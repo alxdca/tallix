@@ -4,6 +4,7 @@ import {
   accountBalances,
   budgetGroups,
   budgetItems,
+  budgets,
   budgetYears,
   monthlyValues,
   paymentMethods,
@@ -306,7 +307,10 @@ function calculateTotals(groups: BudgetGroup[]): {
   };
 }
 
-function calculateExpectedTotals(groups: BudgetGroup[], currentMonthIndex: number): {
+function calculateExpectedTotals(
+  groups: BudgetGroup[],
+  currentMonthIndex: number
+): {
   income: number;
   expenses: number;
   savings: number;
@@ -358,12 +362,22 @@ function calculateExpectedTotals(groups: BudgetGroup[], currentMonthIndex: numbe
 }
 
 // Get full budget data for a year
-export async function getBudgetDataForYear(tx: DbClient, year: number, budgetId: number, userId: string): Promise<BudgetData> {
+export async function getBudgetDataForYear(
+  tx: DbClient,
+  year: number,
+  budgetId: number,
+  userId: string
+): Promise<BudgetData> {
   const budgetYear = await getOrCreateYear(tx, year, budgetId);
   const activeSavingsAccountIds = await getActiveSavingsAccountIds(tx, userId);
   const transactionTotals = await getTransactionTotals(tx, budgetYear.id, year);
   const transferTotals = await getSavingsTransferTotals(tx, budgetYear.id, year, activeSavingsAccountIds);
-  const savingsAccountTransactionTotals = await getSavingsAccountTransactionTotals(tx, budgetYear.id, year, activeSavingsAccountIds);
+  const savingsAccountTransactionTotals = await getSavingsAccountTransactionTotals(
+    tx,
+    budgetYear.id,
+    year,
+    activeSavingsAccountIds
+  );
 
   // Combine transfer totals and savings account transaction totals into one map
   const savingsBalanceChanges = new Map<string, number>();
@@ -487,8 +501,7 @@ function calculateProjectedEndOfYear(
 
   let projectedEnd = cumulativeActual;
 
-  const budgetStartMonth =
-    actualBalanceThroughMonth !== undefined ? currentMonthIndex + 1 : maxActualMonth + 1;
+  const budgetStartMonth = actualBalanceThroughMonth !== undefined ? currentMonthIndex + 1 : maxActualMonth + 1;
   for (let i = budgetStartMonth; i < 12; i++) {
     projectedEnd +=
       sectionTotals.income.monthlyBudgets[i] -
@@ -502,7 +515,12 @@ function calculateProjectedEndOfYear(
 }
 
 // Get budget summary for a year
-export async function getBudgetSummary(tx: DbClient, year: number, budgetId: number, userId: string): Promise<BudgetSummary> {
+export async function getBudgetSummary(
+  tx: DbClient,
+  year: number,
+  budgetId: number,
+  userId: string
+): Promise<BudgetSummary> {
   const data = await getBudgetDataForYear(tx, year, budgetId, userId);
   const { income, expenses, savings } = calculateTotals(data.groups);
   const currentMonthIndex = new Date().getMonth();
@@ -565,7 +583,13 @@ export async function getAllYears(tx: DbClient, budgetId: number) {
 }
 
 // Create a new year
-export async function createYear(tx: DbClient, year: number, initialBalance: number = 0, budgetId: number, userId: string) {
+export async function createYear(
+  tx: DbClient,
+  year: number,
+  initialBalance: number = 0,
+  budgetId: number,
+  userId: string
+) {
   try {
     const [newYear] = await tx
       .insert(budgetYears)
@@ -622,13 +646,16 @@ export async function updateYear(tx: DbClient, id: number, initialBalance: numbe
 }
 
 // Create a new group
-export async function createGroup(tx: DbClient, data: {
-  budgetId: number;
-  name: string;
-  slug: string;
-  type?: 'income' | 'expense';
-  sortOrder?: number;
-}) {
+export async function createGroup(
+  tx: DbClient,
+  data: {
+    budgetId: number;
+    name: string;
+    slug: string;
+    type?: 'income' | 'expense';
+    sortOrder?: number;
+  }
+) {
   const [newGroup] = await tx
     .insert(budgetGroups)
     .values({
@@ -731,13 +758,17 @@ export async function deleteGroup(tx: DbClient, id: number, budgetId: number): P
 }
 
 // Create a new item
-export async function createItem(tx: DbClient, data: {
-  yearId: number;
-  groupId?: number | null;
-  name: string;
-  slug: string;
-  sortOrder?: number;
-}, budgetId: number) {
+export async function createItem(
+  tx: DbClient,
+  data: {
+    yearId: number;
+    groupId?: number | null;
+    name: string;
+    slug: string;
+    sortOrder?: number;
+  },
+  budgetId: number
+) {
   const year = await tx.query.budgetYears.findFirst({
     where: and(eq(budgetYears.id, data.yearId), eq(budgetYears.budgetId, budgetId)),
   });
@@ -758,7 +789,9 @@ export async function createItem(tx: DbClient, data: {
     // Prevent creating savings items through the generic create function
     // Savings items must be created through createSavingsBudgetItems() or createSavingsItemForYear()
     if (group.type === SAVINGS_GROUP_TYPE) {
-      throw new Error('Cannot create savings items manually. Savings items are automatically created from savings accounts.');
+      throw new Error(
+        'Cannot create savings items manually. Savings items are automatically created from savings accounts.'
+      );
     }
   }
 
@@ -787,11 +820,7 @@ export async function createItem(tx: DbClient, data: {
 }
 
 // Get or create the unclassified item for a year
-export async function getOrCreateUnclassifiedItem(
-  tx: DbClient,
-  yearId: number,
-  budgetId: number
-): Promise<number> {
+export async function getOrCreateUnclassifiedItem(tx: DbClient, yearId: number, budgetId: number): Promise<number> {
   let unclassifiedGroup = await tx.query.budgetGroups.findFirst({
     where: and(eq(budgetGroups.budgetId, budgetId), eq(budgetGroups.slug, UNCLASSIFIED_GROUP_SLUG)),
   });
@@ -910,7 +939,9 @@ export async function moveItem(tx: DbClient, itemId: number, groupId: number | n
     // Prevent moving items into savings groups
     // Savings items must be created through createSavingsBudgetItems() or createSavingsItemForYear()
     if (group.type === SAVINGS_GROUP_TYPE) {
-      throw new Error('Cannot move items into savings groups. Savings items are automatically managed based on savings accounts.');
+      throw new Error(
+        'Cannot move items into savings groups. Savings items are automatically managed based on savings accounts.'
+      );
     }
   }
 
@@ -1134,4 +1165,68 @@ export async function createSavingsItemForYear(
   await tx.insert(monthlyValues).values(monthlyData);
 
   return newItem.id;
+}
+
+// ============ START YEAR MANAGEMENT ============
+
+// Get the start year for a budget
+export async function getStartYear(tx: DbClient, budgetId: number): Promise<number> {
+  const budget = await tx.query.budgets.findFirst({
+    where: eq(budgets.id, budgetId),
+    columns: { startYear: true },
+  });
+
+  if (!budget) {
+    throw new Error('Budget not found');
+  }
+
+  return budget.startYear;
+}
+
+// Update the start year for a budget and backfill missing years
+export async function updateStartYear(
+  tx: DbClient,
+  budgetId: number,
+  userId: string,
+  newStartYear: number
+): Promise<{ startYear: number; createdYears: number[] }> {
+  const currentYear = new Date().getFullYear();
+
+  // Validation: startYear must be <= current year
+  if (newStartYear > currentYear) {
+    throw new Error(`Start year cannot be in the future. Current year is ${currentYear}.`);
+  }
+
+  // Get existing years for this budget
+  const existingYears = await tx.query.budgetYears.findMany({
+    where: eq(budgetYears.budgetId, budgetId),
+    orderBy: [asc(budgetYears.year)],
+    columns: { year: true },
+  });
+
+  const existingYearNumbers = existingYears.map((y) => y.year);
+  const minExistingYear = existingYearNumbers.length > 0 ? Math.min(...existingYearNumbers) : null;
+
+  // Validation: cannot move start year forward if there are older years
+  if (minExistingYear !== null && newStartYear > minExistingYear) {
+    const blockingYears = existingYearNumbers.filter((y) => y < newStartYear);
+    throw new Error(
+      `Cannot set start year to ${newStartYear} because older years exist: ${blockingYears.join(', ')}. ` +
+        `Please delete these years first or choose an earlier start year.`
+    );
+  }
+
+  // Update the budget's start year
+  await tx.update(budgets).set({ startYear: newStartYear, updatedAt: new Date() }).where(eq(budgets.id, budgetId));
+
+  // Backfill missing years from startYear to currentYear
+  const createdYears: number[] = [];
+  for (let year = newStartYear; year <= currentYear; year++) {
+    if (!existingYearNumbers.includes(year)) {
+      await createYear(tx, year, 0, budgetId, userId);
+      createdYears.push(year);
+    }
+  }
+
+  return { startYear: newStartYear, createdYears };
 }

@@ -10,6 +10,7 @@ import { requireAuth } from './middleware/auth.js';
 import { requireBudget } from './middleware/budget.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import accountsRoutes from './routes/accounts.js';
+import assetsRoutes from './routes/assets.js';
 import authRoutes from './routes/auth.js';
 import budgetRoutes from './routes/budget.js';
 import importRoutes from './routes/import.js';
@@ -59,6 +60,7 @@ async function seedDemoUser() {
       await tx.insert(budgets).values({
         userId: demoUser.id,
         description: 'Demo Budget',
+        startYear: new Date().getFullYear(),
       });
     });
 
@@ -150,6 +152,7 @@ app.use('/api/transactions', requireAuth, requireBudget, transactionsRoutes);
 app.use('/api/payment-methods', requireAuth, paymentMethodsRoutes);
 app.use('/api/import', requireAuth, requireBudget, importRoutes);
 app.use('/api/accounts', requireAuth, requireBudget, accountsRoutes);
+app.use('/api/assets', requireAuth, requireBudget, assetsRoutes);
 app.use('/api/transfers', requireAuth, requireBudget, transfersRoutes);
 
 // Health check

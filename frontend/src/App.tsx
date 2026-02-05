@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type Account, fetchAccounts, fetchBudgetData, fetchBudgetSummary } from './api';
 import Accounts from './components/Accounts';
+import Archive from './components/Archive';
+import Assets from './components/Assets';
 import BudgetPlanning from './components/BudgetPlanning';
 import BudgetSpreadsheet from './components/BudgetSpreadsheet';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -25,6 +27,10 @@ function AppContent() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [lastActiveMonth, setLastActiveMonth] = useState<number>(0);
   const [activeView, setActiveView] = useState('current');
+  const [selectedYear] = useState<number>(new Date().getFullYear());
+  const [archiveBudgetData, setArchiveBudgetData] = useState<BudgetData | null>(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { t, monthNames } = useI18n();
@@ -53,30 +59,53 @@ function AppContent() {
       .map((_, i) => paymentAccounts.reduce((sum, account) => sum + (account.monthlyBalances[i] || 0), 0));
   }, [paymentAccounts]);
 
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [data, summaryData] = await Promise.all([fetchBudgetData(), fetchBudgetSummary()]);
-      setBudgetData(data);
-      setSummary(summaryData);
+  const loadData = useCallback(
+    async (year?: number) => {
+      try {
+        setLoading(true);
+        const yearToFetch = year || selectedYear;
+        const [data, summaryData] = await Promise.all([
+          fetchBudgetData(yearToFetch),
+          fetchBudgetSummary(), // Summary is always for current year
+        ]);
+        setBudgetData(data);
+        setSummary(summaryData);
 
-      // Fetch accounts for the year (needed for funds summary)
-      const accountsResponse = await fetchAccounts(data.year);
-      setAccounts(accountsResponse.accounts);
-      setLastActiveMonth(accountsResponse.lastActiveMonth);
+        // Fetch accounts for the year (needed for funds summary)
+        const accountsResponse = await fetchAccounts(data.year);
+        setAccounts(accountsResponse.accounts);
+        setLastActiveMonth(accountsResponse.lastActiveMonth);
 
-      setError(null);
-    } catch (err) {
-      setError(getErrorMessage(err, t));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+        setError(null);
+      } catch (err) {
+        setError(getErrorMessage(err, t));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [t, selectedYear]
+  );
+
+  const loadArchiveData = useCallback(
+    async (year: number) => {
+      try {
+        setArchiveLoading(true);
+        const data = await fetchBudgetData(year);
+        setArchiveBudgetData(data);
+        setArchiveError(null);
+      } catch (err) {
+        setArchiveError(getErrorMessage(err, t));
+      } finally {
+        setArchiveLoading(false);
+      }
+    },
+    [t]
+  );
 
   // Silent refresh that doesn't show loading spinner (for inline updates)
   const refreshData = useCallback(async () => {
     try {
-      const [data, summaryData] = await Promise.all([fetchBudgetData(), fetchBudgetSummary()]);
+      const [data, summaryData] = await Promise.all([fetchBudgetData(selectedYear), fetchBudgetSummary()]);
       setBudgetData(data);
       setSummary(summaryData);
 
@@ -87,7 +116,7 @@ function AppContent() {
     } catch (err) {
       logger.error('Failed to refresh data', err);
     }
-  }, []);
+  }, [selectedYear]);
 
   useEffect(() => {
     loadData();
@@ -97,13 +126,24 @@ function AppContent() {
     setMonths(monthNames);
   }, [monthNames]);
 
+  // Handle archive view changes - extract year and load data for that year (without switching current year)
+  useEffect(() => {
+    if (activeView.startsWith('archive-')) {
+      const match = activeView.match(/^archive-(\d+)-(transactions|accounts)$/);
+      if (match) {
+        const archiveYear = parseInt(match[1], 10);
+        loadArchiveData(archiveYear);
+      }
+    }
+  }, [activeView, loadArchiveData]);
+
   const currentYear = budgetData?.year || new Date().getFullYear();
   const yearId = budgetData?.yearId || 0;
 
   // Refresh budget data when transactions might have changed
   const handleTransactionsChanged = useCallback(async () => {
     try {
-      const [data, summaryData] = await Promise.all([fetchBudgetData(), fetchBudgetSummary()]);
+      const [data, summaryData] = await Promise.all([fetchBudgetData(selectedYear), fetchBudgetSummary()]);
       setBudgetData(data);
       setSummary(summaryData);
 
@@ -114,11 +154,17 @@ function AppContent() {
     } catch (err) {
       logger.error('Failed to refresh budget data', err);
     }
+  }, [selectedYear]);
+
+  // Handle year selection from Archive
+  const handleYearSelected = useCallback((year: number) => {
+    setActiveView(`archive-${year}-transactions`);
   }, []);
 
   // Views that should show the budget header with balance boxes
-  const budgetViews = ['current', 'budget-planning', 'transactions', 'accounts'];
-  const showBudgetHeader = budgetViews.includes(activeView) && !loading && !error;
+  const budgetViews = ['current', 'budget-planning', 'transactions', 'accounts', 'assets'];
+  const isArchiveView = activeView.startsWith('archive-');
+  const showBudgetHeader = (budgetViews.includes(activeView) || isArchiveView) && !loading && !error;
 
   const renderContent = () => {
     if (loading) {
@@ -141,6 +187,49 @@ function AppContent() {
       );
     }
 
+    // Handle archive views (e.g., archive-2023-transactions)
+    if (activeView.startsWith('archive-')) {
+      const match = activeView.match(/^archive-(\d+)-(transactions|accounts)$/);
+      if (match) {
+        const archiveYear = parseInt(match[1], 10);
+        const archiveSubView = match[2];
+
+        if (archiveLoading) {
+          return (
+            <div className="content-loading">
+              <div className="loading-spinner" />
+              <p>{t('app.loadingBudget')}</p>
+            </div>
+          );
+        }
+
+        if (archiveError) {
+          return (
+            <div className="content-error">
+              <p>
+                {t('app.error')}: {archiveError}
+              </p>
+              <button onClick={() => loadArchiveData(archiveYear)}>{t('app.retry')}</button>
+            </div>
+          );
+        }
+
+        if (archiveSubView === 'transactions') {
+          return (
+            <Transactions
+              year={archiveYear}
+              yearId={archiveBudgetData?.yearId || 0}
+              groups={archiveBudgetData?.groups || []}
+              onTransactionsChanged={() => loadArchiveData(archiveYear)}
+            />
+          );
+        } else if (archiveSubView === 'accounts') {
+          return <Accounts year={archiveYear} months={months} onDataChanged={refreshData} />;
+        }
+      }
+      return null;
+    }
+
     switch (activeView) {
       case 'current':
         return (
@@ -156,19 +245,7 @@ function AppContent() {
           </div>
         );
       case 'archive':
-        return (
-          <div className="placeholder-view">
-            <div className="placeholder-icon">
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <polyline points="21 8 21 21 3 21 3 8" />
-                <rect x="1" y="3" width="22" height="5" />
-                <line x1="10" y1="12" x2="14" y2="12" />
-              </svg>
-            </div>
-            <h2>{t('app.archiveTitle')}</h2>
-            <p>{t('app.archiveSubtitle')}</p>
-          </div>
-        );
+        return <Archive selectedYear={selectedYear} onYearSelected={handleYearSelected} />;
       case 'transactions':
         return (
           <Transactions
@@ -182,6 +259,8 @@ function AppContent() {
         return <Settings yearId={yearId} groups={budgetData?.groups || []} onDataChanged={refreshData} />;
       case 'accounts':
         return <Accounts year={currentYear} months={months} onDataChanged={refreshData} />;
+      case 'assets':
+        return <Assets onDataChanged={refreshData} />;
       case 'budget-planning':
         return (
           <BudgetPlanning
@@ -200,11 +279,11 @@ function AppContent() {
 
   return (
     <div className="app">
-      <Sidebar activeView={activeView} onViewChange={setActiveView} currentYear={currentYear} />
+      <Sidebar activeView={activeView} onViewChange={setActiveView} currentYear={selectedYear} />
       <main className="main-content">
         {showBudgetHeader && (
           <Header
-            year={currentYear}
+            year={selectedYear}
             initialBalance={summary?.initialBalance || 0}
             totalIncome={summary?.totalIncome || { budget: 0, actual: 0 }}
             totalSavings={summary?.totalSavings || { budget: 0, actual: 0 }}

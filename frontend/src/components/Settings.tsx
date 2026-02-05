@@ -8,6 +8,7 @@ import {
   deleteItem,
   deletePaymentMethod,
   fetchPaymentMethods,
+  fetchStartYear,
   moveItem,
   type PaymentMethod,
   reorderGroups,
@@ -18,6 +19,7 @@ import {
   updateGroup,
   updateItem,
   updatePaymentMethod,
+  updateStartYear,
 } from '../api';
 import { useI18n } from '../contexts/I18nContext';
 import { useSettings } from '../contexts/SettingsContext';
@@ -75,6 +77,12 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   const [editLinkedPaymentMethodId, setEditLinkedPaymentMethodId] = useState<number | null>(null);
   const [paymentMethodError, setPaymentMethodError] = useState<string | null>(null);
 
+  // Start year state
+  const [startYear, setStartYear] = useState<number>(new Date().getFullYear());
+  const [startYearInput, setStartYearInput] = useState<string>('');
+  const [startYearError, setStartYearError] = useState<string | null>(null);
+  const [startYearSuccess, setStartYearSuccess] = useState<string | null>(null);
+
   // Sort groups by sortOrder within their category
   const incomeGroups = [...groups.filter((g) => g.type === 'income')].sort((a, b) => a.sortOrder - b.sortOrder);
   const expenseGroups = [...groups.filter((g) => g.type === 'expense')].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -91,6 +99,60 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   useEffect(() => {
     loadPaymentMethods();
   }, [loadPaymentMethods]);
+
+  const loadStartYear = useCallback(async () => {
+    try {
+      const data = await fetchStartYear();
+      setStartYear(data.startYear);
+      setStartYearInput(data.startYear.toString());
+    } catch (error) {
+      logger.error('Failed to load start year', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStartYear();
+  }, [loadStartYear]);
+
+  const handleUpdateStartYear = async () => {
+    if (isSubmitting) return;
+
+    const yearValue = parseInt(startYearInput, 10);
+    if (Number.isNaN(yearValue)) {
+      setStartYearError(t('settings.startYearInvalid'));
+      return;
+    }
+
+    const currentYear = new Date().getFullYear();
+    if (yearValue > currentYear) {
+      setStartYearError(t('settings.startYearFuture', { currentYear }));
+      return;
+    }
+
+    setIsSubmitting(true);
+    setStartYearError(null);
+    setStartYearSuccess(null);
+
+    try {
+      const result = await updateStartYear(yearValue);
+      setStartYear(result.startYear);
+      setStartYearInput(result.startYear.toString());
+
+      if (result.createdYears.length > 0) {
+        setStartYearSuccess(t('settings.startYearUpdatedWithYears', { years: result.createdYears.join(', ') }));
+      } else {
+        setStartYearSuccess(t('settings.startYearUpdated'));
+      }
+
+      // Refresh data to show new years
+      onDataChanged();
+    } catch (error) {
+      logger.error('Failed to update start year', error);
+      setStartYearError(getErrorMessage(error, t));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleCreatePaymentMethod = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1108,77 +1170,124 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   );
 
   const renderPreferencesTab = () => (
-    <div className="appearance-section">
-      <h3 className="section-title">
-        <span className="section-indicator appearance"></span>
-        {t('settings.appearance')}
-      </h3>
-      <div className="appearance-options">
-        <div className="setting-row">
-          <span className="setting-label">{t('settings.theme')}</span>
-          <div className="setting-buttons">
-            <button
-              type="button"
-              className={`setting-btn ${theme === 'dark' ? 'active' : ''}`}
-              onClick={theme === 'light' ? toggleTheme : undefined}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-              {t('settings.themeDark')}
-            </button>
-            <button
-              type="button"
-              className={`setting-btn ${theme === 'light' ? 'active' : ''}`}
-              onClick={theme === 'dark' ? toggleTheme : undefined}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="5" />
-                <line x1="12" y1="1" x2="12" y2="3" />
-                <line x1="12" y1="21" x2="12" y2="23" />
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                <line x1="1" y1="12" x2="3" y2="12" />
-                <line x1="21" y1="12" x2="23" y2="12" />
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-              </svg>
-              {t('settings.themeLight')}
-            </button>
+    <>
+      <div className="appearance-section">
+        <h3 className="section-title">
+          <span className="section-indicator appearance"></span>
+          {t('settings.appearance')}
+        </h3>
+        <div className="appearance-options">
+          <div className="setting-row">
+            <span className="setting-label">{t('settings.theme')}</span>
+            <div className="setting-buttons">
+              <button
+                type="button"
+                className={`setting-btn ${theme === 'dark' ? 'active' : ''}`}
+                onClick={theme === 'light' ? toggleTheme : undefined}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
+                {t('settings.themeDark')}
+              </button>
+              <button
+                type="button"
+                className={`setting-btn ${theme === 'light' ? 'active' : ''}`}
+                onClick={theme === 'dark' ? toggleTheme : undefined}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="5" />
+                  <line x1="12" y1="1" x2="12" y2="3" />
+                  <line x1="12" y1="21" x2="12" y2="23" />
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                  <line x1="1" y1="12" x2="3" y2="12" />
+                  <line x1="21" y1="12" x2="23" y2="12" />
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                </svg>
+                {t('settings.themeLight')}
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="setting-row">
-          <span className="setting-label">{t('settings.decimalSeparator')}</span>
-          <div className="setting-buttons">
-            <button
-              type="button"
-              className={`setting-btn ${decimalSeparator === '.' ? 'active' : ''}`}
-              onClick={() => setDecimalSeparator('.')}
-            >
-              {t('settings.decimalPoint')}
-            </button>
-            <button
-              type="button"
-              className={`setting-btn ${decimalSeparator === ',' ? 'active' : ''}`}
-              onClick={() => setDecimalSeparator(',')}
-            >
-              {t('settings.decimalComma')}
-            </button>
+          <div className="setting-row">
+            <span className="setting-label">{t('settings.decimalSeparator')}</span>
+            <div className="setting-buttons">
+              <button
+                type="button"
+                className={`setting-btn ${decimalSeparator === '.' ? 'active' : ''}`}
+                onClick={() => setDecimalSeparator('.')}
+              >
+                {t('settings.decimalPoint')}
+              </button>
+              <button
+                type="button"
+                className={`setting-btn ${decimalSeparator === ',' ? 'active' : ''}`}
+                onClick={() => setDecimalSeparator(',')}
+              >
+                {t('settings.decimalComma')}
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="setting-row">
-          <span className="setting-label">{t('settings.showBudgetBelowActual')}</span>
-          <label className="setting-toggle">
-            <input
-              type="checkbox"
-              checked={showBudgetBelowActual}
-              onChange={(e) => setShowBudgetBelowActual(e.target.checked)}
-            />
-            <span className="toggle-slider"></span>
-          </label>
+          <div className="setting-row">
+            <span className="setting-label">{t('settings.showBudgetBelowActual')}</span>
+            <label className="setting-toggle">
+              <input
+                type="checkbox"
+                checked={showBudgetBelowActual}
+                onChange={(e) => setShowBudgetBelowActual(e.target.checked)}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
         </div>
       </div>
-    </div>
+
+      <div className="appearance-section">
+        <h3 className="section-title">
+          <span className="section-indicator appearance"></span>
+          {t('settings.budgetSettings')}
+        </h3>
+        <div className="appearance-options">
+          <div className="setting-row">
+            <span className="setting-label">{t('settings.startYear')}</span>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleUpdateStartYear();
+              }}
+              className="start-year-form"
+            >
+              <div className="start-year-controls">
+                <input
+                  type="number"
+                  min="1900"
+                  max={new Date().getFullYear()}
+                  value={startYearInput}
+                  onChange={(e) => {
+                    setStartYearInput(e.target.value);
+                    setStartYearError(null);
+                    setStartYearSuccess(null);
+                  }}
+                  className="form-input"
+                  disabled={isSubmitting}
+                />
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={isSubmitting || startYearInput === startYear.toString()}
+                >
+                  {t('common.save')}
+                </button>
+              </div>
+            </form>
+          </div>
+          {startYearError && <div className="form-error">{startYearError}</div>}
+          {startYearSuccess && <div className="form-success">{startYearSuccess}</div>}
+          <div className="setting-help-text">{t('settings.startYearHelp')}</div>
+        </div>
+      </div>
+    </>
   );
 
   return (

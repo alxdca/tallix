@@ -107,6 +107,31 @@ router.put(
   })
 );
 
+// POST /api/transactions/:id/dismiss-warning - Dismiss warning for a transaction
+router.post(
+  '/:id/dismiss-warning',
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) {
+      throw new AppError(400, 'Invalid transaction ID');
+    }
+
+    const budgetId = req.budget!.id;
+    const updated = await withTenantContext(userId, budgetId, (tx) =>
+      transactionsSvc.updateTransaction(tx, userId, budgetId, id, {
+        warning: null,
+      })
+    );
+
+    if (!updated) {
+      throw new AppError(404, 'Transaction not found');
+    }
+
+    res.json(updated);
+  })
+);
+
 // DELETE /api/transactions/bulk - Delete multiple transactions
 router.delete(
   '/bulk',

@@ -55,16 +55,18 @@ router.get(
   })
 );
 
-// GET /api/budget/years - Get all years
+// GET /api/budget/years - Get all available years
 router.get(
   '/years',
   asyncHandler(async (req, res) => {
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    const years = await withTenantContext(userId, budgetId, (tx) =>
+    const allYears = await withTenantContext(userId, budgetId, (tx) =>
       budget.getAllYears(tx, budgetId)
     );
-    res.json(years);
+    // Return just the year numbers for the sidebar dropdown
+    const years = allYears.map(y => y.year);
+    res.json({ years });
   })
 );
 
@@ -304,6 +306,46 @@ router.put(
       budget.updateMonthlyValue(tx, itemId, month, { budget: budgetValue, actual }, budgetId)
     );
     res.status(result.created ? 201 : 200).json({ budget: result.budget, actual: result.actual });
+  })
+);
+
+// GET /api/budget/start-year - Get budget start year
+router.get(
+  '/start-year',
+  asyncHandler(async (req, res) => {
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const startYear = await withTenantContext(userId, budgetId, (tx) =>
+      budget.getStartYear(tx, budgetId)
+    );
+    res.json({ startYear });
+  })
+);
+
+// PUT /api/budget/start-year - Update budget start year
+router.put(
+  '/start-year',
+  asyncHandler(async (req, res) => {
+    const { startYear } = req.body;
+
+    if (!startYear || typeof startYear !== 'number' || !Number.isInteger(startYear)) {
+      throw new AppError(400, 'startYear must be an integer');
+    }
+
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+
+    try {
+      const result = await withTenantContext(userId, budgetId, (tx) =>
+        budget.updateStartYear(tx, budgetId, userId, startYear)
+      );
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('older years exist')) {
+        throw new AppError(409, err.message);
+      }
+      throw err;
+    }
   })
 );
 

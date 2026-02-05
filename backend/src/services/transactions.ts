@@ -16,6 +16,7 @@ interface TransactionWithRelations {
   amount: string;
   accountingMonth: number;
   accountingYear: number;
+  warning: string | null;
   item?: {
     name: string;
     group?: {
@@ -87,6 +88,65 @@ export function calculateAccountingPeriod(
   return { accountingMonth: month, accountingYear: year };
 }
 
+// Detect if a transaction is a potential duplicate
+async function detectPotentialDuplicate(
+  tx: DbClient,
+  budgetId: number,
+  data: {
+    date: string;
+    thirdParty?: string | null;
+    amount: number;
+    excludeId?: number; // Exclude this transaction ID from duplicate check (for updates)
+  }
+): Promise<boolean> {
+  // Only check for duplicates if thirdParty is provided and non-empty
+  const thirdParty = data.thirdParty?.trim();
+  if (!thirdParty) {
+    return false;
+  }
+
+  // Parse transaction date
+  const transactionDate = new Date(data.date);
+  if (Number.isNaN(transactionDate.getTime())) {
+    return false;
+  }
+
+  // Calculate date range: ±1 day
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const minDate = new Date(transactionDate.getTime() - oneDayMs);
+  const maxDate = new Date(transactionDate.getTime() + oneDayMs);
+
+  // Format dates as YYYY-MM-DD for SQL comparison
+  const minDateStr = formatDate(minDate);
+  const maxDateStr = formatDate(maxDate);
+
+  // Calculate amount range: ±5%
+  const amount = Math.abs(data.amount);
+  const minAmount = amount * 0.95;
+  const maxAmount = amount * 1.05;
+
+  // Query for potential duplicates
+  // Match: same third party (case-insensitive), date within ±1 day, amount within ±5%
+  const duplicates = await tx
+    .select({ id: transactions.id })
+    .from(transactions)
+    .innerJoin(budgetYears, eq(transactions.yearId, budgetYears.id))
+    .where(
+      and(
+        eq(budgetYears.budgetId, budgetId),
+        sql`LOWER(TRIM(${transactions.thirdParty})) = LOWER(${thirdParty})`,
+        sql`${transactions.date} >= ${minDateStr}`,
+        sql`${transactions.date} <= ${maxDateStr}`,
+        sql`ABS(${transactions.amount}::numeric) >= ${minAmount}`,
+        sql`ABS(${transactions.amount}::numeric) <= ${maxAmount}`,
+        data.excludeId ? sql`${transactions.id} != ${data.excludeId}` : sql`TRUE`
+      )
+    )
+    .limit(1);
+
+  return duplicates.length > 0;
+}
+
 // Format transaction for response
 function formatTransaction(t: TransactionWithRelations) {
   const groupType = t.item?.group?.type || 'expense';
@@ -111,6 +171,7 @@ function formatTransaction(t: TransactionWithRelations) {
     groupType,
     accountingMonth: t.accountingMonth,
     accountingYear: t.accountingYear,
+    warning: t.warning,
   };
 }
 
@@ -199,6 +260,13 @@ export async function createTransaction(
     accountingYear = accountingYear ?? accounting.accountingYear;
   }
 
+  // Detect potential duplicates
+  const isPotentialDuplicate = await detectPotentialDuplicate(tx, budgetId, {
+    date: data.date,
+    thirdParty: data.thirdParty,
+    amount: data.amount,
+  });
+
   const [newTransaction] = await tx
     .insert(transactions)
     .values({
@@ -212,6 +280,7 @@ export async function createTransaction(
       amount: data.amount.toString(),
       accountingMonth,
       accountingYear,
+      warning: isPotentialDuplicate ? 'potential_duplicate' : null,
     })
     .returning();
 
@@ -226,6 +295,7 @@ export async function createTransaction(
     itemId: newTransaction.itemId,
     accountingMonth: newTransaction.accountingMonth,
     accountingYear: newTransaction.accountingYear,
+    warning: newTransaction.warning,
   };
 }
 
@@ -246,6 +316,7 @@ export async function updateTransaction(
     accountingMonth?: number;
     accountingYear?: number;
     recalculateAccounting?: boolean;
+    warning?: string | null;
   }
 ) {
   const transaction = await tx.query.transactions.findFirst({
@@ -280,6 +351,7 @@ export async function updateTransaction(
     amount: string;
     accountingMonth: number;
     accountingYear: number;
+    warning: string | null;
     updatedAt: Date;
   }> = { updatedAt: new Date() };
 
@@ -290,6 +362,7 @@ export async function updateTransaction(
   if (data.thirdParty !== undefined) updateData.thirdParty = data.thirdParty || null;
   if (data.paymentMethodId !== undefined) updateData.paymentMethodId = data.paymentMethodId;
   if (data.amount !== undefined) updateData.amount = data.amount.toString();
+  if (data.warning !== undefined) updateData.warning = data.warning;
 
   if (data.accountingMonth !== undefined) updateData.accountingMonth = data.accountingMonth;
   if (data.accountingYear !== undefined) updateData.accountingYear = data.accountingYear;
@@ -498,10 +571,21 @@ export async function bulkCreateTransactions(
     paymentMethodSettlements.set(pmId, pm.settlementDay ?? null);
   }
 
+  // Detect duplicates for each transaction
+  const duplicateFlags = await Promise.all(
+    transactionsData.map((t) =>
+      detectPotentialDuplicate(tx, budgetId, {
+        date: t.date,
+        thirdParty: t.thirdParty,
+        amount: t.amount,
+      })
+    )
+  );
+
   const inserted = await tx
     .insert(transactions)
     .values(
-      transactionsData.map((t) => {
+      transactionsData.map((t, index) => {
         let accountingMonth = t.accountingMonth;
         let accountingYear = t.accountingYear;
 
@@ -523,6 +607,7 @@ export async function bulkCreateTransactions(
           amount: t.amount.toString(),
           accountingMonth,
           accountingYear,
+          warning: duplicateFlags[index] ? 'potential_duplicate' : null,
         };
       })
     )
@@ -536,6 +621,7 @@ export async function bulkCreateTransactions(
       amount: parseFloat(t.amount),
       accountingMonth: t.accountingMonth,
       accountingYear: t.accountingYear,
+      warning: t.warning,
     })),
   };
 }

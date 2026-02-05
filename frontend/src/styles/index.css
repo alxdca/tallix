@@ -203,6 +203,7 @@ input[type="number"]::-webkit-inner-spin-button {
   font-family: var(--font-sans);
   font-size: 0.9375rem;
   font-weight: 500;
+  line-height: 1;
   color: var(--text-secondary);
   background: transparent;
   border: none;
@@ -227,6 +228,16 @@ input[type="number"]::-webkit-inner-spin-button {
   color: var(--accent-budget-light);
 }
 
+.nav-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.nav-item.disabled:hover {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
 .nav-icon {
   display: flex;
   align-items: center;
@@ -236,8 +247,15 @@ input[type="number"]::-webkit-inner-spin-button {
   flex-shrink: 0;
 }
 
+.nav-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .nav-label {
   flex: 1;
+  line-height: 1;
 }
 
 .nav-group {
@@ -253,6 +271,32 @@ input[type="number"]::-webkit-inner-spin-button {
 .nav-sub-item .nav-icon {
   width: 20px;
   height: 20px;
+}
+
+.nav-chevron {
+  margin-left: auto;
+  transition: transform var(--transition-fast);
+  opacity: 0.6;
+}
+
+.nav-chevron.open {
+  transform: rotate(180deg);
+}
+
+.nav-sub-group {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+.nav-year-label {
+  padding: 8px 20px 4px 44px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .sidebar-footer {
@@ -1447,6 +1491,21 @@ td.zero {
   color: var(--text-muted);
 }
 
+.btn-icon.dismiss-warning {
+  color: var(--accent-warning, #f59e0b);
+}
+
+.btn-icon.dismiss-warning:hover {
+  color: var(--accent-actual);
+}
+
+.warning-badge {
+  display: inline-block;
+  font-size: 0.875rem;
+  opacity: 0.8;
+  cursor: help;
+}
+
 /* Items List */
 .items-list {
   display: flex;
@@ -1672,6 +1731,7 @@ td.zero {
 .setting-label {
   font-size: 0.9rem;
   color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 .setting-buttons {
@@ -1710,10 +1770,13 @@ td.zero {
 
 .setting-toggle {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   width: 44px;
   height: 24px;
   cursor: pointer;
+  flex-shrink: 0;
+  vertical-align: middle;
 }
 
 .setting-toggle input {
@@ -1740,7 +1803,8 @@ td.zero {
   height: 18px;
   width: 18px;
   left: 2px;
-  bottom: 2px;
+  top: 50%;
+  transform: translateY(-50%);
   background: var(--text-muted);
   border-radius: 50%;
   transition: all var(--transition-fast);
@@ -1752,8 +1816,125 @@ td.zero {
 }
 
 .setting-toggle input:checked + .toggle-slider::before {
-  transform: translateX(20px);
+  transform: translateX(20px) translateY(-50%);
   background: white;
+}
+
+/* ========================================
+   Archive Page
+   ======================================== */
+
+.archive-container {
+  padding: 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.archive-header {
+  margin-bottom: 32px;
+}
+
+.archive-header h2 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.archive-header p {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.archive-content {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.archive-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.archive-section-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+}
+
+.years-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 16px;
+}
+
+.year-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-color);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-height: 100px;
+}
+
+.year-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-budget);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.year-card.selected {
+  background: var(--accent-budget);
+  border-color: var(--accent-budget);
+  color: white;
+}
+
+.year-card.selected:hover {
+  background: var(--accent-budget);
+  transform: translateY(-2px);
+}
+
+.year-card-year {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: currentColor;
+  margin-bottom: 4px;
+}
+
+.year-card.selected .year-card-year {
+  color: white;
+}
+
+.year-card-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--accent-actual);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.year-card.selected .year-card-label {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.archive-empty {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--text-muted);
+}
+
+.archive-empty p {
+  font-size: 0.95rem;
 }
 
 /* Payment Methods Section */
@@ -1782,6 +1963,23 @@ td.zero {
 
 .payment-method-form .form-input {
   flex: 1;
+}
+
+/* Start year form styling */
+.start-year-form {
+  display: contents;
+}
+
+.start-year-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.start-year-controls .form-input {
+  flex: 0 0 auto;
+  width: 100px;
+  min-width: 0;
 }
 
 .form-error {
@@ -2225,6 +2423,22 @@ td.zero {
   background: var(--bg-hover);
 }
 
+.transactions-table tbody tr.warning-row {
+  background: rgba(252, 211, 77, 0.28);
+}
+
+.transactions-table tbody tr.warning-row:hover {
+  background: rgba(252, 211, 77, 0.38);
+}
+
+.transactions-table tbody tr.warning-row.selected {
+  background: rgba(252, 211, 77, 0.34);
+}
+
+.transactions-table tbody tr.warning-row.selected:hover {
+  background: rgba(252, 211, 77, 0.44);
+}
+
 .transactions-table .date-cell {
   font-family: var(--font-mono);
   font-size: 0.8125rem;
@@ -2341,7 +2555,12 @@ td.zero {
 
 .transactions-table .actions-cell {
   text-align: center;
-  width: 100px;
+  width: 120px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .transactions-table .actions-cell .btn-icon {
@@ -4542,7 +4761,7 @@ td.zero {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.875rem;
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .accounts-table th,
@@ -4551,6 +4770,8 @@ td.zero {
   text-align: right;
   white-space: nowrap;
   border-bottom: 1px solid var(--border-subtle);
+  height: 48px;
+  vertical-align: middle;
 }
 
 .accounts-table th {
@@ -4574,13 +4795,99 @@ td.zero {
   text-align: left;
   font-weight: 500;
   color: var(--text-primary);
+  min-width: 280px;
   width: 280px;
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .accounts-table .account-name .institution-badge {
   margin-left: 8px;
+}
+
+.accounts-table tr.asset-child td {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.accounts-empty-note {
+  margin-top: 0.75rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-style: italic;
+  font-size: 0.875rem;
+}
+
+.accounts-table .asset-child-name {
+  padding-left: 28px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  position: relative;
+}
+
+.accounts-table .asset-child-name::before {
+  content: none;
+}
+
+.accounts-section-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 16px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.accounts-section-title-row .accounts-section-title {
+  margin: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.btn-icon.add-inline {
+  width: 22px;
+  height: 22px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon.add-inline:hover {
+  color: var(--text-primary);
+  border-color: var(--border-color);
+  background: var(--bg-tertiary);
+}
+
+.accounts-table .asset-card-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.accounts-table .asset-card {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-tertiary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.accounts-table .asset-card-institution {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .account-initial-col,
@@ -4590,7 +4897,25 @@ td.zero {
 }
 
 .account-month-col {
+  min-width: 90px;
   width: 90px;
+}
+
+.assets-table {
+  table-layout: fixed;
+}
+
+.assets-table .account-month-col,
+.assets-table .account-month-cell {
+  min-width: 110px;
+  width: 110px;
+  max-width: 110px;
+}
+
+.account-actions-col {
+  min-width: 60px;
+  width: 60px;
+  text-align: center;
 }
 
 .account-month-balance {
@@ -4603,11 +4928,11 @@ td.zero {
 
 .balance-value {
   font-family: var(--font-mono);
+  padding: 4px 8px;
 }
 
 .balance-value.editable {
   cursor: pointer;
-  padding: 4px 8px;
   border-radius: 4px;
   transition: background var(--transition-fast);
 }
@@ -4620,6 +4945,8 @@ td.zero {
   display: flex;
   align-items: center;
   gap: 4px;
+  width: 100%;
+  justify-content: flex-end;
 }
 
 .balance-input {
@@ -4696,6 +5023,8 @@ td.zero {
   padding: 6px 8px;
   text-align: right;
   vertical-align: middle;
+  min-width: 90px;
+  width: 90px;
 }
 
 .accounts-table .account-movement {

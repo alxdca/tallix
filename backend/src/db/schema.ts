@@ -32,6 +32,7 @@ export const budgets = pgTable('budgets', {
     .references(() => users.id, { onDelete: 'cascade' })
     .notNull(),
   description: varchar('description', { length: 500 }),
+  startYear: integer('start_year').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -168,6 +169,8 @@ export const transactions = pgTable('transactions', {
   // Can be manually overridden by user
   accountingMonth: integer('accounting_month').notNull(), // 1-12
   accountingYear: integer('accounting_year').notNull(),
+  // Warning field for flagging potential issues (e.g., 'potential_duplicate')
+  warning: varchar('warning', { length: 50 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -247,6 +250,50 @@ export const transfers = pgTable('transfers', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Assets (custom asset types for net worth tracking)
+export const assets = pgTable(
+  'assets',
+  {
+    id: serial('id').primaryKey(),
+    budgetId: integer('budget_id')
+      .references(() => budgets.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isSystem: boolean('is_system').notNull().default(false), // true for Checkings/Savings
+    isDebt: boolean('is_debt').notNull().default(false),
+    parentAssetId: integer('parent_asset_id'), // For hierarchical assets (e.g., Savings sub-types)
+    savingsType: varchar('savings_type', { length: 20 }), // 'epargne' | 'prevoyance' | 'investissements' for savings sub-assets
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Unique constraint on (budget_id, name) - one asset name per budget
+    budgetNameUnique: uniqueIndex('assets_budget_name_unique').on(table.budgetId, table.name),
+  })
+);
+
+// Asset Values (yearly values for custom assets)
+export const assetValues = pgTable(
+  'asset_values',
+  {
+    id: serial('id').primaryKey(),
+    assetId: integer('asset_id')
+      .references(() => assets.id, { onDelete: 'cascade' })
+      .notNull(),
+    yearId: integer('year_id')
+      .references(() => budgetYears.id, { onDelete: 'cascade' })
+      .notNull(),
+    value: decimal('value', { precision: 12, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Unique constraint on (asset_id, year_id) - one value per asset per year
+    assetYearUnique: uniqueIndex('asset_values_asset_year_unique').on(table.assetId, table.yearId),
+  })
+);
+
 // Settings (per-user)
 export const settings = pgTable(
   'settings',
@@ -282,6 +329,7 @@ export const budgetsRelations = relations(budgets, ({ one, many }) => ({
   shares: many(budgetShares),
   years: many(budgetYears),
   groups: many(budgetGroups),
+  assets: many(assets),
 }));
 
 export const budgetSharesRelations = relations(budgetShares, ({ one }) => ({
@@ -304,6 +352,7 @@ export const budgetYearsRelations = relations(budgetYears, ({ one, many }) => ({
   transactions: many(transactions),
   transfers: many(transfers),
   accountBalances: many(accountBalances),
+  assetValues: many(assetValues),
 }));
 
 export const accountBalancesRelations = relations(accountBalances, ({ one }) => ({
@@ -393,5 +442,24 @@ export const settingsRelations = relations(settings, ({ one }) => ({
   user: one(users, {
     fields: [settings.userId],
     references: [users.id],
+  }),
+}));
+
+export const assetsRelations = relations(assets, ({ one, many }) => ({
+  budget: one(budgets, {
+    fields: [assets.budgetId],
+    references: [budgets.id],
+  }),
+  values: many(assetValues),
+}));
+
+export const assetValuesRelations = relations(assetValues, ({ one }) => ({
+  asset: one(assets, {
+    fields: [assetValues.assetId],
+    references: [assets.id],
+  }),
+  year: one(budgetYears, {
+    fields: [assetValues.yearId],
+    references: [budgetYears.id],
   }),
 }));

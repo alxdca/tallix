@@ -43,6 +43,7 @@ export async function requireBudget(req: Request, res: Response, next: NextFunct
           .values({
             userId,
             description: null,
+            startYear: new Date().getFullYear(),
           })
           .returning();
         found = newBudget;

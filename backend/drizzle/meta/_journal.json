@@ -148,6 +148,34 @@
       "when": 1770157539000,
       "tag": "0021_linked_payment_method_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1770160434000,
+      "tag": "0022_add_assets",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1770161000000,
+      "tag": "0023_add_budget_start_year",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1770278792000,
+      "tag": "0024_add_transaction_warning",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1770365200000,
+      "tag": "0025_add_asset_debt_flag",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchAvailableYears } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
+import { logger } from '../utils/logger';
 
 interface SidebarProps {
   activeView: string;
@@ -12,7 +14,33 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showArchiveDropdown, setShowArchiveDropdown] = useState(false);
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Fetch available years
+  const loadAvailableYears = useCallback(async () => {
+    try {
+      const { years } = await fetchAvailableYears();
+      console.log('Available years:', years);
+      console.log('Current year:', currentYear);
+      setAvailableYears(years || []);
+    } catch (error) {
+      logger.error('Failed to fetch available years', error);
+      setAvailableYears([]);
+    }
+  }, [currentYear]);
+
+  useEffect(() => {
+    loadAvailableYears();
+  }, [loadAvailableYears]);
+
+  // Reload available years when returning from settings or when activeView changes
+  useEffect(() => {
+    if (activeView === 'current' || activeView === 'settings') {
+      loadAvailableYears();
+    }
+  }, [activeView, loadAvailableYears]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -29,6 +57,10 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showUserMenu]);
+
+  // Get past years (years before current year)
+  const pastYears = (availableYears || []).filter((year) => year < currentYear).sort((a, b) => b - a);
+  console.log('Past years:', pastYears);
 
   return (
     <aside className="sidebar">
@@ -102,20 +134,82 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
           </button>
         </div>
 
-        {/* Archive */}
+        {/* Assets (multi-year) */}
         <button
-          className={`nav-item ${activeView === 'archive' ? 'active' : ''}`}
-          onClick={() => onViewChange('archive')}
+          className={`nav-item ${activeView === 'assets' ? 'active' : ''}`}
+          onClick={() => onViewChange('assets')}
         >
           <span className="nav-icon">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="21 8 21 21 3 21 3 8" />
-              <rect x="1" y="3" width="22" height="5" />
-              <line x1="10" y1="12" x2="14" y2="12" />
+              <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+              <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+              <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
             </svg>
           </span>
-          <span className="nav-label">{t('nav.archive')}</span>
+          <span className="nav-label">{t('nav.assets')}</span>
         </button>
+
+        {/* Archive - Collapsible with past years */}
+        <div className="nav-group">
+          <button
+            className={`nav-item ${activeView.startsWith('archive-') ? 'active' : ''} ${pastYears.length === 0 ? 'disabled' : ''}`}
+            onClick={() => pastYears.length > 0 && setShowArchiveDropdown(!showArchiveDropdown)}
+            disabled={pastYears.length === 0}
+          >
+            <span className="nav-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="21 8 21 21 3 21 3 8" />
+                <rect x="1" y="3" width="22" height="5" />
+                <line x1="10" y1="12" x2="14" y2="12" />
+              </svg>
+            </span>
+            <span className="nav-label">{t('nav.archive')}</span>
+            {pastYears.length > 0 && (
+              <svg
+                className={`nav-chevron ${showArchiveDropdown ? 'open' : ''}`}
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            )}
+          </button>
+
+          {/* Past year sub-items */}
+          {showArchiveDropdown && pastYears.length > 0 && pastYears.map((year) => (
+            <div key={year} className="nav-sub-group">
+              <div className="nav-year-label">{year}</div>
+              <button
+                className={`nav-item nav-sub-item ${activeView === `archive-${year}-transactions` ? 'active' : ''}`}
+                onClick={() => onViewChange(`archive-${year}-transactions`)}
+              >
+                <span className="nav-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="12" y1="1" x2="12" y2="23" />
+                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                  </svg>
+                </span>
+                <span className="nav-label">{t('nav.transactions')}</span>
+              </button>
+              <button
+                className={`nav-item nav-sub-item ${activeView === `archive-${year}-accounts` ? 'active' : ''}`}
+                onClick={() => onViewChange(`archive-${year}-accounts`)}
+              >
+                <span className="nav-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="2" y="5" width="20" height="14" rx="2" />
+                    <line x1="2" y1="10" x2="22" y2="10" />
+                  </svg>
+                </span>
+                <span className="nav-label">{t('nav.accounts')}</span>
+              </button>
+            </div>
+          ))}
+        </div>
 
         {/* Settings */}
         <button

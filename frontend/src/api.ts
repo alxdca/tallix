@@ -83,8 +83,9 @@ async function authFetch(url: string, options: RequestInit = {}): Promise<Respon
 }
 
 // Budget Data
-export async function fetchBudgetData(): Promise<BudgetData> {
-  const response = await authFetch(`${API_BASE}/budget`);
+export async function fetchBudgetData(year?: number): Promise<BudgetData> {
+  const url = year ? `${API_BASE}/budget/year/${year}` : `${API_BASE}/budget`;
+  const response = await authFetch(url);
   await ensureOk(response, 'Failed to fetch budget data');
   return response.json();
 }
@@ -129,6 +130,28 @@ export async function updateYear(id: number, initialBalance: number): Promise<Bu
     body: JSON.stringify({ initialBalance }),
   });
   await ensureOk(response, 'Failed to update year');
+  return response.json();
+}
+
+// Start Year
+export async function fetchStartYear(): Promise<{ startYear: number }> {
+  const response = await authFetch(`${API_BASE}/budget/start-year`);
+  await ensureOk(response, 'Failed to fetch start year');
+  return response.json();
+}
+
+export async function updateStartYear(startYear: number): Promise<{ startYear: number; createdYears: number[] }> {
+  const response = await authFetch(`${API_BASE}/budget/start-year`, {
+    method: 'PUT',
+    body: JSON.stringify({ startYear }),
+  });
+  await ensureOk(response, 'Failed to update start year');
+  return response.json();
+}
+
+export async function fetchAvailableYears(): Promise<{ years: number[] }> {
+  const response = await authFetch(`${API_BASE}/budget/years`);
+  await ensureOk(response, 'Failed to fetch available years');
   return response.json();
 }
 
@@ -262,10 +285,14 @@ export interface Transaction {
   groupType: 'income' | 'expense' | 'savings';
   accountingMonth: number;
   accountingYear: number;
+  warning?: string | null;
 }
 
-export async function fetchTransactions(): Promise<Transaction[]> {
-  const response = await authFetch(`${API_BASE}/transactions`);
+export async function fetchTransactions(year?: number): Promise<Transaction[]> {
+  const url = typeof year === 'number'
+    ? `${API_BASE}/transactions/year/${year}`
+    : `${API_BASE}/transactions`;
+  const response = await authFetch(url);
   await ensureOk(response, 'Failed to fetch transactions');
   return response.json();
 }
@@ -326,6 +353,14 @@ export async function bulkDeleteTransactions(ids: number[]): Promise<{ deleted: 
     body: JSON.stringify({ ids }),
   });
   await ensureOk(response, 'Failed to delete transactions');
+  return response.json();
+}
+
+export async function dismissTransactionWarning(id: number): Promise<Transaction> {
+  const response = await authFetch(`${API_BASE}/transactions/${id}/dismiss-warning`, {
+    method: 'POST',
+  });
+  await ensureOk(response, 'Failed to dismiss transaction warning');
   return response.json();
 }
 
@@ -562,6 +597,61 @@ export async function togglePaymentMethodSavings(id: number, isSavingsAccount: b
     body: JSON.stringify({ isSavingsAccount }),
   });
   await ensureOk(response, 'Failed to toggle savings account');
+}
+
+// Assets
+export interface Asset {
+  id: number;
+  name: string;
+  sortOrder: number;
+  isSystem: boolean;
+  isDebt: boolean;
+  parentAssetId: number | null;
+  savingsType: string | null;
+  yearlyValues: Record<number, number>; // year -> value
+}
+
+export interface AssetsResponse {
+  assets: Asset[];
+  years: number[]; // Available years for this budget
+}
+
+export async function fetchAssets(): Promise<AssetsResponse> {
+  const response = await authFetch(`${API_BASE}/assets`);
+  await ensureOk(response, 'Failed to fetch assets');
+  return response.json();
+}
+
+export async function createAsset(name: string, isDebt = false): Promise<Asset> {
+  const response = await authFetch(`${API_BASE}/assets`, {
+    method: 'POST',
+    body: JSON.stringify({ name, isDebt }),
+  });
+  await ensureOk(response, 'Failed to create asset');
+  return response.json();
+}
+
+export async function updateAssetValue(assetId: number, year: number, value: number): Promise<void> {
+  const response = await authFetch(`${API_BASE}/assets/${assetId}/value`, {
+    method: 'PUT',
+    body: JSON.stringify({ year, value }),
+  });
+  await ensureOk(response, 'Failed to update asset value');
+}
+
+export async function deleteAsset(assetId: number): Promise<void> {
+  const response = await authFetch(`${API_BASE}/assets/${assetId}`, {
+    method: 'DELETE',
+  });
+  await ensureOk(response, 'Failed to delete asset');
+}
+
+export async function reorderAssets(assetIds: number[]): Promise<void> {
+  const response = await authFetch(`${API_BASE}/assets/reorder`, {
+    method: 'PUT',
+    body: JSON.stringify({ assetIds }),
+  });
+  await ensureOk(response, 'Failed to reorder assets');
 }
 
 // Transfers

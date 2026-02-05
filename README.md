@@ -13,6 +13,7 @@ A personal budgeting application for tracking income, expenses, savings, and acc
   - Based on payment account balances (excludes savings)
   - Accounts for both monthly and yearly budgets in projections
 - **Transaction Tracking** - Record transactions with categories, payment methods, and third-party details
+- **Duplicate Detection Warnings** - Automatically flag potential duplicate transactions (row highlight with dismiss action)
 - **Account Balances** - Track balances across savings accounts and payment methods
 - **Transfers** - Record money transfers between accounts
 - **Category Organization** - Drag-and-drop reorder groups/items and move items between groups
@@ -29,6 +30,7 @@ A personal budgeting application for tracking income, expenses, savings, and acc
 - **Multi-user Authentication** - Email/password auth, per-user profile (name, language, country), settings, and payment methods (JWT-protected APIs)
 - **Settlement Days** - Configure payment method billing cycles to auto-calculate accounting month/year
 - **Linked Accounts** - Link payment methods to their funding accounts so balances roll up correctly
+- **Assets & Net Worth** - Assets view with system categories and account-level breakdown (plus a dedicated Debt section placeholder)
 
 ## AI-Powered Transaction Processing
 
@@ -119,7 +121,7 @@ DEBUG_LOG_BODY=false
 
 ```bash
 cd backend
-pnpm db:push
+pnpm db:migrate
 ```
 
 ### 5. Start development servers
@@ -267,6 +269,7 @@ All endpoints below (except `/api/auth/*`) require a `Bearer` token.
 - `GET /api/transactions/year/:year` - List transactions for year
 - `POST /api/transactions` - Create transaction
 - `PUT /api/transactions/:id` - Update transaction (supports `recalculateAccounting`)
+- `POST /api/transactions/:id/dismiss-warning` - Dismiss duplicate warning
 - `DELETE /api/transactions/:id` - Delete transaction
 - `DELETE /api/transactions/bulk` - Bulk delete
 

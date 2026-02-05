@@ -8,6 +8,7 @@ import {
   createTransfer,
   deleteTransaction,
   deleteTransfer,
+  dismissTransactionWarning,
   fetchPaymentMethods,
   fetchTransactions,
   fetchTransferAccounts,
@@ -176,7 +177,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     try {
       setLoading(true);
       const [transactionsData, methodsData, transfersData, accountsData] = await Promise.all([
-        fetchTransactions(),
+        fetchTransactions(year),
         fetchPaymentMethods(),
         fetchTransfers(year),
         fetchTransferAccounts(year),
@@ -212,7 +213,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
   const loadTransactions = async () => {
     try {
-      const [transactionsData, transfersData] = await Promise.all([fetchTransactions(), fetchTransfers(year)]);
+      const [transactionsData, transfersData] = await Promise.all([fetchTransactions(year), fetchTransfers(year)]);
       setTransactions(transactionsData);
       setTransfers(transfersData);
       // Clear selections that no longer exist
@@ -742,6 +743,19 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       onTransactionsChanged?.();
     } catch (error) {
       logger.error('Failed to delete', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDismissWarning = async (transactionId: number) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await dismissTransactionWarning(transactionId);
+      await loadTransactions();
+    } catch (error) {
+      logger.error('Failed to dismiss warning', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -1300,11 +1314,14 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 const isTransfer = entry.type === 'transfer';
                 const transaction = entry.transaction;
                 const transfer = entry.transfer;
+                const isPotentialDuplicate =
+                  !isTransfer && transaction?.warning === 'potential_duplicate';
 
                 return (
                   <tr
                     key={entry.id}
-                    className={`${isTransfer ? 'transfer' : transaction?.groupType} ${selectedIds.has(entry.id) ? 'selected' : ''}`}
+                    className={`${isTransfer ? 'transfer' : transaction?.groupType} ${selectedIds.has(entry.id) ? 'selected' : ''} ${isPotentialDuplicate ? 'warning-row' : ''}`}
+                    title={isPotentialDuplicate ? t('transactions.potentialDuplicate') : undefined}
                   >
                     {editingId === entry.id ? (
                       isTransfer ? (
@@ -1711,7 +1728,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               <span className="transfer-dest">{transfer?.destinationAccount.name}</span>
                             </span>
                           ) : (
-                            transaction?.thirdParty || <span className="empty-field">-</span>
+                            <>
+                              {transaction?.thirdParty || <span className="empty-field">-</span>}
+                            </>
                           )}
                         </td>
                         <td className="description-cell">
@@ -1761,6 +1780,24 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                           {formatCurrency(entry.amount, true)}
                         </td>
                         <td className="actions-cell">
+                          {!isTransfer && transaction?.warning === 'potential_duplicate' && (
+                            <button
+                              className="btn-icon dismiss-warning"
+                              onClick={() => handleDismissWarning(transaction.id)}
+                              title={t('transactions.dismissWarning')}
+                            >
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            </button>
+                          )}
                           <button
                             className="btn-icon edit"
                             onClick={() =>

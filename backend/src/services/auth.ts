@@ -48,6 +48,7 @@ async function ensureDefaultBudget(userId: string): Promise<void> {
     // Create budget with RLS protection
     await tx.insert(budgets).values({
       userId,
+      startYear: new Date().getFullYear(),
     });
   });
 }

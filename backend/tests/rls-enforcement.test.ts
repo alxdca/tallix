@@ -120,8 +120,15 @@ async function setup() {
   userBId = userB.id;
 
   // Create budgets
-  const [bA] = await superuserDb.insert(budgets).values({ userId: userAId }).returning();
-  const [bB] = await superuserDb.insert(budgets).values({ userId: userBId }).returning();
+  const currentYear = new Date().getFullYear();
+  const [bA] = await superuserDb
+    .insert(budgets)
+    .values({ userId: userAId, startYear: currentYear })
+    .returning();
+  const [bB] = await superuserDb
+    .insert(budgets)
+    .values({ userId: userBId, startYear: currentYear })
+    .returning();
   budgetAId = bA.id;
   budgetBId = bB.id;
 
