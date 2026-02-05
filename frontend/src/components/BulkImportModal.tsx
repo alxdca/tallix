@@ -111,6 +111,7 @@ export default function BulkImportModal({
             id: newItem.id,
             name: newItem.name,
             slug: newItem.name.toLowerCase().replace(/\s+/g, '-'),
+            yearlyBudget: 0,
             months: Array(12).fill({ budget: 0, actual: 0 }),
           }],
         };

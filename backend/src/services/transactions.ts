@@ -21,7 +21,7 @@ interface TransactionWithRelations {
     name: string;
     group?: {
       name: string;
-      type: GroupType;
+      type: string; // Will be cast to GroupType at runtime
     } | null;
   } | null;
 }
@@ -140,7 +140,7 @@ export async function getTransactionsForYear(year: number) {
     },
   });
 
-  return allTransactions.map(formatTransaction);
+  return (allTransactions as unknown as TransactionWithRelations[]).map(formatTransaction);
 }
 
 // Create a new transaction

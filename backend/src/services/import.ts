@@ -93,7 +93,7 @@ export async function getItemsForMatching(yearId: number): Promise<ItemForMatchi
     slug: item.slug,
     groupName: item.group?.name || '',
     groupSlug: item.group?.slug || '',
-    groupType: item.group?.type || 'expense',
+    groupType: (item.group?.type || 'expense') as 'income' | 'expense' | 'savings',
   }));
 }
 

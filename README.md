@@ -5,12 +5,19 @@ A personal budgeting application for tracking income, expenses, savings, and acc
 ## Features
 
 - **Budget Management** - Organize finances by year with income, expense, and savings categories
+- **Budget Planning** - Plan your annual budget with both monthly recurring amounts and yearly variable budgets
+  - Monthly budgets for fixed recurring expenses (rent, subscriptions, etc.)
+  - Yearly budgets for irregular/variable spending (vacations, restaurants, leisure)
+  - Track remaining budget with color-coded indicators (green > 50%, orange 20-50%, red < 20%)
+- **Funds Summary** - View projected and actual funds available at the start and end of each month
+  - Based on payment account balances (excludes savings)
+  - Accounts for both monthly and yearly budgets in projections
 - **Transaction Tracking** - Record transactions with categories, payment methods, and third-party details
 - **Account Balances** - Track balances across savings accounts and payment methods
 - **Transfers** - Record money transfers between accounts
 - **PDF Import** - Import transactions from bank statement PDFs with automatic categorization
 - **Settlement Days** - Configure payment method billing cycles for accurate monthly accounting
-- **Linked Accounts** - Link payment methods (e.g., TWINT) to their funding accounts
+- **Linked Accounts** - Link payment methods to their funding accounts
 
 ## Tech Stack
 
@@ -124,9 +131,9 @@ tallix/
 ## API Endpoints
 
 ### Budget
-- `GET /api/budget` - Get current year budget
+- `GET /api/budget` - Get current year budget (includes yearly budgets per item)
 - `GET /api/budget/year/:year` - Get budget for specific year
-- `GET /api/budget/summary` - Get budget summary
+- `GET /api/budget/summary` - Get budget summary (includes yearly budgets in totals)
 - `GET /api/budget/years` - List all years
 - `POST /api/budget/years` - Create new year
 - `PUT /api/budget/years/:id` - Update year
@@ -134,8 +141,9 @@ tallix/
 - `PUT /api/budget/groups/:id` - Update group
 - `DELETE /api/budget/groups/:id` - Delete group
 - `POST /api/budget/items` - Create budget item
-- `PUT /api/budget/items/:id` - Update item
+- `PUT /api/budget/items/:id` - Update item (name, slug, sortOrder, yearlyBudget)
 - `DELETE /api/budget/items/:id` - Delete item
+- `PUT /api/budget/monthly-value/:itemId/:month` - Update monthly budget value
 
 ### Transactions
 - `GET /api/transactions` - List transactions (current year)

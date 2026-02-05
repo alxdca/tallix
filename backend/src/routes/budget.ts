@@ -164,8 +164,8 @@ router.put('/items/:id', asyncHandler(async (req, res) => {
   if (isNaN(id)) {
     throw new AppError(400, 'Invalid item ID');
   }
-  const { name, slug, sortOrder } = req.body;
-  const updated = await budget.updateItem(id, { name, slug, sortOrder });
+  const { name, slug, sortOrder, yearlyBudget } = req.body;
+  const updated = await budget.updateItem(id, { name, slug, sortOrder, yearlyBudget });
   if (!updated) {
     throw new AppError(404, 'Item not found');
   }

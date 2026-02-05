@@ -10,7 +10,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
       <div className="sidebar-header">
         <div className="logo">
           <span className="logo-icon">◈</span>
-          <span className="logo-text">Budget</span>
+          <span className="logo-text">Tallix</span>
         </div>
       </div>
       
@@ -58,6 +58,22 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
               </svg>
             </span>
             <span className="nav-label">Comptes</span>
+          </button>
+
+          {/* Sub-item: Budget Planning */}
+          <button
+            className={`nav-item nav-sub-item ${activeView === 'budget-planning' ? 'active' : ''}`}
+            onClick={() => onViewChange('budget-planning')}
+          >
+            <span className="nav-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+                <rect x="9" y="3" width="6" height="4" rx="2" />
+                <path d="M9 12h6" />
+                <path d="M9 16h6" />
+              </svg>
+            </span>
+            <span className="nav-label">Planification</span>
           </button>
         </div>
 

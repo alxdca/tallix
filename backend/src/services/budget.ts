@@ -111,6 +111,7 @@ interface ItemWithMonthlyValues {
   name: string;
   slug: string;
   sortOrder: number;
+  yearlyBudget: string;
   monthlyValues?: MonthlyValueRecord[];
 }
 
@@ -131,12 +132,14 @@ function formatItem(item: ItemWithMonthlyValues, transactionTotals: Map<string, 
     id: item.id,
     name: item.name,
     slug: item.slug,
+    yearlyBudget: parseFloat(item.yearlyBudget || '0'),
     months,
   };
 }
 
 // Calculate totals for groups
 // Uses Decimal.js to avoid floating-point rounding errors over many additions
+// Includes both monthly budgets and yearly budgets
 function calculateTotals(groups: BudgetGroup[]): { income: AnnualTotals; expenses: AnnualTotals; savings: AnnualTotals } {
   let incomeBudget = new Decimal(0);
   let incomeActual = new Decimal(0);
@@ -147,6 +150,22 @@ function calculateTotals(groups: BudgetGroup[]): { income: AnnualTotals; expense
 
   groups.forEach((group) => {
     group.items.forEach((item) => {
+      // Add yearly budget to the total (once per item, not per month)
+      const yearlyBudget = new Decimal(item.yearlyBudget || 0);
+      
+      switch (group.type) {
+        case 'income':
+          incomeBudget = incomeBudget.plus(yearlyBudget);
+          break;
+        case 'expense':
+          expensesBudget = expensesBudget.plus(yearlyBudget);
+          break;
+        case 'savings':
+          savingsBudget = savingsBudget.plus(yearlyBudget);
+          break;
+      }
+      
+      // Add monthly budgets and actuals
       item.months.forEach((month) => {
         switch (group.type) {
           case 'income':
@@ -468,9 +487,16 @@ export async function updateItem(id: number, data: {
   name?: string;
   slug?: string;
   sortOrder?: number;
+  yearlyBudget?: number;
 }) {
+  const updateData: Record<string, unknown> = { updatedAt: new Date() };
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.slug !== undefined) updateData.slug = data.slug;
+  if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
+  if (data.yearlyBudget !== undefined) updateData.yearlyBudget = data.yearlyBudget.toString();
+
   const [updated] = await db.update(budgetItems)
-    .set({ ...data, updatedAt: new Date() })
+    .set(updateData)
     .where(eq(budgetItems.id, id))
     .returning();
 

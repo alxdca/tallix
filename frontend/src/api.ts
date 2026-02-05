@@ -175,6 +175,7 @@ export async function updateItem(id: number, data: {
   name?: string;
   slug?: string;
   sortOrder?: number;
+  yearlyBudget?: number;
 }): Promise<BudgetItem> {
   const response = await fetch(`${API_BASE}/budget/items/${id}`, {
     method: 'PUT',

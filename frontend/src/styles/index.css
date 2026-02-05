@@ -3935,6 +3935,7 @@ td.zero {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.875rem;
+  table-layout: fixed;
 }
 
 .accounts-table th,
@@ -3966,17 +3967,19 @@ td.zero {
   text-align: left;
   font-weight: 500;
   color: var(--text-primary);
-  min-width: 200px;
+  width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .account-initial-col,
 .accounts-table .account-initial {
-  min-width: 120px;
+  width: 100px;
   background: rgba(59, 130, 246, 0.05);
 }
 
 .account-month-col {
-  min-width: 90px;
+  width: 90px;
 }
 
 .account-month-balance {
@@ -4645,13 +4648,13 @@ td.zero {
 
 .spreadsheet thead th.budget {
   color: var(--accent-budget-light);
-  text-align: right;
+  text-align: center;
   min-width: 65px;
 }
 
 .spreadsheet thead th.actual {
   color: var(--accent-actual-light);
-  text-align: right;
+  text-align: center;
   min-width: 65px;
   border-right: 1px solid var(--border-subtle);
 }
@@ -4685,10 +4688,20 @@ td.zero {
   text-align: right;
   font-family: var(--font-mono);
   color: var(--text-muted);
+  width: 65px;
+  min-width: 65px;
 }
 
 .spreadsheet tbody td.cell.actual {
   border-right: 1px solid var(--border-subtle);
+}
+
+.spreadsheet tbody td.cell.actual.warning {
+  color: var(--accent-warning);
+}
+
+.spreadsheet tbody td.cell.actual.over-budget {
+  color: var(--accent-negative);
 }
 
 .spreadsheet tbody td.cell:nth-child(3) {
@@ -4800,6 +4813,90 @@ td.zero {
   color: var(--accent-budget-light);
 }
 
+/* Funds Summary Section */
+.spreadsheet .funds-summary-header {
+  background: var(--bg-tertiary);
+}
+
+.spreadsheet .funds-summary-header td {
+  padding: 16px 16px;
+  font-weight: 700;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent-purple);
+  border-bottom: 2px solid var(--border-color);
+}
+
+.spreadsheet .funds-summary-row td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  background: var(--bg-secondary);
+}
+
+.spreadsheet .funds-summary-row td.category-name {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  text-align: left;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  color: var(--text-primary);
+  padding-left: 16px;
+}
+
+.spreadsheet .funds-summary-row td.cell {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.spreadsheet .funds-summary-row td.cell.budget {
+  color: var(--accent-budget);
+}
+
+.spreadsheet .funds-summary-row td.cell.actual {
+  color: var(--accent-actual);
+}
+
+.spreadsheet .funds-summary-row td.cell.negative {
+  color: var(--accent-negative) !important;
+}
+
+.spreadsheet .funds-summary-row.start-of-month {
+  background: rgba(139, 92, 246, 0.03);
+}
+
+.spreadsheet .funds-summary-row.start-of-month td.category-name {
+  background: rgba(139, 92, 246, 0.05);
+}
+
+.spreadsheet .funds-summary-row.end-of-month {
+  background: rgba(139, 92, 246, 0.06);
+}
+
+.spreadsheet .funds-summary-row.end-of-month td.category-name {
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.spreadsheet .funds-summary-row.end-of-month td.cell {
+  font-weight: 600;
+}
+
+.spreadsheet .funds-summary-row.end-of-month td {
+  border-bottom: 2px solid var(--border-color);
+}
+
+/* Spacing after funds summary */
+.spreadsheet .funds-summary-spacer td {
+  height: 20px;
+  background: var(--bg-secondary);
+  border: none;
+}
+
 /* ========================================
    Error Boundary
    ======================================== */
@@ -4851,5 +4948,625 @@ td.zero {
   font-size: var(--font-size-xs);
   overflow-x: auto;
   color: var(--text-danger);
+}
+
+/* ========================================
+   Budget Planning View
+   ======================================== */
+.budget-planning-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  gap: 24px;
+  overflow: hidden;
+}
+
+.budget-planning-header {
+  flex-shrink: 0;
+}
+
+.budget-planning-header h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+}
+
+.budget-planning-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.budget-planning-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.budget-planning-table-container {
+  flex: 1;
+  overflow: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+
+.budget-planning-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.budget-planning-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-tertiary);
+  padding: 12px 8px;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border-color);
+  white-space: nowrap;
+  text-align: center;
+}
+
+.budget-planning-table thead th.col-category {
+  text-align: left;
+  padding-left: 16px;
+  min-width: 220px;
+}
+
+.budget-planning-table thead th.col-annual {
+  min-width: 100px;
+  border-right: 1px solid var(--border-subtle);
+  text-align: right;
+}
+
+.budget-planning-table thead th.col-yearly {
+  min-width: 85px;
+  text-align: right;
+}
+
+.budget-planning-table thead th.col-remaining {
+  min-width: 85px;
+  text-align: right;
+  border-right: 2px solid var(--border-color);
+}
+
+.budget-planning-table thead th.col-month {
+  min-width: 75px;
+  text-align: right;
+}
+
+.budget-planning-table thead th.col-actions {
+  min-width: 60px;
+}
+
+.budget-planning-table thead th.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 20;
+}
+
+/* Section rows */
+.budget-planning-table .section-row {
+  background: linear-gradient(90deg, 
+    color-mix(in srgb, var(--section-color) 15%, transparent) 0%, 
+    color-mix(in srgb, var(--section-color) 5%, transparent) 50%, 
+    transparent 100%
+  );
+}
+
+.budget-planning-table .section-row td {
+  padding: 14px 8px;
+  font-weight: 700;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
+  border-top: 2px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  text-align: right;
+}
+
+.budget-planning-table .section-row td.category-cell {
+  text-align: left;
+  padding-left: 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.budget-planning-table .section-row td.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: linear-gradient(90deg, 
+    color-mix(in srgb, var(--section-color) 20%, var(--bg-secondary)) 0%, 
+    color-mix(in srgb, var(--section-color) 8%, var(--bg-secondary)) 100%
+  );
+  border-right: 1px solid var(--border-color);
+}
+
+.budget-planning-table .section-row td.annual-total {
+  border-right: 1px solid var(--border-subtle);
+  color: var(--section-color);
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.budget-planning-table .section-row td.yearly-budget-total {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--section-color);
+  text-align: right;
+}
+
+.budget-planning-table .section-row td.remaining-budget-total {
+  border-right: 2px solid var(--border-color);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--section-color);
+  text-align: right;
+}
+
+.budget-planning-table .section-row td.month-total {
+  color: var(--section-color);
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.budget-planning-table .section-row:hover td.category-cell {
+  color: var(--accent-budget-light);
+}
+
+/* Group rows */
+.budget-planning-table .group-row td {
+  padding: 10px 8px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: right;
+}
+
+.budget-planning-table .group-row td.category-cell {
+  text-align: left;
+  padding-left: 28px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.budget-planning-table .group-row td.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--bg-tertiary);
+  border-right: 1px solid var(--border-color);
+}
+
+.budget-planning-table .group-row td.annual-total {
+  border-right: 1px solid var(--border-subtle);
+  text-align: right;
+}
+
+.budget-planning-table .group-row td.yearly-budget-total {
+  text-align: right;
+}
+
+.budget-planning-table .group-row td.remaining-budget-total {
+  border-right: 2px solid var(--border-color);
+  text-align: right;
+}
+
+.budget-planning-table .group-row td.group-total {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.budget-planning-table .group-row:hover td.category-cell {
+  color: var(--accent-budget-light);
+}
+
+/* Item rows */
+.budget-planning-table .item-row td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: right;
+}
+
+.budget-planning-table .item-row td.category-cell {
+  text-align: left;
+  padding-left: 44px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.budget-planning-table .item-row td.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+}
+
+.budget-planning-table .item-row td.annual-total {
+  border-right: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.budget-planning-table .item-row td.yearly-budget-cell {
+  text-align: right;
+}
+
+.budget-planning-table .item-row td.remaining-budget-cell {
+  border-right: 2px solid var(--border-color);
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  padding: 4px 8px;
+}
+
+.budget-planning-table .item-row td.remaining-budget-cell .remaining-content {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.budget-planning-table .item-row td.remaining-budget-cell .remaining-percent-badge {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  min-width: 36px;
+  text-align: center;
+}
+
+.budget-planning-table .item-row td.remaining-budget-cell .remaining-amount {
+  font-size: 0.8125rem;
+}
+
+/* Healthy: > 50% remaining - Green */
+.budget-planning-table .item-row td.remaining-budget-cell.healthy .remaining-percent-badge {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.budget-planning-table .item-row td.remaining-budget-cell.healthy .remaining-amount {
+  color: var(--text-secondary);
+}
+
+/* Warning: 20-50% remaining - Orange */
+.budget-planning-table .item-row td.remaining-budget-cell.warning .remaining-percent-badge {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.budget-planning-table .item-row td.remaining-budget-cell.warning .remaining-amount {
+  color: var(--accent-warning);
+}
+
+/* Critical: < 20% remaining - Red */
+.budget-planning-table .item-row td.remaining-budget-cell.critical .remaining-percent-badge {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.budget-planning-table .item-row td.remaining-budget-cell.critical .remaining-amount {
+  color: var(--accent-negative);
+}
+
+.budget-planning-table .budget-value.yearly {
+  /* Same styling as other budget values */
+}
+
+.budget-planning-table .budget-input.yearly {
+  width: 75px;
+}
+
+.budget-planning-table .item-row:hover td {
+  background: var(--bg-hover);
+}
+
+.budget-planning-table .item-row:hover td.sticky-col {
+  background: var(--bg-hover);
+}
+
+/* Month cells */
+.budget-planning-table .month-cell {
+  padding: 4px 6px;
+  text-align: right;
+}
+
+.budget-planning-table .budget-value {
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-width: 60px;
+  text-align: right;
+  display: block;
+}
+
+.budget-planning-table .budget-value:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.budget-planning-table .budget-value.zero {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.budget-planning-table .budget-input {
+  width: 70px;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  text-align: right;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-budget);
+  border-radius: 4px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.budget-planning-table .budget-input:focus {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+/* Actions column */
+.budget-planning-table .actions-cell {
+  text-align: center;
+}
+
+.budget-planning-table .btn-icon.quick-fill {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.budget-planning-table .btn-icon.quick-fill:hover {
+  color: var(--accent-budget);
+  border-color: var(--accent-budget);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.budget-planning-table .btn-icon.cancel {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.budget-planning-table .btn-icon.cancel:hover {
+  color: var(--accent-negative);
+}
+
+/* Chevron */
+.budget-planning-table .chevron {
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 0.625rem;
+  transition: transform 0.15s ease;
+  opacity: 0.6;
+}
+
+.budget-planning-table .chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.budget-planning-table td.category-cell:hover .chevron {
+  opacity: 1;
+}
+
+/* Quick Fill Modal */
+.quick-fill-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+  backdrop-filter: blur(4px);
+}
+
+.quick-fill-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: var(--shadow-lg);
+  animation: modalSlideIn 0.2s ease;
+}
+
+.quick-fill-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.quick-fill-header h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.quick-fill-header .btn-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all var(--transition-fast);
+}
+
+.quick-fill-header .btn-close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.quick-fill-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.quick-fill-amount label,
+.quick-fill-months label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.quick-fill-amount input {
+  width: 100%;
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.quick-fill-amount input:focus {
+  border-color: var(--accent-budget);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.quick-fill-amount input::placeholder {
+  color: var(--text-muted);
+}
+
+.month-toggles {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.month-toggle {
+  padding: 8px 4px;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.month-toggle:hover {
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+}
+
+.month-toggle.active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: var(--accent-budget);
+  color: var(--accent-budget-light);
+}
+
+.month-presets {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.preset-btn {
+  padding: 6px 12px;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.preset-btn:hover {
+  border-color: var(--accent-budget);
+  color: var(--accent-budget);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.quick-fill-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-color);
+}
+
+.quick-fill-footer .btn-secondary {
+  padding: 10px 20px;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.quick-fill-footer .btn-secondary:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
 }
 

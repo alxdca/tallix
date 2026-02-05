@@ -75,7 +75,7 @@ export function calculateAnnualTotals(months: MonthlyValue[]): AnnualTotals {
   );
 }
 
-// Calculate group totals
+// Calculate group totals (includes yearly budgets)
 export function calculateGroupTotals(items: BudgetItem[]): {
   annual: AnnualTotals;
   months: MonthlyValue[];
@@ -86,6 +86,9 @@ export function calculateGroupTotals(items: BudgetItem[]): {
   };
 
   items.forEach((item) => {
+    // Add yearly budget to annual total
+    totals.annual.budget += item.yearlyBudget || 0;
+    
     item.months.forEach((month, i) => {
       totals.months[i].budget += month.budget;
       totals.months[i].actual += month.actual;

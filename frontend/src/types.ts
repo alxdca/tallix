@@ -11,6 +11,7 @@ export interface BudgetItem {
   id: number;
   name: string;
   slug: string;
+  yearlyBudget: number; // Budget for irregular/variable spending (in addition to monthly)
   months: MonthlyValue[];
 }
 

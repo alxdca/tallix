@@ -34,6 +34,9 @@ export const budgetItems = pgTable('budget_items', {
   name: varchar('name', { length: 200 }).notNull(),
   slug: varchar('slug', { length: 200 }).notNull(),
   sortOrder: integer('sort_order').notNull().default(0),
+  // Yearly budget for irregular/variable spending (e.g., vacations, restaurants)
+  // This is in addition to monthly budgets - some items may have both
+  yearlyBudget: decimal('yearly_budget', { precision: 12, scale: 2 }).notNull().default('0'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { fetchBudgetData, fetchBudgetSummary, fetchMonths } from './api';
+import { fetchBudgetData, fetchBudgetSummary, fetchMonths, fetchAccounts, type Account } from './api';
 import type { BudgetData, BudgetSummary } from './types';
 import { organizeBudgetData } from './utils';
 import { logger } from './utils/logger';
@@ -10,11 +10,13 @@ import BudgetSpreadsheet from './components/BudgetSpreadsheet';
 import Settings from './components/Settings';
 import Transactions from './components/Transactions';
 import Accounts from './components/Accounts';
+import BudgetPlanning from './components/BudgetPlanning';
 
 function App() {
   const [budgetData, setBudgetData] = useState<BudgetData | null>(null);
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [months, setMonths] = useState<string[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [activeView, setActiveView] = useState('current');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +25,13 @@ function App() {
   const organizedData = useMemo(() => {
     return budgetData ? organizeBudgetData(budgetData) : null;
   }, [budgetData]);
+
+  // Calculate total initial balance of payment method accounts (excluding savings)
+  const paymentAccountsInitialBalance = useMemo(() => {
+    return accounts
+      .filter(a => a.type === 'payment_method')
+      .reduce((sum, a) => sum + a.initialBalance, 0);
+  }, [accounts]);
 
   const loadData = useCallback(async () => {
     try {
@@ -35,6 +44,11 @@ function App() {
       setBudgetData(data);
       setSummary(summaryData);
       setMonths(monthsData);
+      
+      // Fetch accounts for the year (needed for funds summary)
+      const accountsData = await fetchAccounts(data.year);
+      setAccounts(accountsData);
+      
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -54,6 +68,10 @@ function App() {
       setBudgetData(data);
       setSummary(summaryData);
       setMonths(monthsData);
+      
+      // Fetch accounts for the year (needed for funds summary)
+      const accountsData = await fetchAccounts(data.year);
+      setAccounts(accountsData);
     } catch (err) {
       logger.error('Failed to refresh data', err);
     }
@@ -75,6 +93,10 @@ function App() {
       ]);
       setBudgetData(data);
       setSummary(summaryData);
+      
+      // Also refresh accounts for updated fund balances
+      const accountsData = await fetchAccounts(data.year);
+      setAccounts(accountsData);
     } catch (err) {
       logger.error('Failed to refresh budget data', err);
     }
@@ -112,6 +134,7 @@ function App() {
               <BudgetSpreadsheet
                 sections={organizedData?.sections || []}
                 months={months}
+                paymentAccountsInitialBalance={paymentAccountsInitialBalance}
               />
             </div>
           </>
@@ -151,6 +174,15 @@ function App() {
         return (
           <Accounts
             year={currentYear}
+            months={months}
+            onDataChanged={refreshData}
+          />
+        );
+      case 'budget-planning':
+        return (
+          <BudgetPlanning
+            year={currentYear}
+            groups={budgetData?.groups || []}
             months={months}
             onDataChanged={refreshData}
           />
