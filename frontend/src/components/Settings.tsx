@@ -170,7 +170,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
   const handleDeletePaymentMethod = async (id: number) => {
     if (isSubmitting) return;
-    
+
     const confirmed = await confirm({
       title: 'Supprimer le moyen de paiement',
       message: 'Êtes-vous sûr de vouloir supprimer ce moyen de paiement ?',
@@ -353,7 +353,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
   const handleDeleteGroup = async (groupId: number) => {
     if (isSubmitting) return;
-    
+
     const confirmed = await confirm({
       title: 'Supprimer le groupe',
       message: 'Êtes-vous sûr de vouloir supprimer ce groupe et tous ses éléments ?',
@@ -419,9 +419,9 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
   const handleDeleteItem = async (itemId: number) => {
     if (isSubmitting) return;
-    
+
     const confirmed = await confirm({
-      title: 'Supprimer l\'élément',
+      title: "Supprimer l'élément",
       message: 'Êtes-vous sûr de vouloir supprimer cet élément ?',
       confirmLabel: 'Supprimer',
       variant: 'danger',
@@ -881,7 +881,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
         {renderGroupSection('Revenus', incomeGroups, 'income')}
         {renderGroupSection('Dépenses', expenseGroups, 'expense')}
       </div>
-
     </>
   );
 

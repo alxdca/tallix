@@ -1,12 +1,18 @@
-import React, { type DragEvent, useCallback, useState } from 'react';
+import React, { type DragEvent, useCallback, useEffect, useState } from 'react';
 import {
   bulkCreateTransactions,
+  type CategoryForClassification,
+  checkLLMStatus,
+  classifyTransactionsWithLLM,
   fetchPaymentMethods,
   type ParsedTransaction,
   type PaymentMethod,
   parsePdf,
+  parsePdfWithLlm,
 } from '../api';
 import type { BudgetGroup } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { logger } from '../utils/logger';
 import { formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import CategoryCombobox from './CategoryCombobox';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
@@ -81,6 +87,11 @@ interface EditableTransaction extends ParsedTransaction {
   id: string;
   itemId: number | null;
   paymentMethod: string;
+  // Raw fields from import (before any processing/matching)
+  rawDescription: string;
+  rawThirdParty: string;
+  rawCategory: string;
+  rawPaymentMethod: string;
   comment: string;
   selected: boolean;
   accountingMonth: number;
@@ -89,6 +100,7 @@ interface EditableTransaction extends ParsedTransaction {
 }
 
 export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImportComplete }: BulkImportModalProps) {
+  const { user } = useAuth();
   const [step, setStep] = useState<ImportStep>('select');
   const [importSource, setImportSource] = useState<ImportSource>('pdf');
   const [isDragging, setIsDragging] = useState(false);
@@ -100,6 +112,12 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
   const [pasteContent, setPasteContent] = useState('');
   const [columnOrder, setColumnOrder] = useState<ColumnType[]>(DEFAULT_COLUMN_ORDER);
   const [draggedColumn, setDraggedColumn] = useState<number | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+
+  // LLM Classification state
+  const [llmAvailable, setLlmAvailable] = useState(false);
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [skipPreprocessing, setSkipPreprocessing] = useState(false);
 
   // Track newly created items during this session
   const [localGroups, setLocalGroups] = useState<BudgetGroup[]>(groups);
@@ -108,6 +126,17 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
   React.useEffect(() => {
     setLocalGroups(groups);
   }, [groups]);
+
+  // Savings accounts are now real budget items in the "Épargne" group - no need for virtual groups
+
+  // Check LLM availability when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      checkLLMStatus()
+        .then((status) => setLlmAvailable(status.available))
+        .catch(() => setLlmAvailable(false));
+    }
+  }, [isOpen]);
 
   // Handle when a new item is created
   const handleItemCreated = (newItem: {
@@ -140,6 +169,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
   };
 
   // Get all items from all groups (use localGroups to include newly created items)
+  // Savings accounts are now real budget items in the "Épargne" group
   const allItems = localGroups.flatMap((g) =>
     g.items.map((item) => ({
       ...item,
@@ -151,6 +181,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
 
   const incomeItems = allItems.filter((i) => i.groupType === 'income');
   const expenseItems = allItems.filter((i) => i.groupType === 'expense');
+  const savingsCategoryItems = allItems.filter((i) => i.groupType === 'savings');
 
   const handleDragOver = useCallback((e: DragEvent) => {
     e.preventDefault();
@@ -174,8 +205,84 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
         const methods = await fetchPaymentMethods();
         setPaymentMethods(methods);
 
-        // Parse PDF with yearId for category suggestions
-        const result = await parsePdf(file, yearId);
+        // If skipPreprocessing is enabled and LLM is available, use LLM for extraction + classification
+        if (skipPreprocessing && llmAvailable) {
+          logger.info('Using LLM for PDF extraction and classification');
+          setIsClassifying(true);
+          setClassifyProgress({ done: 0, total: 1 });
+
+          // Build categories for LLM
+          const categories: CategoryForClassification[] = localGroups.flatMap((group) =>
+            group.items.map((item) => ({
+              id: item.id,
+              name: item.name,
+              groupName: group.name,
+              groupType: group.type as 'income' | 'expense' | 'savings',
+            }))
+          );
+
+          // Build payment methods for LLM
+          const pmForLlm = methods.map((pm) => ({
+            id: pm.id,
+            name: pm.name,
+            institution: pm.institution,
+          }));
+
+          const result = await parsePdfWithLlm(
+            file,
+            categories,
+            pmForLlm,
+            user?.language || 'fr',
+            user?.country || undefined
+          );
+          setClassifyProgress({ done: 1, total: 1 });
+
+          if (result.transactions.length === 0) {
+            setError('No transactions found in the PDF.');
+            setIsLoading(false);
+            setIsClassifying(false);
+            return;
+          }
+
+          // Convert LLM-extracted transactions to editable format
+          const editableTransactions: EditableTransaction[] = result.transactions.map((t, index) => {
+            const dateDisplay = formatDateDisplay(t.date);
+            const pm = t.paymentMethodId ? methods.find((m) => m.id === t.paymentMethodId) : null;
+            const { accountingMonth, accountingYear } = calculateAccountingPeriod(
+              dateDisplay,
+              pm?.settlementDay ?? null
+            );
+            return {
+              id: `import-${index}-${Date.now()}`,
+              date: dateDisplay,
+              description: t.description,
+              thirdParty: t.thirdParty || '',
+              amount: t.amount,
+              itemId: t.categoryId,
+              paymentMethod: pm?.name || '',
+              rawDescription: t.description,
+              rawThirdParty: t.thirdParty || '',
+              rawCategory: t.categoryName || '',
+              rawPaymentMethod: '',
+              comment: '',
+              selected: true,
+              accountingMonth,
+              accountingYear,
+              isIncome: t.isIncome,
+            };
+          });
+
+          setTransactions(editableTransactions);
+          setImportSource('pdf');
+          setStep('preview');
+          setIsClassifying(false);
+
+          logger.info(`LLM extracted and classified ${result.transactions.length} transactions from PDF`);
+          return;
+        }
+
+        // Standard PDF parsing with optional category suggestions
+        const result = await parsePdf(file, yearId, skipPreprocessing);
 
         if (result.transactions.length === 0) {
           setError('No transactions found in the PDF. The format may not be supported.');
@@ -184,23 +291,24 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
         }
 
         // Convert to editable transactions, using suggested categories
-        // Convert dates from YYYY-MM-DD to DD/MM/YYYY for display
-        // Preserve isIncome flag from PDF detection for user review
         const editableTransactions: EditableTransaction[] = result.transactions.map((t, index) => {
-          const dateDisplay = formatDateDisplay(t.date); // Convert to DD/MM/YYYY
-          // Default accounting period (no payment method yet, so use transaction date)
+          const dateDisplay = formatDateDisplay(t.date);
           const { accountingMonth, accountingYear } = calculateAccountingPeriod(dateDisplay, null);
           return {
             ...t,
             date: dateDisplay,
             id: `import-${index}-${Date.now()}`,
-            itemId: t.suggestedItemId || null, // Use suggested category if available
+            itemId: t.suggestedItemId || null,
             paymentMethod: '',
+            rawDescription: t.description,
+            rawThirdParty: t.thirdParty || '',
+            rawCategory: '',
+            rawPaymentMethod: '',
             comment: '',
             selected: true,
             accountingMonth,
             accountingYear,
-            isIncome: t.isIncome ?? false, // Preserve PDF detection for user review
+            isIncome: t.isIncome ?? false,
           };
         });
 
@@ -211,9 +319,10 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
         setError(err instanceof Error ? err.message : 'Failed to parse PDF');
       } finally {
         setIsLoading(false);
+        setIsClassifying(false);
       }
     },
-    [yearId]
+    [yearId, skipPreprocessing, llmAvailable, localGroups, user?.language, user?.country]
   );
 
   const handleDrop = useCallback(
@@ -230,17 +339,28 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
         return;
       }
 
-      await processFile(pdfFile);
+      setError(null);
+      setPendingFile(pdfFile);
     },
-    [processFile]
+    []
   );
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      await processFile(file);
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      setError('Please select a PDF file');
+      return;
     }
+    setError(null);
+    setPendingFile(file);
+    e.target.value = '';
   };
+
+  const handleStartImport = useCallback(async () => {
+    if (!pendingFile || isLoading || isClassifying) return;
+    await processFile(pendingFile);
+  }, [pendingFile, isLoading, isClassifying, processFile]);
 
   // Try to match a category name to an existing item
   // Returns the full item with groupType for determining income/expense
@@ -275,25 +395,73 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
     if (!methodName) return null;
     const normalized = methodName.toLowerCase().trim();
 
-    // Try exact match first
+    // Try exact match with institution format "Name (Institution)" FIRST
+    // This is important when multiple payment methods have the same name but different institutions
+    const exactWithInstitution = methods.find((m) => {
+      const fullName = m.institution ? `${m.name} (${m.institution})`.toLowerCase() : m.name.toLowerCase();
+      return fullName === normalized;
+    });
+    if (exactWithInstitution) return exactWithInstitution;
+
+    // Try exact match on name only
     const exactMatch = methods.find((m) => m.name.toLowerCase() === normalized);
     if (exactMatch) return exactMatch;
 
-    // Try partial match
-    const partialMatch = methods.find(
-      (m) => m.name.toLowerCase().includes(normalized) || normalized.includes(m.name.toLowerCase())
+    // Check if input contains institution in parentheses, e.g., "Carte de crédit (Swisscard)"
+    const institutionMatch = normalized.match(/^(.+?)\s*\((.+?)\)$/);
+    if (institutionMatch) {
+      const [, baseName, institution] = institutionMatch;
+      // Find payment method with matching name AND institution
+      const matchByNameAndInstitution = methods.find(
+        (m) =>
+          m.name.toLowerCase() === baseName.trim() &&
+          m.institution &&
+          m.institution.toLowerCase() === institution.trim()
+      );
+      if (matchByNameAndInstitution) return matchByNameAndInstitution;
+
+      // Try partial match on institution
+      const matchByPartialInstitution = methods.find(
+        (m) =>
+          m.name.toLowerCase() === baseName.trim() &&
+          m.institution &&
+          (m.institution.toLowerCase().includes(institution.trim()) ||
+            institution.trim().includes(m.institution.toLowerCase()))
+      );
+      if (matchByPartialInstitution) return matchByPartialInstitution;
+    }
+
+    // Try partial match on name (only if no institution in input)
+    if (!institutionMatch) {
+      const partialMatch = methods.find(
+        (m) => m.name.toLowerCase().includes(normalized) || normalized.includes(m.name.toLowerCase())
+      );
+      if (partialMatch) return partialMatch;
+    }
+
+    // Try matching by institution only (exact)
+    const byInstitutionExact = methods.find((m) => m.institution && m.institution.toLowerCase() === normalized);
+    if (byInstitutionExact) return byInstitutionExact;
+
+    // Try matching by institution (partial)
+    const byInstitutionPartial = methods.find(
+      (m) =>
+        m.institution &&
+        (m.institution.toLowerCase().includes(normalized) || normalized.includes(m.institution.toLowerCase()))
     );
-    if (partialMatch) return partialMatch;
+    if (byInstitutionPartial) return byInstitutionPartial;
 
     return null;
   };
 
   // Parse spreadsheet data using configured column order
   // Accepts methods list as parameter to avoid stale state issues
+  // If skipMatching is true, skip category/payment method matching (for AI-only mode)
   const parseSpreadsheetData = (
     data: string,
     columns: ColumnType[],
-    methods: PaymentMethod[]
+    methods: PaymentMethod[],
+    skipMatching: boolean = false
   ): EditableTransaction[] => {
     const lines = data.trim().split('\n');
     const transactions: EditableTransaction[] = [];
@@ -380,16 +548,21 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       // Skip rows without valid date or amount
       if (!date || amount === 0) continue;
 
-      // Try to match category and payment method
-      const matchedCategory = findCategory(categoryName);
-      const matchedPM = findPaymentMethod(paymentMethodName, methods);
-      const matchedPaymentMethod = matchedPM?.name || '';
+      // Try to match category and payment method (unless skipMatching for AI-only mode)
+      const matchedCategory = skipMatching ? null : findCategory(categoryName);
+      const matchedPM = skipMatching ? null : findPaymentMethod(paymentMethodName, methods);
+      // Store full "Name (Institution)" format to preserve uniqueness
+      const matchedPaymentMethod = matchedPM
+        ? matchedPM.institution
+          ? `${matchedPM.name} (${matchedPM.institution})`
+          : matchedPM.name
+        : '';
 
       // Calculate accounting period based on payment method's settlement day
       const { accountingMonth, accountingYear } = calculateAccountingPeriod(date, matchedPM?.settlementDay ?? null);
 
-      // Determine if income based on matched category type or negative amount
-      const isIncome = matchedCategory?.groupType === 'income' || amount < 0;
+      // Determine if income based on matched category type or negative amount (unless skipMatching)
+      const isIncome = skipMatching ? false : matchedCategory?.groupType === 'income' || amount < 0;
 
       transactions.push({
         id: `paste-${i}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -399,6 +572,11 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
         thirdParty,
         itemId: matchedCategory?.id ?? null,
         paymentMethod: matchedPaymentMethod,
+        // Keep all raw fields for LLM classification
+        rawDescription: description.trim(),
+        rawThirdParty: thirdParty,
+        rawCategory: categoryName,
+        rawPaymentMethod: paymentMethodName,
         comment: comment.trim(),
         selected: true,
         accountingMonth,
@@ -530,6 +708,10 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       thirdParty: '',
       itemId: null,
       paymentMethod: '',
+      rawDescription: '',
+      rawThirdParty: '',
+      rawCategory: '',
+      rawPaymentMethod: '',
       comment: '',
       selected: true,
       accountingMonth: currentMonth,
@@ -555,6 +737,163 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
 
   const applyPaymentMethodToAll = (paymentMethod: string) => {
     setTransactions((prev) => prev.map((t) => (t.selected ? { ...t, paymentMethod } : t)));
+  };
+
+  // LLM Classification with parallel batching
+  const BATCH_SIZE = 25;
+  const MAX_CONCURRENT = 6;
+  const [classifyProgress, setClassifyProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // Process batches in waves with concurrency limit, tracking timing
+  interface BatchResult<R> {
+    results: R[];
+    batchTimes: number[];
+  }
+
+  async function processInWaves<T, R>(
+    items: T[],
+    concurrency: number,
+    processor: (item: T) => Promise<R>,
+    onProgress?: (done: number, total: number) => void
+  ): Promise<BatchResult<R>> {
+    const results: R[] = [];
+    const batchTimes: number[] = [];
+    let completed = 0;
+
+    for (let i = 0; i < items.length; i += concurrency) {
+      const wave = items.slice(i, i + concurrency);
+      const waveStart = performance.now();
+      const waveResults = await Promise.all(wave.map(processor));
+      const waveTime = performance.now() - waveStart;
+
+      // Record time for each batch in this wave (approximate as wave time / batch count)
+      for (let j = 0; j < wave.length; j++) {
+        batchTimes.push(waveTime);
+      }
+
+      results.push(...waveResults);
+      completed += wave.length;
+      onProgress?.(completed, items.length);
+    }
+
+    return { results, batchTimes };
+  }
+
+  const handleLLMClassification = async () => {
+    if (!llmAvailable || isClassifying) return;
+
+    // Prepare transactions for classification - send both raw and processed data
+    const transactionsToClassify = transactions.map((t, index) => ({
+      index,
+      date: t.date,
+      description: t.description,
+      amount: t.amount,
+      thirdParty: t.thirdParty || undefined,
+      // Include raw fields so LLM has full context
+      rawDescription: t.rawDescription || undefined,
+      rawThirdParty: t.rawThirdParty || undefined,
+      rawCategory: t.rawCategory || undefined,
+      rawPaymentMethod: t.rawPaymentMethod || undefined,
+    }));
+
+    // Prepare categories list (income, expense, and savings)
+    const categories: CategoryForClassification[] = allItems.map((item) => ({
+      id: item.id,
+      name: item.name,
+      groupName: item.groupName,
+      groupType: item.groupType,
+    }));
+
+    // Prepare payment methods list with IDs
+    const paymentMethodsForLLM = paymentMethods.map((pm) => ({
+      id: pm.id,
+      name: pm.name,
+      institution: pm.institution,
+    }));
+
+    setIsClassifying(true);
+    setClassifyProgress({ done: 0, total: 0 });
+    setError(null);
+
+    try {
+      // Split transactions into batches for parallel processing
+      const batches: (typeof transactionsToClassify)[] = [];
+      for (let i = 0; i < transactionsToClassify.length; i += BATCH_SIZE) {
+        batches.push(transactionsToClassify.slice(i, i + BATCH_SIZE));
+      }
+
+      setClassifyProgress({ done: 0, total: batches.length });
+      const startTime = performance.now();
+      logger.info(`Starting LLM classification: ${batches.length} batches, max ${MAX_CONCURRENT} concurrent`);
+
+      // Process batches in waves with concurrency limit
+      const { results: batchResults, batchTimes } = await processInWaves(
+        batches,
+        MAX_CONCURRENT,
+        (batch) => classifyTransactionsWithLLM(batch, categories, paymentMethodsForLLM),
+        (done, total) => setClassifyProgress({ done, total })
+      );
+
+      // Calculate timing stats
+      const totalTime = performance.now() - startTime;
+      const avgBatchTime = batchTimes.length > 0 ? batchTimes.reduce((a, b) => a + b, 0) / batchTimes.length : 0;
+
+      // Merge all batch results into a single classifications array
+      const classifications = batchResults.flat();
+
+      // Merge classifications with transactions
+      setTransactions((prev) =>
+        prev.map((t, index) => {
+          const classification = classifications.find((c) => c.index === index);
+          if (!classification) return t;
+
+          // Apply LLM classifications (override existing values)
+          const updates: Partial<EditableTransaction> = {};
+
+          if (classification.categoryId) {
+            updates.itemId = classification.categoryId;
+          }
+
+          if (classification.description) {
+            updates.description = classification.description;
+          }
+
+          if (classification.thirdParty) {
+            updates.thirdParty = classification.thirdParty;
+          }
+
+          if (classification.paymentMethodId) {
+            // Look up payment method by ID
+            const matchedPM = paymentMethods.find((pm) => pm.id === classification.paymentMethodId);
+            if (matchedPM) {
+              // Store full "Name (Institution)" format to preserve uniqueness
+              const fullName = matchedPM.institution ? `${matchedPM.name} (${matchedPM.institution})` : matchedPM.name;
+              updates.paymentMethod = fullName;
+            }
+          }
+
+          if (classification.isIncome !== undefined) {
+            updates.isIncome = classification.isIncome;
+          }
+
+          return { ...t, ...updates };
+        })
+      );
+
+      logger.info(
+        `LLM classification complete: ` +
+          `${transactions.length} transactions, ` +
+          `${batches.length} batches, ` +
+          `${(totalTime / 1000).toFixed(1)}s total, ` +
+          `${(avgBatchTime / 1000).toFixed(1)}s avg/wave`
+      );
+    } catch (err) {
+      logger.error('LLM classification failed', err);
+      setError(err instanceof Error ? err.message : 'Échec de la classification automatique');
+    } finally {
+      setIsClassifying(false);
+      setClassifyProgress(null);
+    }
   };
 
   // Check which required fields are missing for a transaction
@@ -647,6 +986,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
     setImportSource('pdf');
     setColumnOrder(DEFAULT_COLUMN_ORDER);
     setDraggedColumn(null);
+    setPendingFile(null);
     onClose();
     if (step === 'success') {
       onImportComplete();
@@ -755,18 +1095,47 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
 
           {step === 'upload' && (
             <div className="upload-area">
+              {/* AI Classification progress overlay */}
+              {isClassifying && (
+                <div className="classification-overlay">
+                  <div className="classification-popup">
+                    <div className="classification-icon">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
+                        <circle cx="8" cy="14" r="1" />
+                        <circle cx="16" cy="14" r="1" />
+                        <path d="M9 18h6" />
+                      </svg>
+                    </div>
+                    <h3>Extraction et classification IA</h3>
+                    {classifyProgress && (
+                      <>
+                        <div className="classification-progress-bar">
+                          <div
+                            className="classification-progress-fill"
+                            style={{ width: `${(classifyProgress.done / classifyProgress.total) * 100}%` }}
+                          />
+                        </div>
+                        <p className="classification-progress-text">Traitement en cours...</p>
+                      </>
+                    )}
+                    <p className="classification-hint">Analyse du PDF avec l'IA...</p>
+                  </div>
+                </div>
+              )}
+
               <div
                 className={`drop-zone ${isDragging ? 'dragging' : ''}`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
               >
-                {isLoading ? (
+                {isLoading && !isClassifying ? (
                   <div className="loading-state">
                     <div className="loading-spinner" />
                     <p>Analyse du fichier en cours...</p>
                   </div>
-                ) : (
+                ) : !isLoading ? (
                   <>
                     <div className="drop-icon">
                       <svg
@@ -788,10 +1157,47 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                       <input type="file" accept=".pdf,application/pdf" onChange={handleFileSelect} hidden />
                       Parcourir les fichiers
                     </label>
+                    {pendingFile && (
+                      <div className="selected-file">
+                        <p className="selected-file-name">Fichier sélectionné : {pendingFile.name}</p>
+                        <div className="selected-file-actions">
+                          <button className="btn-primary" onClick={handleStartImport} disabled={isLoading || isClassifying}>
+                            Démarrer l'import
+                          </button>
+                          <button className="btn-back" onClick={() => setPendingFile(null)} disabled={isLoading || isClassifying}>
+                            Retirer
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </>
-                )}
+                ) : null}
               </div>
-              <button className="btn-back" onClick={() => setStep('select')}>
+
+              {llmAvailable && (
+                <label className="skip-preprocessing-option">
+                  <input
+                    type="checkbox"
+                    checked={skipPreprocessing}
+                    onChange={(e) => setSkipPreprocessing(e.target.checked)}
+                  />
+                  <span className="checkbox-label">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
+                    </svg>
+                    Classification IA uniquement
+                  </span>
+                  <span className="checkbox-hint">Envoyer le PDF directement à l'IA sans pré-traitement</span>
+                </label>
+              )}
+
+              <button
+                className="btn-back"
+                onClick={() => {
+                  setPendingFile(null);
+                  setStep('select');
+                }}
+              >
                 ← Retour
               </button>
             </div>
@@ -943,7 +1349,38 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
           )}
 
           {step === 'preview' && (
-            <div className="preview-area">
+            <div className={`preview-area ${isClassifying ? 'classifying' : ''}`}>
+              {/* Classification progress overlay */}
+              {isClassifying && (
+                <div className="classification-overlay">
+                  <div className="classification-popup">
+                    <div className="classification-icon">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
+                        <circle cx="8" cy="14" r="1" />
+                        <circle cx="16" cy="14" r="1" />
+                        <path d="M9 18h6" />
+                      </svg>
+                    </div>
+                    <h3>Classification IA en cours</h3>
+                    {classifyProgress && (
+                      <>
+                        <div className="classification-progress-bar">
+                          <div
+                            className="classification-progress-fill"
+                            style={{ width: `${(classifyProgress.done / classifyProgress.total) * 100}%` }}
+                          />
+                        </div>
+                        <p className="classification-progress-text">
+                          Traitement du lot {classifyProgress.done} sur {classifyProgress.total}
+                        </p>
+                      </>
+                    )}
+                    <p className="classification-hint">Analyse de {transactions.length} transactions...</p>
+                  </div>
+                </div>
+              )}
+
               {/* Summary totals */}
               {(() => {
                 const selected = transactions.filter((t) => t.selected);
@@ -1009,6 +1446,26 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                   <button className="btn-text" onClick={toggleSelectAll}>
                     {transactions.every((t) => t.selected) ? 'Tout désélectionner' : 'Tout sélectionner'}
                   </button>
+                  {llmAvailable && (
+                    <button
+                      className="btn-llm-classify"
+                      onClick={handleLLMClassification}
+                      disabled={isClassifying || transactions.length === 0}
+                      title="Classifier automatiquement avec l'IA"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
+                        <circle cx="8" cy="14" r="1" />
+                        <circle cx="16" cy="14" r="1" />
+                        <path d="M9 18h6" />
+                      </svg>
+                      {isClassifying
+                        ? classifyProgress
+                          ? `Classification ${classifyProgress.done}/${classifyProgress.total}...`
+                          : 'Classification...'
+                        : 'Classifier avec IA'}
+                    </button>
+                  )}
                   <button className="btn-add-row" onClick={addTransaction}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <line x1="12" y1="5" x2="12" y2="19" />
@@ -1049,6 +1506,15 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                           </option>
                         ))}
                       </optgroup>
+                      {savingsCategoryItems.length > 0 && (
+                        <optgroup label="Épargne">
+                          {savingsCategoryItems.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
                   <div className="bulk-apply-field">
@@ -1061,17 +1527,36 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                       className="preview-select"
                     >
                       <option value="">—</option>
-                      {paymentMethods.map((m) => (
-                        <option key={m.id} value={m.name}>
-                          {m.name}
-                        </option>
-                      ))}
+                      {paymentMethods
+                        .filter((m) => !m.isSavingsAccount)
+                        .map((m) => {
+                          const fullName = m.institution ? `${m.name} (${m.institution})` : m.name;
+                          return (
+                            <option key={m.id} value={fullName}>
+                              {fullName}
+                            </option>
+                          );
+                        })}
+                      {paymentMethods.some((m) => m.isSavingsAccount) && (
+                        <optgroup label="Comptes d'épargne">
+                          {paymentMethods
+                            .filter((m) => m.isSavingsAccount)
+                            .map((m) => {
+                              const fullName = m.institution ? `${m.name} (${m.institution})` : m.name;
+                              return (
+                                <option key={m.id} value={fullName}>
+                                  {fullName}
+                                </option>
+                              );
+                            })}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
                 </div>
               </div>
 
-              <div className="preview-table-container">
+              <div className={`preview-table-container ${isClassifying ? 'classifying' : ''}`}>
                 <table className="preview-table">
                   <thead>
                     <tr>
@@ -1087,7 +1572,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                       <th className="col-description">Description</th>
                       <th className="col-third-party">Tiers *</th>
                       <th className="col-amount">Montant *</th>
-                      <th className="col-type" title="Type: Dépense ou Revenu/Crédit">
+                      <th className="col-type" title="Type: Dépense ou Revenu">
                         Type
                       </th>
                       <th className="col-category">Catégorie *</th>
@@ -1117,7 +1602,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                               onChange={(e) => {
                                 const newDate = e.target.value;
                                 if (isValidDateFormat(newDate)) {
-                                  const pm = paymentMethods.find((m) => m.name === t.paymentMethod);
+                                  const pm = findPaymentMethod(t.paymentMethod);
                                   const newAccounting = calculateAccountingPeriod(newDate, pm?.settlementDay ?? null);
                                   updateTransaction(t.id, {
                                     date: newDate,
@@ -1192,8 +1677,8 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                               onClick={() => updateTransaction(t.id, { isIncome: !t.isIncome })}
                               title={
                                 t.isIncome
-                                  ? 'Revenu/Crédit (cliquer pour changer en Dépense)'
-                                  : 'Dépense (cliquer pour changer en Revenu/Crédit)'
+                                  ? 'Revenu (cliquer pour changer en Dépense)'
+                                  : 'Dépense (cliquer pour changer en Revenu)'
                               }
                             >
                               {t.isIncome ? (
@@ -1209,7 +1694,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                                     <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
                                     <polyline points="17 6 23 6 23 12" />
                                   </svg>
-                                  <span>Crédit</span>
+                                  <span>Revenu</span>
                                 </>
                               ) : (
                                 <>
@@ -1243,7 +1728,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                             <select
                               value={t.paymentMethod}
                               onChange={(e) => {
-                                const pm = paymentMethods.find((m) => m.name === e.target.value);
+                                const pm = findPaymentMethod(e.target.value);
                                 const newAccounting = calculateAccountingPeriod(t.date, pm?.settlementDay ?? null);
                                 updateTransaction(t.id, {
                                   paymentMethod: e.target.value,
@@ -1254,11 +1739,30 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                               className={`preview-select ${missing.includes('mode') ? 'missing-field' : ''}`}
                             >
                               <option value="">- Mode * -</option>
-                              {paymentMethods.map((m) => (
-                                <option key={m.id} value={m.name}>
-                                  {m.name}
-                                </option>
-                              ))}
+                              {paymentMethods
+                                .filter((m) => !m.isSavingsAccount)
+                                .map((m) => {
+                                  const fullName = m.institution ? `${m.name} (${m.institution})` : m.name;
+                                  return (
+                                    <option key={m.id} value={fullName}>
+                                      {fullName}
+                                    </option>
+                                  );
+                                })}
+                              {paymentMethods.some((m) => m.isSavingsAccount) && (
+                                <optgroup label="Comptes d'épargne">
+                                  {paymentMethods
+                                    .filter((m) => m.isSavingsAccount)
+                                    .map((m) => {
+                                      const fullName = m.institution ? `${m.name} (${m.institution})` : m.name;
+                                      return (
+                                        <option key={m.id} value={fullName}>
+                                          {fullName}
+                                        </option>
+                                      );
+                                    })}
+                                </optgroup>
+                              )}
                             </select>
                           </td>
                           <td>

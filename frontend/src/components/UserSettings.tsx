@@ -1,16 +1,71 @@
-import { useState } from 'react';
-import { changePassword } from '../api';
+import React, { useState } from 'react';
+import { changePassword, updateUserSettings } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { logger } from '../utils/logger';
 
+const LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'fr', label: 'Français' },
+];
+
+const COUNTRIES = [
+  { code: '', label: '—' },
+  { code: 'CH', label: 'Switzerland' },
+  { code: 'FR', label: 'France' },
+  { code: 'DE', label: 'Germany' },
+  { code: 'IT', label: 'Italy' },
+  { code: 'AT', label: 'Austria' },
+  { code: 'BE', label: 'Belgium' },
+  { code: 'NL', label: 'Netherlands' },
+  { code: 'LU', label: 'Luxembourg' },
+  { code: 'ES', label: 'Spain' },
+  { code: 'PT', label: 'Portugal' },
+  { code: 'GB', label: 'United Kingdom' },
+  { code: 'US', label: 'United States' },
+  { code: 'CA', label: 'Canada' },
+];
+
 export default function UserSettings() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
+  const [language, setLanguage] = useState(user?.language || 'fr');
+  const [country, setCountry] = useState(user?.country || '');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Update local state when user changes
+  React.useEffect(() => {
+    if (user) {
+      setLanguage(user.language || 'fr');
+      setCountry(user.country || '');
+    }
+  }, [user]);
+
+  const handleSaveSettings = async () => {
+    setIsSavingSettings(true);
+    setError(null);
+    try {
+      const updatedUser = await updateUserSettings({
+        language,
+        country,
+      });
+      updateUser({
+        language: updatedUser.language,
+        country: updatedUser.country,
+      });
+      setSuccess('Paramètres mis à jour');
+      setTimeout(() => setSuccess(null), 2000);
+    } catch (err) {
+      logger.error('Failed to update settings', err);
+      setError('Erreur lors de la mise à jour des paramètres');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,7 +130,46 @@ export default function UserSettings() {
                 <span className="user-info-value">{user.name}</span>
               </div>
             )}
+            <div className="user-info-row">
+              <span className="user-info-label">Langue</span>
+              <select
+                className="language-select"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                disabled={isSavingSettings}
+              >
+                {LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="user-info-row">
+              <span className="user-info-label">Pays</span>
+              <select
+                className="language-select"
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                disabled={isSavingSettings}
+              >
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ display: 'flex', margin: '20px auto 0', padding: '12px 32px' }}
+            onClick={handleSaveSettings}
+            disabled={isSavingSettings}
+          >
+            {isSavingSettings ? 'Enregistrement...' : 'Enregistrer les modifications'}
+          </button>
         </div>
 
         <div className="user-settings-section">

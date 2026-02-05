@@ -59,8 +59,16 @@ router.put(
       throw new AppError(400, 'Invalid payment method ID');
     }
 
-    const { name, institution, sortOrder, isAccount, isSavingsAccount, savingsType, settlementDay, linkedPaymentMethodId } =
-      req.body;
+    const {
+      name,
+      institution,
+      sortOrder,
+      isAccount,
+      isSavingsAccount,
+      savingsType,
+      settlementDay,
+      linkedPaymentMethodId,
+    } = req.body;
 
     try {
       const updated = await paymentMethods.updatePaymentMethod(id, userId, {

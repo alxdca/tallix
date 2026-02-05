@@ -159,6 +159,12 @@ export async function updatePaymentMethod(
 
   if (!updated) return null;
 
+  // If this is a savings account and name/institution changed, update budget item names
+  if (updated.isSavingsAccount && (data.name !== undefined || data.institution !== undefined)) {
+    const budgetSvc = await import('./budget.js');
+    await budgetSvc.updateSavingsBudgetItemsName(id, updated.name, updated.institution);
+  }
+
   return formatPaymentMethod(updated);
 }
 

@@ -69,6 +69,7 @@ export default function CategoryCombobox({
   // Group filtered items by type
   const incomeItems = filteredItems.filter((i) => i.groupType === 'income');
   const expenseItems = filteredItems.filter((i) => i.groupType === 'expense');
+  const savingsItems = filteredItems.filter((i) => i.groupType === 'savings');
 
   // Check if search matches exactly any existing item
   const exactMatch = allItems.some((item) => item.name.toLowerCase() === search.toLowerCase());
@@ -161,10 +162,15 @@ export default function CategoryCombobox({
         return 'Revenu';
       case 'expense':
         return 'Dépense';
+      case 'savings':
+        return 'Épargne';
       default:
         return '';
     }
   };
+
+  // Filter out virtual savings group from the "create new" form
+  const creatableGroups = groups.filter((g) => g.type !== 'savings');
 
   return (
     <div className="category-combobox" ref={containerRef}>
@@ -203,7 +209,7 @@ export default function CategoryCombobox({
               <div className="create-form-body">
                 <label>Assigner au groupe :</label>
                 <div className="group-options">
-                  {groups.map((group) => (
+                  {creatableGroups.map((group) => (
                     <button
                       key={group.id}
                       type="button"
@@ -281,6 +287,22 @@ export default function CategoryCombobox({
                     >
                       <span className="option-group">{item.groupName}</span>
                       <span className="option-arrow">→</span>
+                      <span className="option-name">{item.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Savings items */}
+              {savingsItems.length > 0 && (
+                <div className="combobox-group">
+                  <div className="combobox-group-label">Épargne</div>
+                  {savingsItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`combobox-option ${item.id === value ? 'selected' : ''}`}
+                      onClick={() => handleSelectItem(item.id)}
+                    >
                       <span className="option-name">{item.name}</span>
                     </div>
                   ))}

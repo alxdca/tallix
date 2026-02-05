@@ -15,7 +15,10 @@ A personal budgeting application for tracking income, expenses, savings, and acc
 - **Transaction Tracking** - Record transactions with categories, payment methods, and third-party details
 - **Account Balances** - Track balances across savings accounts and payment methods
 - **Transfers** - Record money transfers between accounts
-- **PDF Import** - Import transactions from bank statement PDFs with automatic categorization
+- **Spreadsheet Import** - Paste data from Excel/Sheets with configurable column mapping
+- **PDF Import** - Import transactions from bank statement PDFs with optional category suggestions
+- **LLM Classification (optional)** - DeepSeek-powered PDF extraction + classification and batch classification for imported transactions, with language and country context
+- **Multi-user Authentication** - Email/password auth, per-user profile (name, language, country), settings, and payment methods (JWT-protected APIs)
 - **Settlement Days** - Configure payment method billing cycles for accurate monthly accounting
 - **Linked Accounts** - Link payment methods to their funding accounts
 
@@ -55,6 +58,13 @@ Create `backend/.env`:
 ```env
 NODE_ENV=development
 DATABASE_URL=postgresql://tallix:tallix_secret@localhost:5432/tallix
+JWT_SECRET=dev-secret-change-in-production
+CORS_ORIGIN=http://localhost:5173
+DEEPSEEK_API_KEY=your_key_here
+# Optional overrides
+DEEPSEEK_API_URL=https://api.deepseek.com/v1
+LOG_LEVEL=info
+DEBUG_LOG_BODY=false
 ```
 
 ### 4. Run database migrations
@@ -130,6 +140,15 @@ tallix/
 
 ## API Endpoints
 
+All endpoints below (except `/api/auth/*`) require a `Bearer` token.
+
+### Auth
+- `POST /api/auth/register` - Register a new user
+- `POST /api/auth/login` - Login and receive JWT
+- `GET /api/auth/me` - Get current user from JWT
+- `PATCH /api/auth/me` - Update user profile (name, language, country)
+- `POST /api/auth/change-password` - Change password
+
 ### Budget
 - `GET /api/budget` - Get current year budget (includes yearly budgets per item)
 - `GET /api/budget/year/:year` - Get budget for specific year
@@ -146,6 +165,7 @@ tallix/
 - `PUT /api/budget/monthly-value/:itemId/:month` - Update monthly budget value
 
 ### Transactions
+- `GET /api/transactions/third-parties` - List distinct third parties (autocomplete)
 - `GET /api/transactions` - List transactions (current year)
 - `GET /api/transactions/year/:year` - List transactions for year
 - `POST /api/transactions` - Create transaction
@@ -170,8 +190,17 @@ tallix/
 - `PUT /api/payment-methods/:id` - Update payment method
 - `DELETE /api/payment-methods/:id` - Delete payment method
 
+### Settings
+- `GET /api/settings` - Get all settings for current user
+- `GET /api/settings/:key` - Get a setting value
+- `PUT /api/settings/:key` - Upsert a setting value
+- `DELETE /api/settings/:key` - Delete a setting
+
 ### Import
 - `POST /api/import/pdf` - Parse PDF bank statement
+- `POST /api/import/pdf-llm` - Extract + classify from PDF with LLM
+- `GET /api/import/llm-status` - Check if LLM classification is available
+- `POST /api/import/classify` - Classify transactions with LLM
 - `POST /api/import/bulk` - Bulk create transactions
 
 ## License

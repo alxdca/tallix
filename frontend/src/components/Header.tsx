@@ -9,13 +9,7 @@ interface HeaderProps {
   remainingBalance: number;
 }
 
-export default function Header({
-  year,
-  initialBalance,
-  totalIncome,
-  totalExpenses,
-  remainingBalance,
-}: HeaderProps) {
+export default function Header({ year, initialBalance, totalIncome, totalExpenses, remainingBalance }: HeaderProps) {
   const formatCurrency = useFormatCurrency();
 
   return (

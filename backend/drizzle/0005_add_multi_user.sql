@@ -8,12 +8,6 @@ CREATE TABLE IF NOT EXISTS "users" (
   "updated_at" timestamp DEFAULT now() NOT NULL
 );
 
--- Create a default user for existing data migration
--- Password is 'changeme' hashed with bcrypt (cost 10)
-INSERT INTO "users" ("id", "email", "password_hash", "name")
-VALUES ('00000000-0000-0000-0000-000000000001', 'default@tallix.local', '$2b$10$defaulthashplacaborchangethis000000000000000000000000', 'Default User')
-ON CONFLICT DO NOTHING;
-
 -- Create budgets table (main container for multi-year accounting)
 CREATE TABLE IF NOT EXISTS "budgets" (
   "id" serial PRIMARY KEY NOT NULL,
@@ -24,10 +18,23 @@ CREATE TABLE IF NOT EXISTS "budgets" (
   "updated_at" timestamp DEFAULT now() NOT NULL
 );
 
--- Create a default budget for existing data
-INSERT INTO "budgets" ("id", "user_id", "name", "description")
-VALUES (1, '00000000-0000-0000-0000-000000000001', 'Mon Budget', 'Budget par défaut')
-ON CONFLICT DO NOTHING;
+-- Create a placeholder user/budget only if legacy data exists (to be claimed on first setup)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "budget_years" LIMIT 1)
+     OR EXISTS (SELECT 1 FROM "budget_groups" LIMIT 1)
+     OR EXISTS (SELECT 1 FROM "payment_methods" LIMIT 1)
+     OR EXISTS (SELECT 1 FROM "settings" LIMIT 1) THEN
+    -- Password is 'changeme' hashed with bcrypt (cost 10)
+    INSERT INTO "users" ("id", "email", "password_hash", "name")
+    VALUES ('00000000-0000-0000-0000-000000000001', 'default@tallix.local', '$2b$10$defaulthashplacaborchangethis000000000000000000000000', 'Default User')
+    ON CONFLICT DO NOTHING;
+
+    INSERT INTO "budgets" ("id", "user_id", "name", "description")
+    VALUES (1, '00000000-0000-0000-0000-000000000001', 'Mon Budget', 'Budget par défaut')
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
 
 -- Create budget_shares table for sharing budgets with other users
 CREATE TABLE IF NOT EXISTS "budget_shares" (

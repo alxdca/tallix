@@ -19,6 +19,8 @@ export const users = pgTable('users', {
   email: varchar('email', { length: 255 }).notNull().unique(),
   passwordHash: varchar('password_hash', { length: 255 }).notNull(),
   name: varchar('name', { length: 255 }),
+  language: varchar('language', { length: 10 }).default('fr').notNull(),
+  country: varchar('country', { length: 2 }), // ISO 3166-1 alpha-2 country code
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -115,6 +117,8 @@ export const budgetItems = pgTable(
     // Yearly budget for irregular/variable spending (e.g., vacations, restaurants)
     // This is in addition to monthly budgets - some items may have both
     yearlyBudget: decimal('yearly_budget', { precision: 12, scale: 2 }).notNull().default('0'),
+    // Link to savings account (payment method) - for auto-generated savings budget items
+    savingsAccountId: integer('savings_account_id').references(() => paymentMethods.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

@@ -1,6 +1,6 @@
 // Budget Types (shared with backend)
 
-export type GroupType = 'income' | 'expense';
+export type GroupType = 'income' | 'expense' | 'savings';
 
 export interface MonthlyValue {
   budget: number;

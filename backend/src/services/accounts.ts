@@ -234,6 +234,28 @@ export async function setPaymentMethodAsAccount(id: number, isAccount: boolean):
 }
 
 // Update payment method isSavingsAccount flag
+// Also creates/deletes corresponding budget items in the "Épargne" category
 export async function setPaymentMethodAsSavingsAccount(id: number, isSavingsAccount: boolean): Promise<void> {
+  // Import here to avoid circular dependency
+  const budgetSvc = await import('./budget.js');
+
+  // Get the payment method details
+  const pm = await db.query.paymentMethods.findFirst({
+    where: eq(paymentMethods.id, id),
+  });
+
+  if (!pm) {
+    throw new Error('Payment method not found');
+  }
+
+  // Update the flag
   await db.update(paymentMethods).set({ isSavingsAccount, updatedAt: new Date() }).where(eq(paymentMethods.id, id));
+
+  if (isSavingsAccount) {
+    // Create budget items for this savings account across all years
+    await budgetSvc.createSavingsBudgetItems(id, pm.name, pm.institution);
+  } else {
+    // Delete budget items linked to this savings account
+    await budgetSvc.deleteSavingsBudgetItems(id);
+  }
 }

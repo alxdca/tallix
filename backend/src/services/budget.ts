@@ -40,6 +40,12 @@ export const UNCLASSIFIED_ITEM_NAME = 'Non classé';
 export const UNCLASSIFIED_ITEM_SLUG = 'non-classe';
 export const UNCLASSIFIED_SORT_ORDER = 9999; // High number to appear at the end
 
+// Savings category constants
+export const SAVINGS_GROUP_NAME = 'Épargne';
+export const SAVINGS_GROUP_SLUG = 'epargne';
+export const SAVINGS_GROUP_TYPE = 'savings';
+export const SAVINGS_SORT_ORDER = 998; // High but before unclassified
+
 // Get or create a budget year
 // Uses upsert pattern to avoid race conditions under concurrent requests
 export async function getOrCreateYear(year: number, budgetId: number = DEFAULT_BUDGET_ID) {
@@ -327,6 +333,7 @@ export async function getAllYears() {
 // Create a new year
 // Throws if year already exists - use getOrCreateYear for upsert behavior
 // Uses try-catch on unique constraint to handle race conditions
+// Also creates budget items for existing savings accounts
 export async function createYear(year: number, initialBalance: number = 0, budgetId: number = DEFAULT_BUDGET_ID) {
   try {
     const [newYear] = await db
@@ -337,6 +344,15 @@ export async function createYear(year: number, initialBalance: number = 0, budge
         initialBalance: initialBalance.toString(),
       })
       .returning();
+
+    // Create budget items for existing savings accounts
+    const savingsAccounts = await db.query.paymentMethods.findMany({
+      where: eq(paymentMethods.isSavingsAccount, true),
+    });
+
+    for (const sa of savingsAccounts) {
+      await createSavingsItemForYear(newYear.id, sa.id, sa.name, sa.institution, budgetId);
+    }
 
     return {
       id: newYear.id,
@@ -661,4 +677,170 @@ export async function updateMonthlyValue(
     actual: parseFloat(result.actual),
     created: isCreate,
   };
+}
+
+// ============ SAVINGS CATEGORY MANAGEMENT ============
+
+/**
+ * Get or create the "Épargne" savings group for a budget
+ */
+export async function getOrCreateSavingsGroup(budgetId: number = DEFAULT_BUDGET_ID): Promise<number> {
+  // Check if savings group already exists
+  const existingGroup = await db.query.budgetGroups.findFirst({
+    where: and(eq(budgetGroups.budgetId, budgetId), eq(budgetGroups.slug, SAVINGS_GROUP_SLUG)),
+  });
+
+  if (existingGroup) {
+    return existingGroup.id;
+  }
+
+  // Create the savings group
+  const [newGroup] = await db
+    .insert(budgetGroups)
+    .values({
+      budgetId,
+      name: SAVINGS_GROUP_NAME,
+      slug: SAVINGS_GROUP_SLUG,
+      type: SAVINGS_GROUP_TYPE,
+      sortOrder: SAVINGS_SORT_ORDER,
+    })
+    .returning();
+
+  return newGroup.id;
+}
+
+/**
+ * Create budget items for a savings account across all years
+ * Returns the created item IDs mapped by yearId
+ */
+export async function createSavingsBudgetItems(
+  savingsAccountId: number,
+  savingsAccountName: string,
+  savingsAccountInstitution: string | null,
+  budgetId: number = DEFAULT_BUDGET_ID
+): Promise<Map<number, number>> {
+  // Get or create the savings group
+  const groupId = await getOrCreateSavingsGroup(budgetId);
+
+  // Get all years for this budget
+  const years = await db.query.budgetYears.findMany({
+    where: eq(budgetYears.budgetId, budgetId),
+  });
+
+  const itemName = savingsAccountInstitution
+    ? `${savingsAccountName} (${savingsAccountInstitution})`
+    : savingsAccountName;
+  const itemSlug = `savings-${savingsAccountId}`;
+
+  const createdItems = new Map<number, number>();
+
+  for (const year of years) {
+    // Check if item already exists for this savings account and year
+    const existingItem = await db.query.budgetItems.findFirst({
+      where: and(eq(budgetItems.yearId, year.id), eq(budgetItems.savingsAccountId, savingsAccountId)),
+    });
+
+    if (existingItem) {
+      createdItems.set(year.id, existingItem.id);
+      continue;
+    }
+
+    // Create the budget item
+    const [newItem] = await db
+      .insert(budgetItems)
+      .values({
+        yearId: year.id,
+        groupId,
+        name: itemName,
+        slug: itemSlug,
+        sortOrder: 0,
+        savingsAccountId,
+      })
+      .returning();
+
+    // Create monthly values for the item
+    const monthlyData = Array(12)
+      .fill(null)
+      .map((_, i) => ({
+        itemId: newItem.id,
+        month: i + 1,
+        budget: '0',
+        actual: '0',
+      }));
+    await db.insert(monthlyValues).values(monthlyData);
+
+    createdItems.set(year.id, newItem.id);
+  }
+
+  return createdItems;
+}
+
+/**
+ * Delete all budget items linked to a savings account
+ */
+export async function deleteSavingsBudgetItems(savingsAccountId: number): Promise<void> {
+  // Delete all budget items linked to this savings account
+  // (monthly values will cascade delete)
+  await db.delete(budgetItems).where(eq(budgetItems.savingsAccountId, savingsAccountId));
+}
+
+/**
+ * Update the name of all budget items linked to a savings account
+ */
+export async function updateSavingsBudgetItemsName(
+  savingsAccountId: number,
+  newName: string,
+  newInstitution: string | null
+): Promise<void> {
+  const itemName = newInstitution ? `${newName} (${newInstitution})` : newName;
+
+  await db
+    .update(budgetItems)
+    .set({ name: itemName, updatedAt: new Date() })
+    .where(eq(budgetItems.savingsAccountId, savingsAccountId));
+}
+
+/**
+ * Create a savings budget item for a new year (called when a new year is created)
+ */
+export async function createSavingsItemForYear(
+  yearId: number,
+  savingsAccountId: number,
+  savingsAccountName: string,
+  savingsAccountInstitution: string | null,
+  budgetId: number = DEFAULT_BUDGET_ID
+): Promise<number> {
+  // Get or create the savings group
+  const groupId = await getOrCreateSavingsGroup(budgetId);
+
+  const itemName = savingsAccountInstitution
+    ? `${savingsAccountName} (${savingsAccountInstitution})`
+    : savingsAccountName;
+  const itemSlug = `savings-${savingsAccountId}`;
+
+  // Create the budget item
+  const [newItem] = await db
+    .insert(budgetItems)
+    .values({
+      yearId,
+      groupId,
+      name: itemName,
+      slug: itemSlug,
+      sortOrder: 0,
+      savingsAccountId,
+    })
+    .returning();
+
+  // Create monthly values for the item
+  const monthlyData = Array(12)
+    .fill(null)
+    .map((_, i) => ({
+      itemId: newItem.id,
+      month: i + 1,
+      budget: '0',
+      actual: '0',
+    }));
+  await db.insert(monthlyValues).values(monthlyData);
+
+  return newItem.id;
 }

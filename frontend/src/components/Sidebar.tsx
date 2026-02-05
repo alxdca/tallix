@@ -133,14 +133,8 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
       <div className="sidebar-footer">
         {user && (
           <div className="user-menu-container" ref={menuRef}>
-            <button
-              className="user-info"
-              onClick={() => setShowUserMenu(!showUserMenu)}
-              type="button"
-            >
-              <span className="user-avatar">
-                {(user.name || user.email).charAt(0).toUpperCase()}
-              </span>
+            <button className="user-info" onClick={() => setShowUserMenu(!showUserMenu)} type="button">
+              <span className="user-avatar">{(user.name || user.email).charAt(0).toUpperCase()}</span>
               <span className="user-name">{user.name || user.email}</span>
               <svg
                 className={`user-menu-chevron ${showUserMenu ? 'open' : ''}`}

@@ -429,11 +429,19 @@ export interface ParsePdfResponse {
   rawTextSample?: string;
 }
 
-export async function parsePdf(file: File, yearId?: number): Promise<ParsePdfResponse> {
+export async function parsePdf(
+  file: File,
+  yearId?: number,
+  skipSuggestions: boolean = false
+): Promise<ParsePdfResponse> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const url = yearId ? `${API_BASE}/import/pdf?yearId=${yearId}` : `${API_BASE}/import/pdf`;
+  const params = new URLSearchParams();
+  if (yearId) params.append('yearId', yearId.toString());
+  if (skipSuggestions) params.append('skipSuggestions', 'true');
+  const queryString = params.toString();
+  const url = queryString ? `${API_BASE}/import/pdf?${queryString}` : `${API_BASE}/import/pdf`;
 
   // For FormData, don't set Content-Type - let browser set it with boundary
   const token = localStorage.getItem(TOKEN_KEY);
@@ -450,6 +458,51 @@ export async function parsePdf(file: File, yearId?: number): Promise<ParsePdfRes
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.error || 'Failed to parse PDF');
+  }
+  return response.json();
+}
+
+export interface LlmExtractedTransaction {
+  date: string;
+  amount: number;
+  categoryId: number | null;
+  categoryName: string | null;
+  groupName: string | null;
+  isIncome: boolean;
+  description: string;
+  thirdParty: string | null;
+  paymentMethodId: number | null;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export async function parsePdfWithLlm(
+  file: File,
+  categories: CategoryForClassification[],
+  paymentMethods: Array<{ id: number; name: string; institution: string | null }>,
+  language: string = 'fr',
+  country?: string
+): Promise<{ transactions: LlmExtractedTransaction[] }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('categories', JSON.stringify(categories));
+  formData.append('paymentMethods', JSON.stringify(paymentMethods));
+  formData.append('language', language);
+  if (country) formData.append('country', country);
+
+  const token = localStorage.getItem(TOKEN_KEY);
+  const headers: HeadersInit = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE}/import/pdf-llm`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to extract transactions from PDF');
   }
   return response.json();
 }
@@ -629,4 +682,88 @@ export async function changePassword(currentPassword: string, newPassword: strin
     const error = await response.json();
     throw new Error(error.error || 'Failed to change password');
   }
+}
+
+// Update user settings
+export async function updateUserSettings(updates: {
+  name?: string;
+  language?: string;
+  country?: string;
+}): Promise<{ id: string; email: string; name: string | null; language: string; country: string | null }> {
+  const response = await authFetch(`${API_BASE}/auth/me`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to update user settings');
+  }
+  const data = await response.json();
+  return data.user;
+}
+
+// LLM Classification types
+export interface TransactionToClassify {
+  index: number;
+  date: string;
+  description: string;
+  amount: number;
+  thirdParty?: string;
+  // Raw fields from import (before processing)
+  rawDescription?: string;
+  rawThirdParty?: string;
+  rawCategory?: string;
+  rawPaymentMethod?: string;
+}
+
+export interface CategoryForClassification {
+  id: number;
+  name: string;
+  groupName: string;
+  groupType: 'income' | 'expense' | 'savings';
+}
+
+export interface PaymentMethodForClassification {
+  id: number;
+  name: string;
+  institution: string | null;
+}
+
+export interface ClassificationResult {
+  index: number;
+  categoryId: number | null;
+  categoryName: string | null;
+  groupName: string | null;
+  isIncome: boolean;
+  description: string | null;
+  thirdParty: string | null;
+  paymentMethodId: number | null;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+// Check if LLM classification is available
+export async function checkLLMStatus(): Promise<{ available: boolean }> {
+  const response = await authFetch(`${API_BASE}/import/llm-status`);
+  if (!response.ok) {
+    return { available: false };
+  }
+  return response.json();
+}
+
+// Classify transactions using LLM
+export async function classifyTransactionsWithLLM(
+  transactions: TransactionToClassify[],
+  categories: CategoryForClassification[],
+  paymentMethods: PaymentMethodForClassification[] = []
+): Promise<ClassificationResult[]> {
+  const response = await authFetch(`${API_BASE}/import/classify`, {
+    method: 'POST',
+    body: JSON.stringify({ transactions, categories, paymentMethods }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to classify transactions');
+  }
+  const data = await response.json();
+  return data.classifications;
 }

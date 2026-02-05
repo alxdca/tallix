@@ -70,7 +70,7 @@ interface Filters {
   thirdParty: string;
   description: string;
   paymentMethods: string[]; // Multiple payment methods can be selected
-  categoryFilter: string; // Combined: "section:income", "group:Salaires", "item:Salaires → Alexandre"
+  categoryFilter: string; // Combined: "section:income", "group:Salaires"
 }
 
 export default function Transactions({ year, yearId, groups, onTransactionsChanged }: TransactionsProps) {
@@ -133,7 +133,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const [editSourceAccount, setEditSourceAccount] = useState('');
   const [editDestAccount, setEditDestAccount] = useState('');
 
-  // Get all items from all groups
+  // Get all items from all groups (savings accounts are now real budget items in "Épargne" group)
   const allItems = groups.flatMap((g) =>
     g.items.map((item) => ({
       ...item,
@@ -144,7 +144,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
   const incomeItems = allItems.filter((i) => i.groupType === 'income');
   const expenseItems = allItems.filter((i) => i.groupType === 'expense');
-  // Note: Savings are now accounts, not categories
+  const savingsCategoryItems = allItems.filter((i) => i.groupType === 'savings');
 
   // Get unique values for filter dropdowns (include transfer accounts)
   const uniquePaymentMethods = useMemo(() => {
@@ -708,7 +708,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const handleDelete = async (entryId: string) => {
     if (isSubmitting) return;
     const isTransfer = entryId.startsWith('x_');
-    
+
     const confirmed = await confirm({
       title: isTransfer ? 'Supprimer le transfert' : 'Supprimer la transaction',
       message: isTransfer
@@ -991,11 +991,24 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 className="form-select payment-method-select"
               >
                 <option value="">Moyen de paiement</option>
-                {paymentMethods.map((method) => (
-                  <option key={method.id} value={method.name}>
-                    {formatWithInstitution(method.name, method.institution)}
-                  </option>
-                ))}
+                {paymentMethods
+                  .filter((m) => !m.isSavingsAccount)
+                  .map((method) => (
+                    <option key={method.id} value={method.name}>
+                      {formatWithInstitution(method.name, method.institution)}
+                    </option>
+                  ))}
+                {paymentMethods.some((m) => m.isSavingsAccount) && (
+                  <optgroup label="Comptes d'épargne">
+                    {paymentMethods
+                      .filter((m) => m.isSavingsAccount)
+                      .map((method) => (
+                        <option key={method.id} value={method.name}>
+                          {formatWithInstitution(method.name, method.institution)}
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
               </select>
               <input
                 type="number"
@@ -1031,6 +1044,15 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                     </option>
                   ))}
                 </optgroup>
+                {savingsCategoryItems.length > 0 && (
+                  <optgroup label="Épargne">
+                    {savingsCategoryItems.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             ) : (
               <input
@@ -1565,11 +1587,24 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               className="edit-select"
                             >
                               <option value="">-</option>
-                              {paymentMethods.map((method) => (
-                                <option key={method.id} value={method.name}>
-                                  {formatWithInstitution(method.name, method.institution)}
-                                </option>
-                              ))}
+                              {paymentMethods
+                                .filter((m) => !m.isSavingsAccount)
+                                .map((method) => (
+                                  <option key={method.id} value={method.name}>
+                                    {formatWithInstitution(method.name, method.institution)}
+                                  </option>
+                                ))}
+                              {paymentMethods.some((m) => m.isSavingsAccount) && (
+                                <optgroup label="Comptes d'épargne">
+                                  {paymentMethods
+                                    .filter((m) => m.isSavingsAccount)
+                                    .map((method) => (
+                                      <option key={method.id} value={method.name}>
+                                        {formatWithInstitution(method.name, method.institution)}
+                                      </option>
+                                    ))}
+                                </optgroup>
+                              )}
                             </select>
                           </td>
                           <td>
@@ -1593,6 +1628,15 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                   </option>
                                 ))}
                               </optgroup>
+                              {savingsCategoryItems.length > 0 && (
+                                <optgroup label="Épargne">
+                                  {savingsCategoryItems.map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
                             </select>
                           </td>
                           <td>

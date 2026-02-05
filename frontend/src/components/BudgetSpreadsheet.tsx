@@ -74,7 +74,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
 
     // Show budget for future months, else show actual (or 0 if no actual)
     const displayValue = isFutureMonth ? budget : actual;
-    
+
     // Apply variance coloring for actual values, including 0 when there's a budget
     const shouldShowVariance = !isFutureMonth && (hasActual || showZeroWithBudgetHint);
     const varianceClass = shouldShowVariance ? getVarianceClass(budget, actual, moreIsGood) : '';
@@ -83,13 +83,12 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     // Show tooltip for current/past months with actual or budget data
     const showTooltip = !isFutureMonth && (hasActual || showZeroWithBudgetHint) && budget !== 0;
     const tooltip = showTooltip ? buildTooltip(budget, actual, formatCurrency) : '';
-    
+
     // Show budget hint below when:
     // 1. Setting is enabled and has actual with budget, OR
     // 2. Current/past month with no actual but has budget
-    const showBudgetBelow = 
-      (showBudgetBelowActual && hasActual && !isFutureMonth && budget !== 0) || 
-      showZeroWithBudgetHint;
+    const showBudgetBelow =
+      (showBudgetBelowActual && hasActual && !isFutureMonth && budget !== 0) || showZeroWithBudgetHint;
 
     // Show 0 instead of dash only when there's a budget but no actual
     const showZeroValue = showZeroWithBudgetHint;
@@ -312,10 +311,10 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                 const isFuture = i > maxActualMonth;
                 const value = isFuture ? m.budget : m.actual;
                 const expectedValue = fundsSummary.expectedEndOfMonth[i];
-                
+
                 // Show expected hint for any month with actual data where expected differs from actual
                 const showExpectedHint = !isFuture && expectedValue !== value;
-                
+
                 return (
                   <td
                     key={i}
@@ -356,9 +355,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                     </td>
                     <td className="cell budget">{formatCurrency(sectionTotals.annual.budget, true)}</td>
                     <td className="cell actual">{formatCurrency(sectionTotals.annual.actual, true)}</td>
-                    {sectionTotals.months.map((m, i) =>
-                      renderMonthCell(m.budget, m.actual, i, moreIsGood, i)
-                    )}
+                    {sectionTotals.months.map((m, i) => renderMonthCell(m.budget, m.actual, i, moreIsGood, i))}
                   </tr>
 
                   {/* Groups and Items */}
@@ -377,9 +374,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                             </td>
                             <td className="cell budget">{formatCurrency(groupTotals.annual.budget, true)}</td>
                             <td className="cell actual">{formatCurrency(groupTotals.annual.actual, true)}</td>
-                            {groupTotals.months.map((m, i) =>
-                              renderMonthCell(m.budget, m.actual, i, moreIsGood, i)
-                            )}
+                            {groupTotals.months.map((m, i) => renderMonthCell(m.budget, m.actual, i, moreIsGood, i))}
                           </tr>
 
                           {/* Item Rows */}
@@ -407,9 +402,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                                   <td className={`cell actual ${actualColorClass}`}>
                                     {formatCurrency(monthlyTotal.actual)}
                                   </td>
-                                  {item.months.map((m, i) =>
-                                    renderMonthCell(m.budget, m.actual, i, moreIsGood, i)
-                                  )}
+                                  {item.months.map((m, i) => renderMonthCell(m.budget, m.actual, i, moreIsGood, i))}
                                 </tr>
                               );
                             })}

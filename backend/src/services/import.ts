@@ -638,9 +638,11 @@ export function extractTransactionsFromText(text: string): ParsedTransaction[] {
 }
 
 // Parse PDF buffer and extract transactions
+// If skipSuggestions is true, skip category matching (for AI-only classification)
 export async function parsePdfAndExtract(
   buffer: Buffer,
-  yearId?: number | null
+  yearId?: number | null,
+  skipSuggestions: boolean = false
 ): Promise<{
   transactions: ParsedTransaction[];
   totalFound: number;
@@ -655,6 +657,20 @@ export async function parsePdfAndExtract(
   const text = textResult.text || '';
 
   const parsedTransactions = extractTransactionsFromText(text);
+
+  // Skip category suggestions if requested (for AI-only mode)
+  if (skipSuggestions) {
+    return {
+      transactions: parsedTransactions.map((t) => ({
+        ...t,
+        suggestedItemId: null,
+        suggestedItemName: undefined,
+        suggestedGroupName: undefined,
+      })),
+      totalFound: parsedTransactions.length,
+      rawTextSample: text.substring(0, 500),
+    };
+  }
 
   // Get items for category matching
   let items: ItemForMatching[] = [];

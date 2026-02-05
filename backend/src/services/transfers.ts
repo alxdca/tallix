@@ -63,7 +63,12 @@ export async function getTransfersForYear(year: number): Promise<Transfer[]> {
   const accountMap = new Map<number, { name: string; institution: string | null; isSavingsAccount: boolean }>();
   if (accountIds.size > 0) {
     const pmRecords = await db
-      .select({ id: paymentMethods.id, name: paymentMethods.name, institution: paymentMethods.institution, isSavingsAccount: paymentMethods.isSavingsAccount })
+      .select({
+        id: paymentMethods.id,
+        name: paymentMethods.name,
+        institution: paymentMethods.institution,
+        isSavingsAccount: paymentMethods.isSavingsAccount,
+      })
       .from(paymentMethods)
       .where(sql`${paymentMethods.id} IN ${[...accountIds]}`);
 
