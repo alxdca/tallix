@@ -1,8 +1,8 @@
-import { Router } from 'express';
+import { type Router as RouterType, Router } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import * as transfersSvc from '../services/transfers.js';
 
-const router = Router();
+const router: RouterType = Router();
 
 // Get all transfers for a year
 router.get(

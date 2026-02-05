@@ -1,9 +1,9 @@
-import { Router } from 'express';
+import { type Router as RouterType, Router } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import * as accountsSvc from '../services/accounts.js';
 import { isValidAccountType } from '../types/accounts.js';
 
-const router = Router();
+const router: RouterType = Router();
 
 // GET /api/accounts/:year - Get all accounts with balances for a year
 router.get(
