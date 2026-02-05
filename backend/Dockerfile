@@ -32,19 +32,20 @@ WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY backend/package.json ./backend/
 
-# Install production dependencies only
-RUN pnpm install --frozen-lockfile --prod
+# Install all dependencies (need drizzle-kit for migrations)
+RUN pnpm install --frozen-lockfile
 
 # Copy built files
 COPY --from=builder /app/backend/dist ./backend/dist
 
-# Copy drizzle migrations and config
+# Copy drizzle migrations, config, and schema source (needed for drizzle-kit)
 COPY backend/drizzle ./backend/drizzle
 COPY backend/drizzle.config.ts ./backend/
+COPY backend/src/db ./backend/src/db
 
 WORKDIR /app/backend
 
 EXPOSE 3001
 
 # Run migrations and start the server
-CMD ["sh", "-c", "node dist/index.js"]
+CMD ["sh", "-c", "pnpm db:push && node dist/index.js"]
