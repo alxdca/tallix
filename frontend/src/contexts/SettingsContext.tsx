@@ -6,8 +6,10 @@ export type DecimalSeparator = '.' | ',';
 interface SettingsContextType {
   theme: Theme;
   decimalSeparator: DecimalSeparator;
+  showBudgetBelowActual: boolean;
   setTheme: (theme: Theme) => void;
   setDecimalSeparator: (separator: DecimalSeparator) => void;
+  setShowBudgetBelowActual: (show: boolean) => void;
   toggleTheme: () => void;
 }
 
@@ -16,6 +18,7 @@ const SettingsContext = createContext<SettingsContextType | null>(null);
 const STORAGE_KEYS = {
   theme: 'theme',
   decimalSeparator: 'decimalSeparator',
+  showBudgetBelowActual: 'showBudgetBelowActual',
 } as const;
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
@@ -29,6 +32,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return (saved as DecimalSeparator) || '.';
   });
 
+  const [showBudgetBelowActual, setShowBudgetBelowActualState] = useState<boolean>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.showBudgetBelowActual);
+    return saved === 'true';
+  });
+
   // Apply theme to document
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -40,12 +48,21 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(STORAGE_KEYS.decimalSeparator, decimalSeparator);
   }, [decimalSeparator]);
 
+  // Save showBudgetBelowActual
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.showBudgetBelowActual, String(showBudgetBelowActual));
+  }, [showBudgetBelowActual]);
+
   const setTheme = useCallback((newTheme: Theme) => {
     setThemeState(newTheme);
   }, []);
 
   const setDecimalSeparator = useCallback((separator: DecimalSeparator) => {
     setDecimalSeparatorState(separator);
+  }, []);
+
+  const setShowBudgetBelowActual = useCallback((show: boolean) => {
+    setShowBudgetBelowActualState(show);
   }, []);
 
   const toggleTheme = useCallback(() => {
@@ -57,8 +74,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       value={{
         theme,
         decimalSeparator,
+        showBudgetBelowActual,
         setTheme,
         setDecimalSeparator,
+        setShowBudgetBelowActual,
         toggleTheme,
       }}
     >

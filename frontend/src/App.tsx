@@ -124,6 +124,9 @@ function AppContent() {
             <Header
               year={currentYear}
               initialBalance={summary?.initialBalance || 0}
+              totalIncome={summary?.totalIncome || { budget: 0, actual: 0 }}
+              totalExpenses={summary?.totalExpenses || { budget: 0, actual: 0 }}
+              totalSavings={summary?.totalSavings || { budget: 0, actual: 0 }}
               remainingBalance={summary?.remainingBalance || 0}
             />
             <div className="content-body">

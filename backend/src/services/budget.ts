@@ -1,6 +1,16 @@
 import Decimal from 'decimal.js';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { budgetGroups, budgetItems, budgetYears, db, monthlyValues, transactions, transfers } from '../db/index.js';
+import {
+  accountBalances,
+  budgetGroups,
+  budgetItems,
+  budgetYears,
+  db,
+  monthlyValues,
+  paymentMethods,
+  transactions,
+  transfers,
+} from '../db/index.js';
 import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, BudgetSummary, MonthlyValue } from '../types.js';
 
 // Configure Decimal.js for financial calculations
@@ -239,18 +249,118 @@ export async function getBudgetDataForYear(year: number): Promise<BudgetData> {
   };
 }
 
+// Calculate projected end of year balance matching frontend's December budget calculation
+// This uses: cumulative actual up to current month + budget for remaining months + remaining yearly budgets
+function calculateProjectedEndOfYear(
+  groups: BudgetGroup[],
+  initialBalance: number
+): number {
+  const currentMonth = new Date().getMonth(); // 0-indexed (0 = January)
+  const maxActualMonth = currentMonth + 1; // Frontend shows actual up to currentMonth + 1
+
+  // Calculate cumulative actual balance (matches frontend's cumulativeActual)
+  let cumulativeActual = initialBalance;
+
+  // Calculate section totals
+  const sectionTotals = {
+    income: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
+    expense: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
+    savings: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
+  };
+
+  // Track remaining yearly budget per section (only for items WITH yearly budgets)
+  let incomeRemainingYearly = 0;
+  let expenseRemainingYearly = 0;
+  let savingsRemainingYearly = 0;
+
+  for (const group of groups) {
+    const section = sectionTotals[group.type as keyof typeof sectionTotals];
+    if (!section) continue;
+
+    for (const item of group.items) {
+      for (let i = 0; i < 12; i++) {
+        const monthData = item.months[i];
+        section.monthlyBudgets[i] += monthData?.budget || 0;
+        section.monthlyActuals[i] += monthData?.actual || 0;
+      }
+
+      // Only calculate remaining yearly for items that HAVE a yearly budget
+      // (matches frontend logic which skips items with yearlyBudget === 0)
+      const yearlyBudget = item.yearlyBudget || 0;
+      if (yearlyBudget > 0) {
+        const actualSpent = item.months.reduce((sum, m) => sum + (m?.actual || 0), 0);
+        const remaining = yearlyBudget - actualSpent;
+
+        if (group.type === 'income') {
+          incomeRemainingYearly += remaining;
+        } else if (group.type === 'expense') {
+          expenseRemainingYearly += remaining;
+        } else if (group.type === 'savings') {
+          savingsRemainingYearly += remaining;
+        }
+      }
+    }
+  }
+
+  // Calculate cumulative actual through maxActualMonth
+  for (let i = 0; i <= Math.min(maxActualMonth, 11); i++) {
+    cumulativeActual +=
+      sectionTotals.income.monthlyActuals[i] -
+      sectionTotals.expense.monthlyActuals[i] -
+      sectionTotals.savings.monthlyActuals[i];
+  }
+
+  // Use cumulative actual as starting point, then add budget for remaining months
+  let projectedEnd = cumulativeActual;
+
+  // Add budget cash flow for months after maxActualMonth
+  for (let i = maxActualMonth + 1; i < 12; i++) {
+    projectedEnd +=
+      sectionTotals.income.monthlyBudgets[i] -
+      sectionTotals.expense.monthlyBudgets[i] -
+      sectionTotals.savings.monthlyBudgets[i];
+  }
+
+  // Add remaining yearly budgets (matches frontend's December calculation)
+  projectedEnd += incomeRemainingYearly - expenseRemainingYearly - savingsRemainingYearly;
+
+  return projectedEnd;
+}
+
 // Get budget summary for a year
 export async function getBudgetSummary(year: number): Promise<BudgetSummary> {
   const data = await getBudgetDataForYear(year);
   const { income, expenses, savings } = calculateTotals(data.groups);
 
-  // Remaining = Initial + Income - Expenses - Savings
+  // Calculate initial balance from payment method accounts
+  // Get all payment methods that are marked as accounts
+  const paymentMethodAccounts = await db
+    .select({ id: paymentMethods.id })
+    .from(paymentMethods)
+    .where(eq(paymentMethods.isAccount, true));
+
+  const paymentMethodIds = new Set(paymentMethodAccounts.map((pm) => pm.id));
+
+  // Get all initial balances for this year
+  const allBalances = await db
+    .select()
+    .from(accountBalances)
+    .where(eq(accountBalances.yearId, data.yearId));
+
+  // Sum up balances for payment method accounts only
+  const initialBalance = allBalances
+    .filter((b) => b.accountType === 'payment_method' && paymentMethodIds.has(b.accountId))
+    .reduce((sum, b) => sum + parseFloat(b.initialBalance), 0);
+
+  // Calculate projected end of year (matches frontend's December budget calculation)
+  const remainingBalance = calculateProjectedEndOfYear(data.groups, initialBalance);
+
   return {
-    initialBalance: data.initialBalance,
+    initialBalance,
     totalIncome: income,
     totalExpenses: expenses,
     totalSavings: savings,
-    remainingBalance: data.initialBalance + income.actual - expenses.actual - savings.actual,
+    remainingBalance,
   };
 }
 

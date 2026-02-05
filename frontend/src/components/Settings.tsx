@@ -41,7 +41,8 @@ function slugify(text: string): string {
 type SettingsTab = 'categories' | 'accounts' | 'preferences';
 
 export default function Settings({ yearId, groups, onDataChanged }: SettingsProps) {
-  const { theme, decimalSeparator, toggleTheme, setDecimalSeparator } = useSettings();
+  const { theme, decimalSeparator, showBudgetBelowActual, toggleTheme, setDecimalSeparator, setShowBudgetBelowActual } =
+    useSettings();
   const [activeTab, setActiveTab] = useState<SettingsTab>('categories');
   const [editingGroup, setEditingGroup] = useState<number | null>(null);
   const [editingItem, setEditingItem] = useState<number | null>(null);
@@ -1070,6 +1071,17 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
               Virgule (1'234,56)
             </button>
           </div>
+        </div>
+        <div className="setting-row">
+          <span className="setting-label">Afficher le budget sous le réel</span>
+          <label className="setting-toggle">
+            <input
+              type="checkbox"
+              checked={showBudgetBelowActual}
+              onChange={(e) => setShowBudgetBelowActual(e.target.checked)}
+            />
+            <span className="toggle-slider"></span>
+          </label>
         </div>
       </div>
     </div>

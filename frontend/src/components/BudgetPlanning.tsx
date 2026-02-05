@@ -268,6 +268,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
             <thead>
               <tr>
                 <th className="col-category sticky-col">Catégorie</th>
+                <th className="col-actions">Actions</th>
                 <th className="col-annual">Total Annuel</th>
                 <th className="col-yearly">Variable</th>
                 <th className="col-remaining">Restant</th>
@@ -276,7 +277,6 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                     {month.slice(0, 3)}
                   </th>
                 ))}
-                <th className="col-actions">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -300,6 +300,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                         <span className={`chevron ${!isExpanded ? 'collapsed' : ''}`}>▼</span>
                         {section.name}
                       </td>
+                      <td className="actions-cell"></td>
                       <td className="annual-total">{formatCurrency(sectionGrandTotal, true)}</td>
                       <td className="yearly-budget-total">{formatCurrency(sectionYearlyBudget)}</td>
                       <td className="remaining-budget-total">{formatCurrency(sectionRemainingBudget)}</td>
@@ -308,7 +309,6 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                           {formatCurrency(total)}
                         </td>
                       ))}
-                      <td className="actions-cell"></td>
                     </tr>
 
                     {/* Groups and Items */}
@@ -342,6 +342,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                                 <span className={`chevron ${!isGroupExpanded ? 'collapsed' : ''}`}>▼</span>
                                 {group.name}
                               </td>
+                              <td className="actions-cell"></td>
                               <td className="annual-total group-total">{formatCurrency(groupGrandTotal, true)}</td>
                               <td className="yearly-budget-total group-total">{formatCurrency(groupYearlyBudget)}</td>
                               <td className="remaining-budget-total group-total">
@@ -352,7 +353,6 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                                   {formatCurrency(total)}
                                 </td>
                               ))}
-                              <td className="actions-cell"></td>
                             </tr>
 
                             {/* Items */}
@@ -384,6 +384,41 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                                 return (
                                   <tr key={item.id} className="item-row">
                                     <td className="category-cell sticky-col item-name">{item.name}</td>
+                                    <td className="actions-cell">
+                                      {isQuickFilling ? (
+                                        <div className="quick-fill-inline">
+                                          <button
+                                            className="btn-icon cancel"
+                                            onClick={() => setQuickFillItemId(null)}
+                                            title="Annuler"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          className="btn-icon quick-fill"
+                                          onClick={() => {
+                                            setQuickFillItemId(item.id);
+                                            // Pre-fill with current first non-zero value or empty
+                                            const firstNonZero = item.months.find((m) => m.budget > 0);
+                                            setQuickFillValue(firstNonZero ? firstNonZero.budget.toString() : '');
+                                          }}
+                                          title="Remplissage rapide"
+                                        >
+                                          <svg
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                          >
+                                            <path d="M12 5v14M5 12h14" />
+                                          </svg>
+                                        </button>
+                                      )}
+                                    </td>
                                     <td className="annual-total item-total">{formatCurrency(itemGrandTotal)}</td>
                                     <td className="yearly-budget-cell">
                                       {isEditingYearly ? (
@@ -443,41 +478,6 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                                         </td>
                                       );
                                     })}
-                                    <td className="actions-cell">
-                                      {isQuickFilling ? (
-                                        <div className="quick-fill-inline">
-                                          <button
-                                            className="btn-icon cancel"
-                                            onClick={() => setQuickFillItemId(null)}
-                                            title="Annuler"
-                                          >
-                                            ✕
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <button
-                                          className="btn-icon quick-fill"
-                                          onClick={() => {
-                                            setQuickFillItemId(item.id);
-                                            // Pre-fill with current first non-zero value or empty
-                                            const firstNonZero = item.months.find((m) => m.budget > 0);
-                                            setQuickFillValue(firstNonZero ? firstNonZero.budget.toString() : '');
-                                          }}
-                                          title="Remplissage rapide"
-                                        >
-                                          <svg
-                                            width="16"
-                                            height="16"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                          >
-                                            <path d="M12 5v14M5 12h14" />
-                                          </svg>
-                                        </button>
-                                      )}
-                                    </td>
                                   </tr>
                                 );
                               })}

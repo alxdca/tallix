@@ -1,7 +1,22 @@
+import {
+  CategoryScale,
+  Chart as ChartJS,
+  Filler,
+  Legend,
+  LineElement,
+  LinearScale,
+  PointElement,
+  Title,
+  Tooltip,
+} from 'chart.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Line } from 'react-chartjs-2';
 import { type Account, fetchAccounts, setAccountBalance } from '../api';
 import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import { logger } from '../utils/logger';
+
+// Register Chart.js components
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
 interface AccountsProps {
   year: number;
@@ -14,6 +29,8 @@ interface AccountTotals {
   monthlyBalances: number[];
   monthlyMovements: number[];
 }
+
+type AccountsTab = 'table' | 'chart';
 
 function calculateMonthlyMovements(initialBalance: number, monthlyBalances: number[]): number[] {
   return monthlyBalances.map((balance, i) => {
@@ -38,6 +55,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
   const [editingBalance, setEditingBalance] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState<AccountsTab>('table');
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -94,6 +112,112 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
   const paymentTotals = useMemo(() => calculateTotals(paymentAccounts), [paymentAccounts]);
   const savingsTotals = useMemo(() => calculateTotals(savingsAccounts), [savingsAccounts]);
   const overallTotals = useMemo(() => calculateTotals(accounts), [accounts]);
+
+  // Chart colors
+  const chartColors = [
+    { border: 'rgb(59, 130, 246)', background: 'rgba(59, 130, 246, 0.1)' }, // Blue
+    { border: 'rgb(16, 185, 129)', background: 'rgba(16, 185, 129, 0.1)' }, // Green
+    { border: 'rgb(139, 92, 246)', background: 'rgba(139, 92, 246, 0.1)' }, // Purple
+    { border: 'rgb(245, 158, 11)', background: 'rgba(245, 158, 11, 0.1)' }, // Orange
+    { border: 'rgb(236, 72, 153)', background: 'rgba(236, 72, 153, 0.1)' }, // Pink
+    { border: 'rgb(20, 184, 166)', background: 'rgba(20, 184, 166, 0.1)' }, // Teal
+  ];
+
+  const chartData = useMemo(() => {
+    const labels = ['Initial', ...months.map((m) => m.substring(0, 3))];
+
+    const datasets = accounts.map((account, index) => {
+      const color = chartColors[index % chartColors.length];
+      return {
+        label: account.name,
+        data: [account.initialBalance, ...account.monthlyBalances],
+        borderColor: color.border,
+        backgroundColor: color.background,
+        fill: false,
+        tension: 0.3,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+      };
+    });
+
+    // Add total line
+    if (accounts.length > 1) {
+      const totalData = [overallTotals.initialBalance, ...overallTotals.monthlyBalances];
+      datasets.push({
+        label: 'Total',
+        data: totalData,
+        borderColor: 'rgb(255, 255, 255)',
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        fill: false,
+        tension: 0.3,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+      });
+    }
+
+    return { labels, datasets };
+  }, [accounts, months, overallTotals]);
+
+  const chartOptions = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index' as const,
+        intersect: false,
+      },
+      plugins: {
+        legend: {
+          position: 'top' as const,
+          labels: {
+            color: 'rgb(148, 163, 184)',
+            usePointStyle: true,
+            padding: 20,
+          },
+        },
+        tooltip: {
+          backgroundColor: 'rgba(17, 24, 39, 0.95)',
+          titleColor: 'rgb(241, 245, 249)',
+          bodyColor: 'rgb(148, 163, 184)',
+          borderColor: 'rgb(45, 58, 82)',
+          borderWidth: 1,
+          padding: 12,
+          callbacks: {
+            label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => {
+              const label = context.dataset.label || '';
+              const value = context.parsed.y;
+              return `${label}: ${formatCurrency(value ?? 0, true)} CHF`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: {
+            color: 'rgba(45, 58, 82, 0.5)',
+          },
+          ticks: {
+            color: 'rgb(148, 163, 184)',
+          },
+        },
+        y: {
+          grid: {
+            color: 'rgba(45, 58, 82, 0.5)',
+          },
+          ticks: {
+            color: 'rgb(148, 163, 184)',
+            callback: (value: number | string) => {
+              if (typeof value === 'number') {
+                return formatCurrency(value, true);
+              }
+              return value;
+            },
+          },
+        },
+      },
+    }),
+    [formatCurrency]
+  );
 
   if (loading) {
     return (
@@ -311,11 +435,61 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
     );
   };
 
+  const renderChartView = () => (
+    <div className="accounts-chart-container">
+      <div className="accounts-chart">
+        <Line data={chartData} options={chartOptions} />
+      </div>
+    </div>
+  );
+
+  const renderTableView = () => (
+    <>
+      {renderAccountTable(paymentAccounts, 'Comptes de paiement', paymentTotals)}
+      {renderAccountTable(savingsAccounts, "Comptes d'épargne", savingsTotals)}
+      {renderOverallTotal()}
+    </>
+  );
+
   return (
     <div className="accounts-view">
       <div className="accounts-header">
-        <h2>Comptes - {year}</h2>
-        <p className="accounts-subtitle">Solde attendu à la fin de chaque mois</p>
+        <div className="accounts-header-top">
+          <div>
+            <h2>Comptes - {year}</h2>
+            <p className="accounts-subtitle">Solde attendu à la fin de chaque mois</p>
+          </div>
+        </div>
+
+        {accounts.length > 0 && (
+          <div className="accounts-tabs">
+            <button
+              type="button"
+              className={`accounts-tab ${activeTab === 'table' ? 'active' : ''}`}
+              onClick={() => setActiveTab('table')}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <line x1="3" y1="9" x2="21" y2="9" />
+                <line x1="3" y1="15" x2="21" y2="15" />
+                <line x1="9" y1="3" x2="9" y2="21" />
+              </svg>
+              Tableau
+            </button>
+            <button
+              type="button"
+              className={`accounts-tab ${activeTab === 'chart' ? 'active' : ''}`}
+              onClick={() => setActiveTab('chart')}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="20" x2="18" y2="10" />
+                <line x1="12" y1="20" x2="12" y2="4" />
+                <line x1="6" y1="20" x2="6" y2="14" />
+              </svg>
+              Graphique
+            </button>
+          </div>
+        )}
       </div>
 
       {accounts.length === 0 ? (
@@ -339,9 +513,8 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
         </div>
       ) : (
         <>
-          {renderAccountTable(paymentAccounts, 'Comptes de paiement', paymentTotals)}
-          {renderAccountTable(savingsAccounts, "Comptes d'épargne", savingsTotals)}
-          {renderOverallTotal()}
+          {activeTab === 'table' && renderTableView()}
+          {activeTab === 'chart' && renderChartView()}
         </>
       )}
     </div>

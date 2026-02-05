@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useSettings } from '../contexts/SettingsContext';
 import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import type { BudgetSection, MonthlyValue } from '../types';
 import { calculateAnnualTotals, calculateGroupTotals, calculateSectionTotals } from '../utils';
@@ -12,10 +13,42 @@ interface BudgetSpreadsheetProps {
 interface FundsSummary {
   startOfMonth: MonthlyValue[]; // Funds at start of each month (index 0 = Jan)
   endOfMonth: MonthlyValue[]; // Funds at end of each month
+  expectedEndOfMonth: number[]; // Expected end of month using max(budget, actual) for current month
+}
+
+// Determine variance class based on budget vs actual
+function getVarianceClass(budget: number, actual: number, moreIsGood: boolean): string {
+  if (budget === 0) return '';
+
+  const variance = actual - budget;
+  const variancePercent = Math.abs(variance / budget) * 100;
+
+  // For income/savings: over is good, under is bad
+  // For expenses: under is good, over is bad
+  if (moreIsGood) {
+    if (variance > 0 && variancePercent >= 5) return 'variance-positive';
+    if (variance < 0 && variancePercent >= 5) return 'variance-negative';
+  } else {
+    if (variance < 0 && variancePercent >= 5) return 'variance-positive';
+    if (variance > 0 && variancePercent >= 5) return 'variance-negative';
+  }
+  return '';
+}
+
+// Build tooltip content
+function buildTooltip(budget: number, actual: number, formatCurrency: (v: number, s?: boolean) => string): string {
+  if (actual === 0 && budget === 0) return '';
+
+  const variance = actual - budget;
+  const variancePercent = budget !== 0 ? ((variance / budget) * 100).toFixed(0) : '0';
+  const sign = variance > 0 ? '+' : '';
+
+  return `Budget: ${formatCurrency(budget, true)}\nRéel: ${formatCurrency(actual, true)}\nÉcart: ${sign}${formatCurrency(variance, true)} (${sign}${variancePercent}%)`;
 }
 
 export default function BudgetSpreadsheet({ sections, months, paymentAccountsInitialBalance }: BudgetSpreadsheetProps) {
   const formatCurrency = useFormatCurrency();
+  const { showBudgetBelowActual } = useSettings();
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(new Set());
 
@@ -23,6 +56,57 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
   const currentMonth = new Date().getMonth();
   // Show actual values up to current month + 1 (so if in Jan, show Jan and Feb)
   const maxActualMonth = currentMonth + 1; // 0-indexed, so currentMonth + 1 means up to next month
+
+  // Render a single cell with either budget or actual, with variance coloring
+  const renderMonthCell = (
+    budget: number,
+    actual: number,
+    monthIndex: number,
+    moreIsGood: boolean,
+    key: number | string
+  ) => {
+    const hasActual = actual !== 0;
+    const isFutureMonth = monthIndex > maxActualMonth;
+    const isCurrentOrPastMonth = !isFutureMonth;
+
+    // For current/past months with no actual but has budget: show 0 as actual with budget hint
+    const showZeroWithBudgetHint = isCurrentOrPastMonth && !hasActual && budget !== 0;
+
+    // Show budget for future months, else show actual (or 0 if no actual)
+    const displayValue = isFutureMonth ? budget : actual;
+    
+    // Apply variance coloring for actual values, including 0 when there's a budget
+    const shouldShowVariance = !isFutureMonth && (hasActual || showZeroWithBudgetHint);
+    const varianceClass = shouldShowVariance ? getVarianceClass(budget, actual, moreIsGood) : '';
+    const isBudgetValue = isFutureMonth;
+
+    // Show tooltip for current/past months with actual or budget data
+    const showTooltip = !isFutureMonth && (hasActual || showZeroWithBudgetHint) && budget !== 0;
+    const tooltip = showTooltip ? buildTooltip(budget, actual, formatCurrency) : '';
+    
+    // Show budget hint below when:
+    // 1. Setting is enabled and has actual with budget, OR
+    // 2. Current/past month with no actual but has budget
+    const showBudgetBelow = 
+      (showBudgetBelowActual && hasActual && !isFutureMonth && budget !== 0) || 
+      showZeroWithBudgetHint;
+
+    // Show 0 instead of dash only when there's a budget but no actual
+    const showZeroValue = showZeroWithBudgetHint;
+
+    return (
+      <td
+        key={key}
+        className={`cell ${isBudgetValue ? 'budget-value' : 'actual-value'} ${varianceClass} ${tooltip ? 'has-tooltip' : ''}`}
+        data-tooltip={tooltip || undefined}
+      >
+        <div className="cell-content">
+          <span className="cell-main-value">{formatCurrency(displayValue, showZeroValue)}</span>
+          {showBudgetBelow && <span className="cell-budget-hint">→ {formatCurrency(budget)}</span>}
+        </div>
+      </td>
+    );
+  };
 
   // Calculate funds summary (payment accounts only, excluding savings)
   const fundsSummary = useMemo((): FundsSummary => {
@@ -58,8 +142,27 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     const expenseRemainingYearlyBudget = calculateRemainingYearlyBudget(expenseSection);
     const savingsRemainingYearlyBudget = calculateRemainingYearlyBudget(savingsSection);
 
+    // Calculate expected totals for projection
+    // If category has actual spending, use actual. Otherwise use budget.
+    const calculateExpectedSectionTotal = (section: typeof incomeSection, monthIndex: number) => {
+      if (!section) return 0;
+      return section.groups.reduce(
+        (total, group) =>
+          total +
+          group.items.reduce((itemTotal, item) => {
+            const budget = item.months[monthIndex]?.budget || 0;
+            const actual = item.months[monthIndex]?.actual || 0;
+            // If there's actual data, use it. Otherwise fall back to budget.
+            const expected = actual !== 0 ? actual : budget;
+            return itemTotal + expected;
+          }, 0),
+        0
+      );
+    };
+
     const startOfMonth: MonthlyValue[] = [];
     const endOfMonth: MonthlyValue[] = [];
+    const expectedEndOfMonth: number[] = [];
 
     let cumulativeActual = paymentAccountsInitialBalance;
 
@@ -103,9 +206,20 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
         budget: budgetEndOfMonth,
         actual: cumulativeActual,
       });
+
+      // Calculate expected end of month using max(budget, actual) for each category
+      // This gives a realistic projection: if we've underspent, assume we'll spend the budget
+      // If we've overspent, use the actual amount
+      const expectedIncome = calculateExpectedSectionTotal(incomeSection, i);
+      const expectedExpense = calculateExpectedSectionTotal(expenseSection, i);
+      const expectedSavings = calculateExpectedSectionTotal(savingsSection, i);
+
+      // Expected = start of month actual + expected income - expected expenses - expected savings
+      const expected = startOfMonth[i].actual + expectedIncome - expectedExpense - expectedSavings;
+      expectedEndOfMonth.push(expected);
     }
 
-    return { startOfMonth, endOfMonth };
+    return { startOfMonth, endOfMonth, expectedEndOfMonth };
   }, [sections, paymentAccountsInitialBalance, maxActualMonth]);
 
   const toggleSection = (sectionType: string) => {
@@ -148,7 +262,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
   return (
     <div className="spreadsheet-container">
       <div className="spreadsheet-wrapper">
-        <table className="spreadsheet">
+        <table className="spreadsheet single-column">
           <thead>
             <tr>
               <th className="col-category">Catégorie</th>
@@ -156,7 +270,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                 Annuel
               </th>
               {months.map((month) => (
-                <th key={month} className="col-month" colSpan={2}>
+                <th key={month} className="col-month">
                   {month}
                 </th>
               ))}
@@ -165,57 +279,80 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
               <th></th>
               <th className="budget">Budget</th>
               <th className="actual">Réel</th>
-              {months.map((month) => (
-                <React.Fragment key={month}>
-                  <th className="budget">B</th>
-                  <th className="actual">R</th>
-                </React.Fragment>
+              {months.map((month, i) => (
+                <th key={month} className={i <= maxActualMonth ? 'actual' : 'budget'}>
+                  {i <= maxActualMonth ? 'R' : 'B'}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {/* Funds Summary Section */}
             <tr className="funds-summary-header">
-              <td className="category-name" colSpan={3 + months.length * 2}>
+              <td className="category-name" colSpan={3 + months.length}>
                 Fonds Disponibles (Comptes de paiement)
               </td>
             </tr>
             <tr className="funds-summary-row start-of-month">
               <td className="category-name">Début du mois</td>
-              <td className="cell budget">{formatCurrency(paymentAccountsInitialBalance, true)}</td>
-              <td className="cell actual">{formatCurrency(paymentAccountsInitialBalance, true)}</td>
-              {fundsSummary.startOfMonth.map((m, i) => (
-                <React.Fragment key={i}>
-                  <td className={`cell budget ${m.budget < 0 ? 'negative' : ''}`}>{formatCurrency(m.budget, true)}</td>
-                  <td className={`cell actual ${i <= maxActualMonth && m.actual < 0 ? 'negative' : ''}`}>
-                    {i <= maxActualMonth ? formatCurrency(m.actual, true) : '–'}
+              <td className="cell budget">–</td>
+              <td className="cell actual">–</td>
+              {fundsSummary.startOfMonth.map((m, i) => {
+                const isFuture = i > maxActualMonth;
+                const value = isFuture ? m.budget : m.actual;
+                const tooltip = !isFuture ? buildTooltip(m.budget, m.actual, formatCurrency) : '';
+                return (
+                  <td
+                    key={i}
+                    className={`cell ${isFuture ? 'budget-value' : 'actual-value'} ${value < 0 ? 'negative' : ''} ${tooltip ? 'has-tooltip' : ''}`}
+                    data-tooltip={tooltip || undefined}
+                  >
+                    {formatCurrency(value, true)}
                   </td>
-                </React.Fragment>
-              ))}
+                );
+              })}
             </tr>
             <tr className="funds-summary-row end-of-month">
               <td className="category-name">Fin du mois</td>
-              <td className="cell budget">{formatCurrency(fundsSummary.endOfMonth[11]?.budget || 0, true)}</td>
-              <td className="cell actual">
-                {formatCurrency(fundsSummary.endOfMonth[maxActualMonth]?.actual || 0, true)}
-              </td>
-              {fundsSummary.endOfMonth.map((m, i) => (
-                <React.Fragment key={i}>
-                  <td className={`cell budget ${m.budget < 0 ? 'negative' : ''}`}>{formatCurrency(m.budget, true)}</td>
-                  <td className={`cell actual ${i <= maxActualMonth && m.actual < 0 ? 'negative' : ''}`}>
-                    {i <= maxActualMonth ? formatCurrency(m.actual, true) : '–'}
+              <td className="cell budget">–</td>
+              <td className="cell actual">–</td>
+              {fundsSummary.endOfMonth.map((m, i) => {
+                const isFuture = i > maxActualMonth;
+                const value = isFuture ? m.budget : m.actual;
+                const expectedValue = fundsSummary.expectedEndOfMonth[i];
+                
+                // Show expected hint for any month with actual data where expected differs from actual
+                const showExpectedHint = !isFuture && expectedValue !== value;
+                
+                return (
+                  <td
+                    key={i}
+                    className={`cell ${isFuture ? 'budget-value' : 'actual-value'} ${value < 0 ? 'negative' : ''}`}
+                  >
+                    {showExpectedHint ? (
+                      <div className="cell-content">
+                        <span className="cell-main-value">{formatCurrency(value, true)}</span>
+                        <span className="cell-expected-hint" title="Fin de mois estimée">
+                          → {formatCurrency(expectedValue, true)}
+                        </span>
+                      </div>
+                    ) : (
+                      formatCurrency(value, true)
+                    )}
                   </td>
-                </React.Fragment>
-              ))}
+                );
+              })}
             </tr>
             <tr className="funds-summary-spacer">
-              <td colSpan={3 + months.length * 2}></td>
+              <td colSpan={3 + months.length}></td>
             </tr>
 
             {sections.map((section) => {
               const sectionTotals = calculateSectionTotals(section.groups);
               const isCollapsed = collapsedSections.has(section.type);
               const color = getSectionColor(section.type);
+              // For income and savings: more is good. For expenses: less is good.
+              const moreIsGood = section.type === 'income' || section.type === 'savings';
 
               return (
                 <React.Fragment key={section.type}>
@@ -227,12 +364,9 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                     </td>
                     <td className="cell budget">{formatCurrency(sectionTotals.annual.budget, true)}</td>
                     <td className="cell actual">{formatCurrency(sectionTotals.annual.actual, true)}</td>
-                    {sectionTotals.months.map((m, i) => (
-                      <React.Fragment key={i}>
-                        <td className="cell budget">{formatCurrency(m.budget)}</td>
-                        <td className="cell actual">{formatCurrency(m.actual)}</td>
-                      </React.Fragment>
-                    ))}
+                    {sectionTotals.months.map((m, i) =>
+                      renderMonthCell(m.budget, m.actual, i, moreIsGood, i)
+                    )}
                   </tr>
 
                   {/* Groups and Items */}
@@ -251,12 +385,9 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                             </td>
                             <td className="cell budget">{formatCurrency(groupTotals.annual.budget, true)}</td>
                             <td className="cell actual">{formatCurrency(groupTotals.annual.actual, true)}</td>
-                            {groupTotals.months.map((m, i) => (
-                              <React.Fragment key={i}>
-                                <td className="cell budget">{formatCurrency(m.budget)}</td>
-                                <td className="cell actual">{formatCurrency(m.actual)}</td>
-                              </React.Fragment>
-                            ))}
+                            {groupTotals.months.map((m, i) =>
+                              renderMonthCell(m.budget, m.actual, i, moreIsGood, i)
+                            )}
                           </tr>
 
                           {/* Item Rows */}
@@ -284,12 +415,9 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                                   <td className={`cell actual ${actualColorClass}`}>
                                     {formatCurrency(monthlyTotal.actual)}
                                   </td>
-                                  {item.months.map((m, i) => (
-                                    <React.Fragment key={i}>
-                                      <td className="cell budget">{formatCurrency(m.budget)}</td>
-                                      <td className="cell actual">{formatCurrency(m.actual)}</td>
-                                    </React.Fragment>
-                                  ))}
+                                  {item.months.map((m, i) =>
+                                    renderMonthCell(m.budget, m.actual, i, moreIsGood, i)
+                                  )}
                                 </tr>
                               );
                             })}

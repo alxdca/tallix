@@ -389,6 +389,8 @@ input[type="number"]::-webkit-inner-spin-button {
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: 10px;
+  min-height: 58px;
+  justify-content: center;
 }
 
 .balance-card.positive .balance-value {
@@ -397,6 +399,34 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .balance-card.negative .balance-value {
   color: var(--accent-negative);
+}
+
+.balance-card.income .balance-value {
+  color: var(--accent-actual);
+}
+
+.balance-card.expense .balance-value {
+  color: var(--accent-negative);
+}
+
+.balance-card.savings .balance-value {
+  color: var(--accent-budget);
+}
+
+.balance-card.total {
+  border-width: 2px;
+}
+
+.balance-amounts {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.balance-budget {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
 .balance-label {
@@ -1620,6 +1650,54 @@ td.zero {
 
 .setting-btn svg {
   flex-shrink: 0;
+}
+
+.setting-toggle {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.setting-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.setting-toggle .toggle-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 24px;
+  transition: all var(--transition-fast);
+}
+
+.setting-toggle .toggle-slider::before {
+  position: absolute;
+  content: '';
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: all var(--transition-fast);
+}
+
+.setting-toggle input:checked + .toggle-slider {
+  background: var(--accent-budget);
+  border-color: var(--accent-budget);
+}
+
+.setting-toggle input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+  background: white;
 }
 
 /* Payment Methods Section */
@@ -3999,6 +4077,13 @@ td.zero {
   margin-bottom: 24px;
 }
 
+.accounts-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
 .accounts-header h2 {
   font-size: 1.5rem;
   font-weight: 600;
@@ -4010,6 +4095,56 @@ td.zero {
   font-size: 0.875rem;
   color: var(--text-muted);
   margin: 0;
+}
+
+.accounts-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0;
+}
+
+.accounts-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all var(--transition-fast);
+}
+
+.accounts-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.accounts-tab.active {
+  color: var(--accent-budget);
+  border-bottom-color: var(--accent-budget);
+}
+
+.accounts-tab svg {
+  flex-shrink: 0;
+}
+
+.accounts-chart-container {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 24px;
+  margin-top: 24px;
+}
+
+.accounts-chart {
+  height: 500px;
+  position: relative;
 }
 
 .accounts-loading {
@@ -4791,8 +4926,29 @@ td.zero {
   text-align: center;
 }
 
+/* Single column layout */
+.spreadsheet.single-column {
+  table-layout: fixed;
+}
+
+.spreadsheet.single-column thead th.col-category {
+  width: 160px;
+  min-width: 160px;
+  max-width: 160px;
+}
+
+.spreadsheet.single-column thead th.col-annual {
+  width: 140px;
+  min-width: 140px;
+}
+
+.spreadsheet.single-column thead th.col-month {
+  width: 70px;
+  min-width: 70px;
+}
+
 .spreadsheet thead th.budget {
-  color: var(--accent-budget-light);
+  color: var(--accent-warning);
   text-align: center;
   min-width: 65px;
 }
@@ -4814,9 +4970,10 @@ td.zero {
 
 /* Body cells */
 .spreadsheet tbody td {
-  padding: 10px 8px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--border-subtle);
   white-space: nowrap;
+  vertical-align: middle;
 }
 
 .spreadsheet tbody td.category-name {
@@ -4849,6 +5006,100 @@ td.zero {
   color: var(--accent-negative);
 }
 
+/* Single column variance styling */
+.spreadsheet tbody td.cell.budget-value {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.spreadsheet tbody td.cell.actual-value {
+  color: var(--text-secondary);
+}
+
+.spreadsheet tbody td.cell.variance-positive {
+  color: var(--accent-actual);
+  font-weight: 500;
+}
+
+.spreadsheet tbody td.cell.variance-negative {
+  color: var(--accent-negative);
+  font-weight: 500;
+}
+
+/* Single column layout cells */
+.spreadsheet.single-column tbody td.cell {
+  width: 70px;
+  min-width: 70px;
+}
+
+.spreadsheet.single-column tbody td.category-name {
+  width: 160px;
+  min-width: 160px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Cell content with budget hint */
+.spreadsheet tbody td.cell .cell-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.spreadsheet tbody td.cell .cell-main-value {
+  line-height: 1.2;
+}
+
+.spreadsheet tbody td.cell .cell-budget-hint {
+  display: block;
+  font-size: 0.7em;
+  font-style: italic;
+  color: var(--accent-warning);
+  line-height: 1;
+  margin-top: 1px;
+}
+
+/* Custom tooltip styling */
+.spreadsheet tbody td.cell.has-tooltip {
+  cursor: help;
+  position: relative;
+}
+
+.spreadsheet tbody td.cell.has-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-weight: normal;
+  text-transform: none;
+  white-space: pre-line;
+  line-height: 1.5;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-color);
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s ease, visibility 0.1s ease;
+  min-width: 140px;
+  text-align: left;
+}
+
+.spreadsheet tbody td.cell.has-tooltip:hover::after {
+  opacity: 1;
+  visibility: visible;
+}
+
 .spreadsheet tbody td.cell:nth-child(3) {
   border-right: 2px solid var(--border-color);
 }
@@ -4870,7 +5121,7 @@ td.zero {
   letter-spacing: 0.03em;
   color: var(--text-primary);
   border-top: 2px solid var(--border-color);
-  padding: 14px 8px;
+  padding: 8px 8px;
 }
 
 .spreadsheet .section-row td.category-name {
@@ -4932,6 +5183,10 @@ td.zero {
 }
 
 /* Hover effects */
+.spreadsheet tbody tr {
+  height: 44px;
+}
+
 .spreadsheet tbody tr:hover td {
   background: var(--bg-hover);
 }
@@ -4977,7 +5232,7 @@ td.zero {
 }
 
 .spreadsheet .funds-summary-row td {
-  padding: 10px 8px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--border-subtle);
   white-space: nowrap;
   background: var(--bg-secondary);
@@ -5003,10 +5258,19 @@ td.zero {
 }
 
 .spreadsheet .funds-summary-row td.cell.budget {
-  color: var(--accent-budget);
+  color: var(--accent-warning);
 }
 
 .spreadsheet .funds-summary-row td.cell.actual {
+  color: var(--accent-actual);
+}
+
+.spreadsheet .funds-summary-row td.cell.budget-value {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.spreadsheet .funds-summary-row td.cell.actual-value {
   color: var(--accent-actual);
 }
 
@@ -5036,6 +5300,15 @@ td.zero {
 
 .spreadsheet .funds-summary-row.end-of-month td {
   border-bottom: 2px solid var(--border-color);
+}
+
+.cell-expected-hint {
+  display: block;
+  font-size: 0.7em;
+  font-style: italic;
+  color: var(--accent-warning);
+  line-height: 1;
+  margin-top: 1px;
 }
 
 /* Spacing after funds summary */
@@ -5160,6 +5433,7 @@ td.zero {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-secondary);
+  text-align: center;
   border-bottom: 2px solid var(--border-color);
   white-space: nowrap;
   text-align: center;
@@ -5172,29 +5446,26 @@ td.zero {
 }
 
 .budget-planning-table thead th.col-annual {
-  min-width: 100px;
+  min-width: 95px;
   border-right: 1px solid var(--border-subtle);
-  text-align: right;
 }
 
 .budget-planning-table thead th.col-yearly {
-  min-width: 85px;
-  text-align: right;
+  min-width: 95px;
 }
 
 .budget-planning-table thead th.col-remaining {
-  min-width: 85px;
-  text-align: right;
+  min-width: 95px;
   border-right: 2px solid var(--border-color);
 }
 
 .budget-planning-table thead th.col-month {
   min-width: 75px;
-  text-align: right;
 }
 
 .budget-planning-table thead th.col-actions {
   min-width: 60px;
+  border-right: 1px solid var(--border-color);
 }
 
 .budget-planning-table thead th.sticky-col {
@@ -5480,6 +5751,11 @@ td.zero {
 
 /* Actions column */
 .budget-planning-table .actions-cell {
+  border-right: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+.budget-planning-table .item-row .actions-cell {
   text-align: center;
 }
 
