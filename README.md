@@ -2,6 +2,10 @@
 
 A personal budgeting application for tracking income, expenses, savings, and account balances.
 
+Demo: https://www.tallix.org
+
+![Tallix overview](docs/images/overview.png)
+
 ## Features
 
 - **Budget Management** - Organize finances by year with income, expense, and savings categories
