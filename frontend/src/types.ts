@@ -59,5 +59,9 @@ export interface BudgetSummary {
   initialBalance: number;
   totalIncome: AnnualTotals;
   totalExpenses: AnnualTotals;
+  totalSavings: AnnualTotals;
+  expectedIncome: number;
+  expectedExpenses: number;
+  expectedSavings: number;
   remainingBalance: number;
 }

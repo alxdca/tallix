@@ -15,10 +15,10 @@ router.get(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    const accounts = await withTenantContext(userId, budgetId, (tx) =>
+    const result = await withTenantContext(userId, budgetId, (tx) =>
       accountsSvc.getAccountsForYear(tx, year, budgetId, userId)
     );
-    res.json(accounts);
+    res.json(result);
   })
 );
 
@@ -40,29 +40,6 @@ router.put(
     const userId = req.user!.id;
     await withTenantContext(userId, budgetId, (tx) =>
       accountsSvc.setAccountBalance(tx, year, parseInt(paymentMethodId, 10), initialBalance, budgetId, userId)
-    );
-    res.json({ success: true });
-  })
-);
-
-// PUT /api/accounts/payment-method/:id/toggle - Toggle payment method as account
-router.put(
-  '/payment-method/:id/toggle',
-  asyncHandler(async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (Number.isNaN(id)) {
-      throw new AppError(400, 'Invalid payment method ID');
-    }
-
-    const { isAccount } = req.body;
-    if (typeof isAccount !== 'boolean') {
-      throw new AppError(400, 'isAccount must be a boolean');
-    }
-
-    const userId = req.user!.id;
-    const budgetId = req.budget!.id;
-    await withTenantContext(userId, budgetId, (tx) =>
-      accountsSvc.setPaymentMethodAsAccount(tx, id, isAccount, userId)
     );
     res.json({ success: true });
   })

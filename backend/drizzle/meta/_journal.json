@@ -127,6 +127,13 @@
       "when": 1738532400000,
       "tag": "0018_fix_rls_circular_dependency",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1738646400000,
+      "tag": "0019_use_payment_method_id",
+      "breakpoints": true
     }
   ]
 }

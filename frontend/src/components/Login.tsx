@@ -29,13 +29,13 @@ export default function Login() {
         const data = (await response.json()) as { needsSetup: boolean; demoMode: boolean };
         setNeedsSetup(data.needsSetup);
         setDemoMode(data.demoMode);
-        
+
         // Prefill credentials in demo mode
         if (data.demoMode) {
           setEmail('demo@tallix.org');
           setPassword('demo');
         }
-        
+
         if (data.needsSetup) {
           setIsRegister(true);
         }

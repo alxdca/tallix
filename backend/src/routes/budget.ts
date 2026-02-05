@@ -13,7 +13,7 @@ router.get(
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const data = await withTenantContext(userId, budgetId, (tx) =>
-      budget.getBudgetDataForYear(tx, currentYear, budgetId)
+      budget.getBudgetDataForYear(tx, currentYear, budgetId, userId)
     );
     res.json(data);
   })
@@ -30,7 +30,7 @@ router.get(
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const data = await withTenantContext(userId, budgetId, (tx) =>
-      budget.getBudgetDataForYear(tx, year, budgetId)
+      budget.getBudgetDataForYear(tx, year, budgetId, userId)
     );
     res.json(data);
   })

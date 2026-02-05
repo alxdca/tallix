@@ -525,6 +525,11 @@ input[type="number"]::-webkit-inner-spin-button {
 .balance-budget {
   font-family: var(--font-mono);
   font-size: 0.75rem;
+  color: var(--accent-warning);
+}
+
+.balance-divider {
+  font-size: 0.75rem;
   color: var(--text-muted);
 }
 
@@ -5113,8 +5118,8 @@ td.zero {
   position: absolute;
   top: 100%;
   left: 0;
-  right: 0;
-  min-width: 150px;
+  right: auto;
+  min-width: 280px;
   max-height: 250px;
   overflow-y: auto;
   background: var(--bg-secondary);
@@ -5258,9 +5263,9 @@ td.zero {
 }
 
 .spreadsheet.single-column thead th.col-category {
-  width: 160px;
-  min-width: 160px;
-  max-width: 160px;
+  width: 250px;
+  min-width: 250px;
+  max-width: 250px;
 }
 
 .spreadsheet.single-column thead th.col-annual {
@@ -5352,6 +5357,11 @@ td.zero {
   font-weight: 500;
 }
 
+/* Savings section styling - blue color for actual values only */
+.spreadsheet tbody td.cell.section-savings.actual-value {
+  color: #3b82f6;
+}
+
 /* Single column layout cells */
 .spreadsheet.single-column tbody td.cell {
   width: 70px;
@@ -5359,9 +5369,9 @@ td.zero {
 }
 
 .spreadsheet.single-column tbody td.category-name {
-  width: 160px;
-  min-width: 160px;
-  max-width: 160px;
+  width: 250px;
+  min-width: 250px;
+  max-width: 250px;
   overflow: hidden;
   text-overflow: ellipsis;
 }

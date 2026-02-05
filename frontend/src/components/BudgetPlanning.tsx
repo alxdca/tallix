@@ -20,11 +20,12 @@ interface Section {
 // Organize groups into sections
 function organizeSections(
   groups: BudgetGroup[],
-  labels: { income: string; expense: string }
+  labels: { income: string; expense: string; savings: string }
 ): Section[] {
   const sections: Section[] = [
     { type: 'income', name: labels.income, groups: [] },
     { type: 'expense', name: labels.expense, groups: [] },
+    { type: 'savings', name: labels.savings, groups: [] },
   ];
 
   groups.forEach((group) => {
@@ -44,14 +45,14 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   const [editingYearlyBudget, setEditingYearlyBudget] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<Set<GroupType>>(new Set(['income', 'expense']));
+  const [expandedSections, setExpandedSections] = useState<Set<GroupType>>(new Set(['income', 'expense', 'savings']));
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set(groups.map((g) => g.id)));
   const [quickFillItemId, setQuickFillItemId] = useState<number | null>(null);
   const [quickFillValue, setQuickFillValue] = useState('');
   const [quickFillMonths, setQuickFillMonths] = useState<Set<number>>(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
 
   const sections = useMemo(
-    () => organizeSections(groups, { income: t('budget.income'), expense: t('budget.expenses') }),
+    () => organizeSections(groups, { income: t('budget.income'), expense: t('budget.expenses'), savings: t('budget.savings') }),
     [groups, t]
   );
 
@@ -199,6 +200,8 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
         return '#10b981';
       case 'expense':
         return '#ef4444';
+      case 'savings':
+        return '#3b82f6';
       default:
         return '#6b7280';
     }

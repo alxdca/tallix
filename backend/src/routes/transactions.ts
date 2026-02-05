@@ -57,18 +57,18 @@ router.post(
     const userId = req.user!.id;
     const {
       yearId, itemId, date, description, comment, thirdParty,
-      paymentMethod, amount, accountingMonth, accountingYear,
+      paymentMethodId, amount, accountingMonth, accountingYear,
     } = req.body;
 
-    if (!yearId || !date || !paymentMethod || amount === undefined) {
-      throw new AppError(400, 'yearId, date, paymentMethod, and amount are required');
+    if (!yearId || !date || !paymentMethodId || amount === undefined) {
+      throw new AppError(400, 'yearId, date, paymentMethodId, and amount are required');
     }
 
     const budgetId = req.budget!.id;
     const newTransaction = await withTenantContext(userId, budgetId, (tx) =>
       transactionsSvc.createTransaction(tx, userId, budgetId, {
         yearId, itemId, date, description, comment, thirdParty,
-        paymentMethod, amount, accountingMonth, accountingYear,
+        paymentMethodId, amount, accountingMonth, accountingYear,
       })
     );
 
@@ -87,14 +87,14 @@ router.put(
     }
 
     const {
-      itemId, date, description, comment, thirdParty, paymentMethod,
+      itemId, date, description, comment, thirdParty, paymentMethodId,
       amount, accountingMonth, accountingYear, recalculateAccounting,
     } = req.body;
 
     const budgetId = req.budget!.id;
     const updated = await withTenantContext(userId, budgetId, (tx) =>
       transactionsSvc.updateTransaction(tx, userId, budgetId, id, {
-        itemId, date, description, comment, thirdParty, paymentMethod,
+        itemId, date, description, comment, thirdParty, paymentMethodId,
         amount, accountingMonth, accountingYear, recalculateAccounting,
       })
     );

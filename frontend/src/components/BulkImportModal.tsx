@@ -76,7 +76,7 @@ function calculateAccountingPeriod(
 interface EditableTransaction extends ParsedTransaction {
   id: string;
   itemId: number | null;
-  paymentMethod: string;
+  paymentMethodId: number | null;
   // Raw fields from import (before any processing/matching)
   rawDescription: string;
   rawThirdParty: string;
@@ -256,12 +256,6 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
               dateDisplay,
               pm?.settlementDay ?? null
             );
-            // Use full "Name (Institution)" format for payment method to match rest of the app
-            const paymentMethodDisplay = pm
-              ? pm.institution
-                ? `${pm.name} (${pm.institution})`
-                : pm.name
-              : '';
             return {
               id: `import-${index}-${Date.now()}`,
               date: dateDisplay,
@@ -269,7 +263,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
               thirdParty: t.thirdParty || '',
               amount: t.amount,
               itemId: t.categoryId,
-              paymentMethod: paymentMethodDisplay,
+              paymentMethodId: t.paymentMethodId || null,
               rawDescription: t.description,
               rawThirdParty: t.thirdParty || '',
               rawCategory: t.categoryName || '',
@@ -309,7 +303,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
             date: dateDisplay,
             id: `import-${index}-${Date.now()}`,
             itemId: t.suggestedItemId || null,
-            paymentMethod: '',
+            paymentMethodId: null,
             rawDescription: t.description,
             rawThirdParty: t.thirdParty || '',
             rawCategory: '',
@@ -562,12 +556,6 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       // Try to match category and payment method (unless skipMatching for AI-only mode)
       const matchedCategory = skipMatching ? null : findCategory(categoryName);
       const matchedPM = skipMatching ? null : findPaymentMethod(paymentMethodName, methods);
-      // Store full "Name (Institution)" format to preserve uniqueness
-      const matchedPaymentMethod = matchedPM
-        ? matchedPM.institution
-          ? `${matchedPM.name} (${matchedPM.institution})`
-          : matchedPM.name
-        : '';
 
       // Calculate accounting period based on payment method's settlement day
       const { accountingMonth, accountingYear } = calculateAccountingPeriod(date, matchedPM?.settlementDay ?? null);
@@ -582,7 +570,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
         amount: Math.abs(amount), // Store as absolute value, sign determined by isIncome
         thirdParty,
         itemId: matchedCategory?.id ?? null,
-        paymentMethod: matchedPaymentMethod,
+        paymentMethodId: matchedPM?.id ?? null,
         // Keep all raw fields for LLM classification
         rawDescription: description.trim(),
         rawThirdParty: thirdParty,
@@ -717,7 +705,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       amount: 0,
       thirdParty: '',
       itemId: null,
-      paymentMethod: '',
+      paymentMethodId: null,
       rawDescription: '',
       rawThirdParty: '',
       rawCategory: '',
@@ -745,8 +733,8 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
     setTransactions((prev) => prev.map((t) => (t.selected ? { ...t, itemId } : t)));
   };
 
-  const applyPaymentMethodToAll = (paymentMethod: string) => {
-    setTransactions((prev) => prev.map((t) => (t.selected ? { ...t, paymentMethod } : t)));
+  const applyPaymentMethodToAll = (paymentMethodId: number | null) => {
+    setTransactions((prev) => prev.map((t) => (t.selected ? { ...t, paymentMethodId } : t)));
   };
 
   // LLM Classification with parallel batching
@@ -873,13 +861,8 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
           }
 
           if (classification.paymentMethodId) {
-            // Look up payment method by ID
-            const matchedPM = paymentMethods.find((pm) => pm.id === classification.paymentMethodId);
-            if (matchedPM) {
-              // Store full "Name (Institution)" format to preserve uniqueness
-              const fullName = matchedPM.institution ? `${matchedPM.name} (${matchedPM.institution})` : matchedPM.name;
-              updates.paymentMethod = fullName;
-            }
+            // Store payment method ID directly
+            updates.paymentMethodId = classification.paymentMethodId;
           }
 
           if (classification.isIncome !== undefined) {
@@ -911,7 +894,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
   const getMissingFields = (t: EditableTransaction): string[] => {
     const missing: string[] = [];
     if (!t.date || !isValidDateFormat(t.date)) missing.push('date');
-    if (!t.paymentMethod) missing.push('mode');
+    if (!t.paymentMethodId) missing.push('mode');
     if (t.amount === undefined || t.amount === null || t.amount === 0) missing.push('montant');
     return missing;
   };
@@ -968,7 +951,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
             description: t.description?.trim() || undefined,
             comment: t.comment?.trim() || undefined,
             thirdParty: t.thirdParty,
-            paymentMethod: t.paymentMethod,
+            paymentMethodId: t.paymentMethodId!,
             amount: finalAmount,
             itemId: t.itemId!,
             accountingMonth: t.accountingMonth,
@@ -1547,7 +1530,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                     <label>{t('bulkImport.paymentMethod')}</label>
                     <select
                       onChange={(e) => {
-                        applyPaymentMethodToAll(e.target.value);
+                        applyPaymentMethodToAll(e.target.value ? Number(e.target.value) : null);
                         // Don't reset for payment as empty is valid
                       }}
                       className="preview-select"
@@ -1558,7 +1541,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                         .map((m) => {
                           const fullName = m.institution ? `${m.name} (${m.institution})` : m.name;
                           return (
-                            <option key={m.id} value={fullName}>
+                            <option key={m.id} value={m.id}>
                               {fullName}
                             </option>
                           );
@@ -1570,7 +1553,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                             .map((m) => {
                               const fullName = m.institution ? `${m.name} (${m.institution})` : m.name;
                               return (
-                                <option key={m.id} value={fullName}>
+                                <option key={m.id} value={m.id}>
                                   {fullName}
                                 </option>
                               );
@@ -1628,7 +1611,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                               onChange={(e) => {
                                 const newDate = e.target.value;
                                 if (isValidDateFormat(newDate)) {
-                                  const pm = findPaymentMethod(tx.paymentMethod);
+                                  const pm = tx.paymentMethodId ? paymentMethods.find((m) => m.id === tx.paymentMethodId) : null;
                                   const newAccounting = calculateAccountingPeriod(newDate, pm?.settlementDay ?? null);
                                   updateTransaction(tx.id, {
                                     date: newDate,
@@ -1752,12 +1735,13 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                           </td>
                           <td>
                             <select
-                              value={tx.paymentMethod}
+                              value={tx.paymentMethodId ?? ''}
                               onChange={(e) => {
-                                const pm = findPaymentMethod(e.target.value);
+                                const pmId = e.target.value ? Number(e.target.value) : null;
+                                const pm = pmId ? paymentMethods.find((m) => m.id === pmId) : null;
                                 const newAccounting = calculateAccountingPeriod(tx.date, pm?.settlementDay ?? null);
                                 updateTransaction(tx.id, {
-                                  paymentMethod: e.target.value,
+                                  paymentMethodId: pmId,
                                   accountingMonth: newAccounting.accountingMonth,
                                   accountingYear: newAccounting.accountingYear,
                                 });
@@ -1770,7 +1754,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                                 .map((m) => {
                                   const fullName = m.institution ? `${m.name} (${m.institution})` : m.name;
                                   return (
-                                    <option key={m.id} value={fullName}>
+                                    <option key={m.id} value={m.id}>
                                       {fullName}
                                     </option>
                                   );
@@ -1782,7 +1766,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                                     .map((m) => {
                                       const fullName = m.institution ? `${m.name} (${m.institution})` : m.name;
                                       return (
-                                        <option key={m.id} value={fullName}>
+                                        <option key={m.id} value={m.id}>
                                           {fullName}
                                         </option>
                                       );

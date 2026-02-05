@@ -253,7 +253,8 @@ export interface Transaction {
   description: string | null;
   comment: string | null;
   thirdParty: string | null;
-  paymentMethod: string | null;
+  paymentMethodId: number;
+  paymentMethod: string | null; // Display name: "Name (Institution)"
   amount: number;
   itemId: number | null;
   itemName: string | null;
@@ -276,7 +277,7 @@ export async function createTransaction(data: {
   description?: string;
   comment?: string;
   thirdParty?: string;
-  paymentMethod?: string;
+  paymentMethodId: number;
   amount: number;
   accountingMonth?: number;
   accountingYear?: number;
@@ -297,7 +298,7 @@ export async function updateTransaction(
     description?: string;
     comment?: string;
     thirdParty?: string;
-    paymentMethod?: string;
+    paymentMethodId?: number;
     amount?: number;
     accountingMonth?: number;
     accountingYear?: number;
@@ -539,7 +540,12 @@ export interface Account {
   monthlyBalances: number[]; // Expected balance at end of each month (1-12)
 }
 
-export async function fetchAccounts(year: number): Promise<Account[]> {
+export interface AccountsResponse {
+  accounts: Account[];
+  lastActiveMonth: number; // 1-12, the last month with any settled transaction/transfer
+}
+
+export async function fetchAccounts(year: number): Promise<AccountsResponse> {
   const response = await authFetch(`${API_BASE}/accounts/${year}`);
   await ensureOk(response, 'Failed to fetch accounts');
   return response.json();
@@ -551,14 +557,6 @@ export async function setAccountBalance(year: number, paymentMethodId: number, i
     body: JSON.stringify({ paymentMethodId, initialBalance }),
   });
   await ensureOk(response, 'Failed to set account balance');
-}
-
-export async function togglePaymentMethodAccount(id: number, isAccount: boolean): Promise<void> {
-  const response = await authFetch(`${API_BASE}/accounts/payment-method/${id}/toggle`, {
-    method: 'PUT',
-    body: JSON.stringify({ isAccount }),
-  });
-  await ensureOk(response, 'Failed to toggle payment method account');
 }
 
 export async function togglePaymentMethodSavings(id: number, isSavingsAccount: boolean): Promise<void> {

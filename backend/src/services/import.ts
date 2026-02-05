@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { budgetItems, budgetYears } from '../db/schema.js';
+import { budgetItems, budgetYears, paymentMethods } from '../db/schema.js';
 import type { DbClient } from '../db/index.js';
 
 export interface ParsedTransaction {
@@ -471,4 +471,67 @@ export async function parsePdfAndExtract(
     totalFound: transactionsWithSuggestions.length,
     rawTextSample: text.substring(0, 500),
   };
+}
+
+// Convert payment method names to IDs for bulk import
+export async function convertPaymentMethodNamesToIds(
+  tx: DbClient,
+  userId: string,
+  transactionsData: Array<{
+    date: string;
+    description?: string;
+    comment?: string;
+    thirdParty: string;
+    paymentMethod: string;
+    amount: number;
+    itemId?: number | null;
+    accountingMonth?: number;
+    accountingYear?: number;
+  }>
+): Promise<Array<{
+  date: string;
+  description?: string;
+  comment?: string;
+  thirdParty: string;
+  paymentMethodId: number;
+  amount: number;
+  itemId?: number | null;
+  accountingMonth?: number;
+  accountingYear?: number;
+}>> {
+  // Get all user's payment methods
+  const allPaymentMethods = await tx.query.paymentMethods.findMany({
+    where: eq(paymentMethods.userId, userId),
+  });
+
+  // Build a map of name -> ID and "name (institution)" -> ID
+  const nameToIdMap = new Map<string, number>();
+  for (const pm of allPaymentMethods) {
+    // Map exact name
+    nameToIdMap.set(pm.name, pm.id);
+    // Map "Name (Institution)" format
+    if (pm.institution) {
+      nameToIdMap.set(`${pm.name} (${pm.institution})`, pm.id);
+    }
+  }
+
+  // Convert transactions
+  return transactionsData.map((t) => {
+    const pmId = nameToIdMap.get(t.paymentMethod);
+    if (!pmId) {
+      throw new Error(`Payment method "${t.paymentMethod}" not found. Please create it in Settings first.`);
+    }
+    
+    return {
+      date: t.date,
+      description: t.description,
+      comment: t.comment,
+      thirdParty: t.thirdParty,
+      paymentMethodId: pmId,
+      amount: t.amount,
+      itemId: t.itemId,
+      accountingMonth: t.accountingMonth,
+      accountingYear: t.accountingYear,
+    };
+  });
 }

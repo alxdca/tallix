@@ -8,13 +8,14 @@
  * 4. Handle shared budgets correctly
  * 5. Runtime guard on `db` proxy throws without context
  *
- * Run: npx tsx tests/rls-enforcement.test.ts
+ * Run: pnpm test (vitest)
  * Requires: running PostgreSQL with migrations applied
  */
 
 // CRITICAL: Environment variables must be loaded via dotenv-cli before running this test
 // Run with: pnpm test:rls (which uses dotenv-cli)
 
+import { test } from 'vitest';
 import { sql, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
@@ -92,6 +93,8 @@ let budgetBId: number;
 let yearAId: number;
 let groupAId: number;
 let itemAId: number;
+let paymentMethodAId: number;
+let paymentMethodBId: number;
 
 // ---------------------------------------------------------------------------
 // Setup: create fixtures using rawDb (bypasses guard + RLS since we're the db owner)
@@ -144,14 +147,17 @@ async function setup() {
   itemAId = iA.id;
 
   // Payment methods
-  await superuserDb
+  const [pmA] = await superuserDb
     .insert(paymentMethods)
     .values({ userId: userAId, name: 'Card A', sortOrder: 0 })
     .returning();
-  await superuserDb
+  paymentMethodAId = pmA.id;
+
+  const [pmB] = await superuserDb
     .insert(paymentMethods)
     .values({ userId: userBId, name: 'Card B', sortOrder: 0 })
     .returning();
+  paymentMethodBId = pmB.id;
 
   // Create a transaction in budget A
   await superuserDb.insert(transactions).values({
@@ -159,6 +165,7 @@ async function setup() {
     itemId: itemAId,
     date: '2099-01-15',
     amount: '100.00',
+    paymentMethodId: paymentMethodAId,
     paymentMethod: 'Card A',
     accountingMonth: 1,
     accountingYear: 9901,
@@ -176,6 +183,88 @@ async function setup() {
 
 async function teardown() {
   console.log('\n--- Cleaning up test fixtures ---');
+  // Cleanup in dependency order to satisfy FK constraints.
+  await superuserDb.execute(sql`
+    DELETE FROM transactions
+    WHERE year_id IN (
+      SELECT by.id
+      FROM budget_years by
+      JOIN budgets b ON by.budget_id = b.id
+      WHERE b.user_id IN (
+        SELECT id FROM users WHERE email LIKE 'rls-test-%@test.com'
+      )
+    )
+  `);
+
+  await superuserDb.execute(sql`
+    DELETE FROM budget_items
+    WHERE year_id IN (
+      SELECT by.id
+      FROM budget_years by
+      JOIN budgets b ON by.budget_id = b.id
+      WHERE b.user_id IN (
+        SELECT id FROM users WHERE email LIKE 'rls-test-%@test.com'
+      )
+    )
+  `);
+
+  await superuserDb.execute(sql`
+    DELETE FROM budget_groups
+    WHERE budget_id IN (
+      SELECT id FROM budgets WHERE user_id IN (
+        SELECT id FROM users WHERE email LIKE 'rls-test-%@test.com'
+      )
+    )
+  `);
+
+  await superuserDb.execute(sql`
+    DELETE FROM budget_years
+    WHERE budget_id IN (
+      SELECT id FROM budgets WHERE user_id IN (
+        SELECT id FROM users WHERE email LIKE 'rls-test-%@test.com'
+      )
+    )
+  `);
+
+  await superuserDb.execute(sql`
+    DELETE FROM budget_shares
+    WHERE budget_id IN (
+      SELECT id FROM budgets WHERE user_id IN (
+        SELECT id FROM users WHERE email LIKE 'rls-test-%@test.com'
+      )
+    )
+  `);
+
+  await superuserDb.execute(sql`
+    DELETE FROM settings
+    WHERE user_id IN (
+      SELECT id FROM users WHERE email LIKE 'rls-test-%@test.com'
+    )
+  `);
+
+  await superuserDb.execute(sql`
+    DELETE FROM account_balances
+    WHERE payment_method_id IN (
+      SELECT id FROM payment_methods WHERE user_id IN (
+        SELECT id FROM users WHERE email LIKE 'rls-test-%@test.com'
+      )
+    )
+  `);
+
+  await superuserDb.execute(sql`
+    DELETE FROM payment_methods
+    WHERE user_id IN (
+      SELECT id FROM users WHERE email LIKE 'rls-test-%@test.com'
+    )
+  `);
+
+  await superuserDb.execute(sql`
+    DELETE FROM budgets
+    WHERE user_id IN (
+      SELECT id FROM users WHERE email LIKE 'rls-test-%@test.com'
+    )
+  `);
+
   await superuserDb.execute(sql`DELETE FROM users WHERE email LIKE 'rls-test-%@test.com'`);
   await superuserClient.end();
   console.log('  Done.\n');
@@ -243,6 +332,7 @@ async function testCrossTenantWriteBlocked() {
           itemId: itemAId,
           date: '2099-06-01',
           amount: '999.00',
+          paymentMethodId: paymentMethodBId,
           paymentMethod: 'Hack',
           accountingMonth: 6,
           accountingYear: 9901,
@@ -335,6 +425,7 @@ async function testBudgetSharingReadOnly() {
             itemId: itemAId,
             date: '2099-07-01',
             amount: '50.00',
+            paymentMethodId: paymentMethodBId,
             paymentMethod: 'Card B',
             accountingMonth: 7,
             accountingYear: 9901,
@@ -354,7 +445,11 @@ async function testBudgetSharingReadOnly() {
 // Runner
 // ---------------------------------------------------------------------------
 
-async function main() {
+test('RLS enforcement', async () => {
+  passed = 0;
+  failed = 0;
+  errors.length = 0;
+
   console.log('=== RLS Enforcement Tests ===\n');
 
   try {
@@ -379,7 +474,8 @@ async function main() {
       console.log(`  - ${e}`);
     }
   }
-  process.exit(failed > 0 ? 1 : 0);
-}
 
-main();
+  if (failed > 0) {
+    throw new Error(`RLS enforcement failures: ${failed}`);
+  }
+});

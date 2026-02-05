@@ -7,10 +7,24 @@ interface HeaderProps {
   initialBalance: number;
   totalIncome: AnnualTotals;
   totalExpenses: AnnualTotals;
+  totalSavings: AnnualTotals;
+  expectedIncome: number;
+  expectedExpenses: number;
+  expectedSavings: number;
   remainingBalance: number;
 }
 
-export default function Header({ year, initialBalance, totalIncome, totalExpenses, remainingBalance }: HeaderProps) {
+export default function Header({
+  year,
+  initialBalance,
+  totalIncome,
+  totalExpenses,
+  totalSavings,
+  expectedIncome,
+  expectedExpenses,
+  expectedSavings,
+  remainingBalance,
+}: HeaderProps) {
   const formatCurrency = useFormatCurrency();
   const { t } = useI18n();
 
@@ -28,14 +42,24 @@ export default function Header({ year, initialBalance, totalIncome, totalExpense
           <span className="balance-label">{t('header.income')}</span>
           <span className="balance-amounts">
             <span className="balance-value">{formatCurrency(totalIncome.actual, true)}</span>
-            <span className="balance-budget">/ {formatCurrency(totalIncome.budget, true)}</span>
+            <span className="balance-divider">/</span>
+            <span className="balance-budget">{formatCurrency(expectedIncome, true)}</span>
           </span>
         </div>
         <div className="balance-card expense">
           <span className="balance-label">{t('header.expenses')}</span>
           <span className="balance-amounts">
             <span className="balance-value">{formatCurrency(totalExpenses.actual, true)}</span>
-            <span className="balance-budget">/ {formatCurrency(totalExpenses.budget, true)}</span>
+            <span className="balance-divider">/</span>
+            <span className="balance-budget">{formatCurrency(expectedExpenses, true)}</span>
+          </span>
+        </div>
+        <div className="balance-card savings">
+          <span className="balance-label">{t('header.savings')}</span>
+          <span className="balance-amounts">
+            <span className="balance-value">{formatCurrency(totalSavings.actual, true)}</span>
+            <span className="balance-divider">/</span>
+            <span className="balance-budget">{formatCurrency(expectedSavings, true)}</span>
           </span>
         </div>
         <div className={`balance-card total ${remainingBalance >= 0 ? 'positive' : 'negative'}`}>

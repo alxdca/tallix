@@ -98,6 +98,7 @@ export async function createPaymentMethod(
       sortOrder,
       userId,
       institution: normalizedInstitution,
+      isAccount: true,
     })
     .returning();
 

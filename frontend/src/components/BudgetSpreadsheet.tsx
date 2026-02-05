@@ -7,8 +7,11 @@ import { calculateAnnualTotals, calculateGroupTotals, calculateSectionTotals } f
 
 interface BudgetSpreadsheetProps {
   sections: BudgetSection[];
+  year: number;
   months: string[];
   paymentAccountsInitialBalance: number; // Total initial balance of payment method accounts
+  paymentAccountsMonthlyBalances?: number[]; // Total balance per month for payment method accounts
+  lastActiveMonth: number; // 1-12, the last month with any settled transaction/transfer
 }
 
 interface FundsSummary {
@@ -57,17 +60,26 @@ function buildTooltip(
   });
 }
 
-export default function BudgetSpreadsheet({ sections, months, paymentAccountsInitialBalance }: BudgetSpreadsheetProps) {
+export default function BudgetSpreadsheet({
+  sections,
+  year,
+  months,
+  paymentAccountsInitialBalance,
+  paymentAccountsMonthlyBalances,
+  lastActiveMonth,
+}: BudgetSpreadsheetProps) {
   const formatCurrency = useFormatCurrency();
   const { showBudgetBelowActual } = useSettings();
   const { t } = useI18n();
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(new Set());
 
-  // Current month (0-indexed, so January = 0)
-  const currentMonth = new Date().getMonth();
-  // Show actual values up to current month + 1 (so if in Jan, show Jan and Feb)
-  const maxActualMonth = currentMonth + 1; // 0-indexed, so currentMonth + 1 means up to next month
+  // Show actual values for months with settled transactions, and always for the current month.
+  // lastActiveMonth is 1-indexed (1=Jan), but monthIndex in renderMonthCell is 0-indexed.
+  const now = new Date();
+  const isCurrentYear = year === now.getFullYear();
+  const currentMonthIndex = now.getMonth();
+  const maxActualMonth = Math.max(lastActiveMonth - 1, isCurrentYear ? currentMonthIndex : -1);
 
   // Render a single cell with either budget or actual, with variance coloring
   const renderMonthCell = (
@@ -75,7 +87,8 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     actual: number,
     monthIndex: number,
     moreIsGood: boolean,
-    key: number | string
+    key: number | string,
+    sectionType?: string
   ) => {
     const hasActual = actual !== 0;
     const isFutureMonth = monthIndex > maxActualMonth;
@@ -105,10 +118,13 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     // Show 0 instead of dash only when there's a budget but no actual
     const showZeroValue = showZeroWithBudgetHint;
 
+    // Section-specific styling class
+    const sectionClass = sectionType === 'savings' ? 'section-savings' : '';
+
     return (
       <td
         key={key}
-        className={`cell ${isBudgetValue ? 'budget-value' : 'actual-value'} ${varianceClass} ${tooltip ? 'has-tooltip' : ''}`}
+        className={`cell ${isBudgetValue ? 'budget-value' : 'actual-value'} ${varianceClass} ${sectionClass} ${tooltip ? 'has-tooltip' : ''}`}
         data-tooltip={tooltip || undefined}
       >
         <div className="cell-content">
@@ -119,14 +135,17 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     );
   };
 
-  // Calculate funds summary (payment accounts only, excluding savings)
+  // Calculate funds summary (payment accounts only)
+  // Savings transfers reduce available funds, so they're treated like expenses
   const fundsSummary = useMemo((): FundsSummary => {
     // Get section totals
     const incomeSection = sections.find((s) => s.type === 'income');
     const expenseSection = sections.find((s) => s.type === 'expense');
+    const savingsSection = sections.find((s) => s.type === 'savings');
 
     const incomeTotals = incomeSection ? calculateSectionTotals(incomeSection.groups) : null;
     const expenseTotals = expenseSection ? calculateSectionTotals(expenseSection.groups) : null;
+    const savingsTotals = savingsSection ? calculateSectionTotals(savingsSection.groups) : null;
 
     // Calculate remaining yearly budgets (variable spending) for each section
     // This is: yearlyBudget - actual spent so far (but not less than 0)
@@ -149,6 +168,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     };
     const incomeRemainingYearlyBudget = calculateRemainingYearlyBudget(incomeSection);
     const expenseRemainingYearlyBudget = calculateRemainingYearlyBudget(expenseSection);
+    const savingsRemainingYearlyBudget = calculateRemainingYearlyBudget(savingsSection);
 
     // Calculate expected totals for projection
     // If category has actual spending, use actual. Otherwise use budget.
@@ -172,14 +192,17 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     const endOfMonth: MonthlyValue[] = [];
     const expectedEndOfMonth: number[] = [];
 
+    const hasAccountBalances = paymentAccountsMonthlyBalances && paymentAccountsMonthlyBalances.length > 0;
     let cumulativeActual = paymentAccountsInitialBalance;
 
     for (let i = 0; i < 12; i++) {
-      // Monthly cash flow = Income - Expenses
+      // Monthly cash flow = Income - Expenses - Savings
       const monthIncomeBudget = incomeTotals?.months[i]?.budget || 0;
       const monthIncomeActual = incomeTotals?.months[i]?.actual || 0;
       const monthExpenseBudget = expenseTotals?.months[i]?.budget || 0;
       const monthExpenseActual = expenseTotals?.months[i]?.actual || 0;
+      const monthSavingsBudget = savingsTotals?.months[i]?.budget || 0;
+      const monthSavingsActual = savingsTotals?.months[i]?.actual || 0;
 
       // For budget start of month:
       // - If previous month has actual data (i-1 <= maxActualMonth), use previous month's actual end balance
@@ -191,26 +214,38 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
             ? endOfMonth[i - 1].actual // Use previous month's actual end balance
             : endOfMonth[i - 1].budget; // Use previous month's projected budget
 
+      const actualStart = hasAccountBalances
+        ? i === 0
+          ? paymentAccountsInitialBalance
+          : paymentAccountsMonthlyBalances?.[i - 1] ?? paymentAccountsInitialBalance
+        : cumulativeActual;
+
       startOfMonth.push({
         budget: budgetStartOfMonth,
-        actual: cumulativeActual,
+        actual: actualStart,
       });
 
-      // Calculate end of month
-      cumulativeActual += monthIncomeActual - monthExpenseActual;
+      // Calculate end of month (savings reduce available funds like expenses)
+      if (!hasAccountBalances) {
+        cumulativeActual += monthIncomeActual - monthExpenseActual - monthSavingsActual;
+      }
 
       // Budget end = budget start + planned cash flow for this month
-      let budgetEndOfMonth = budgetStartOfMonth + monthIncomeBudget - monthExpenseBudget;
+      let budgetEndOfMonth = budgetStartOfMonth + monthIncomeBudget - monthExpenseBudget - monthSavingsBudget;
 
       // In December (last month), add remaining yearly budgets to the projection
       // This accounts for variable spending that hasn't happened yet
       if (i === 11) {
-        budgetEndOfMonth += incomeRemainingYearlyBudget - expenseRemainingYearlyBudget;
+        budgetEndOfMonth += incomeRemainingYearlyBudget - expenseRemainingYearlyBudget - savingsRemainingYearlyBudget;
       }
+
+      const actualEnd = hasAccountBalances
+        ? paymentAccountsMonthlyBalances?.[i] ?? actualStart
+        : cumulativeActual;
 
       endOfMonth.push({
         budget: budgetEndOfMonth,
-        actual: cumulativeActual,
+        actual: actualEnd,
       });
 
       // Calculate expected end of month using max(budget, actual) for each category
@@ -218,14 +253,15 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
       // If we've overspent, use the actual amount
       const expectedIncome = calculateExpectedSectionTotal(incomeSection, i);
       const expectedExpense = calculateExpectedSectionTotal(expenseSection, i);
+      const expectedSavings = calculateExpectedSectionTotal(savingsSection, i);
 
-      // Expected = start of month actual + expected income - expected expenses
-      const expected = startOfMonth[i].actual + expectedIncome - expectedExpense;
+      // Expected = start of month actual + expected income - expected expenses - expected savings
+      const expected = startOfMonth[i].actual + expectedIncome - expectedExpense - expectedSavings;
       expectedEndOfMonth.push(expected);
     }
 
     return { startOfMonth, endOfMonth, expectedEndOfMonth };
-  }, [sections, paymentAccountsInitialBalance, maxActualMonth]);
+  }, [sections, paymentAccountsInitialBalance, paymentAccountsMonthlyBalances, maxActualMonth]);
 
   const toggleSection = (sectionType: string) => {
     setCollapsedSections((prev) => {
@@ -257,6 +293,8 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
         return '#10b981';
       case 'expense':
         return '#ef4444';
+      case 'savings':
+        return '#3b82f6'; // Blue for savings (matches transactions)
       default:
         return '#64748b';
     }
@@ -354,8 +392,8 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
               const sectionTotals = calculateSectionTotals(section.groups);
               const isCollapsed = collapsedSections.has(section.type);
               const color = getSectionColor(section.type);
-              // For income: more is good. For expenses: less is good.
-              const moreIsGood = section.type === 'income';
+              // For income/savings: more is good. For expenses: less is good.
+              const moreIsGood = section.type === 'income' || section.type === 'savings';
 
               return (
                 <React.Fragment key={section.type}>
@@ -367,7 +405,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                     </td>
                     <td className="cell budget">{formatCurrency(sectionTotals.annual.budget, true)}</td>
                     <td className="cell actual">{formatCurrency(sectionTotals.annual.actual, true)}</td>
-                    {sectionTotals.months.map((m, i) => renderMonthCell(m.budget, m.actual, i, moreIsGood, i))}
+                    {sectionTotals.months.map((m, i) => renderMonthCell(m.budget, m.actual, i, moreIsGood, i, section.type))}
                   </tr>
 
                   {/* Groups and Items */}

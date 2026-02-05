@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
 import {
   accountBalances,
   budgetGroups,
@@ -8,8 +8,10 @@ import {
   monthlyValues,
   paymentMethods,
   transactions,
+  transfers,
 } from '../db/schema.js';
 import type { DbClient } from '../db/index.js';
+import * as accountsSvc from './accounts.js';
 import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, BudgetSummary, MonthlyValue } from '../types.js';
 
 // Configure Decimal.js for financial calculations
@@ -42,6 +44,15 @@ export const SAVINGS_GROUP_NAME = 'Savings';
 export const SAVINGS_GROUP_SLUG = 'epargne';
 export const SAVINGS_GROUP_TYPE = 'savings';
 export const SAVINGS_SORT_ORDER = 998;
+
+async function getActiveSavingsAccountIds(tx: DbClient, userId: string): Promise<Set<number>> {
+  const accounts = await tx.query.paymentMethods.findMany({
+    where: and(eq(paymentMethods.isSavingsAccount, true), eq(paymentMethods.userId, userId)),
+    columns: { id: true },
+  });
+
+  return new Set(accounts.map((account) => account.id));
+}
 
 // Get or create a budget year
 export async function getOrCreateYear(tx: DbClient, year: number, budgetId: number) {
@@ -88,6 +99,114 @@ async function getTransactionTotals(tx: DbClient, yearId: number, budgetYear: nu
   return totalsMap;
 }
 
+// Get transfer totals for savings accounts per month
+async function getSavingsTransferTotals(
+  tx: DbClient,
+  yearId: number,
+  budgetYear: number,
+  savingsAccountIds: Set<number>
+): Promise<Map<string, number>> {
+  if (savingsAccountIds.size === 0) {
+    return new Map();
+  }
+
+  const accountIdsArray = [...savingsAccountIds];
+
+  // Get all transfers involving savings accounts for this year
+  const transferRecords = await tx
+    .select({
+      sourceAccountId: transfers.sourceAccountId,
+      destinationAccountId: transfers.destinationAccountId,
+      month: transfers.accountingMonth,
+      amount: transfers.amount,
+    })
+    .from(transfers)
+    .where(
+      and(
+        eq(transfers.yearId, yearId),
+        eq(transfers.accountingYear, budgetYear),
+        or(
+          inArray(transfers.sourceAccountId, accountIdsArray),
+          inArray(transfers.destinationAccountId, accountIdsArray)
+        )
+      )
+    );
+
+  // Calculate net impact per savings account per month
+  const totalsMap = new Map<string, number>();
+
+  for (const t of transferRecords) {
+    const amount = parseFloat(t.amount);
+
+    // If destination is a savings account: positive (money in)
+    if (savingsAccountIds.has(t.destinationAccountId)) {
+      const key = `savings-${t.destinationAccountId}-${t.month}`;
+      const current = totalsMap.get(key) || 0;
+      totalsMap.set(key, current + amount);
+    }
+
+    // If source is a savings account: negative (money out)
+    if (savingsAccountIds.has(t.sourceAccountId)) {
+      const key = `savings-${t.sourceAccountId}-${t.month}`;
+      const current = totalsMap.get(key) || 0;
+      totalsMap.set(key, current - amount);
+    }
+  }
+
+  return totalsMap;
+}
+
+// Get transaction totals for savings accounts (transactions where paymentMethodId is a savings account)
+// This captures direct deposits/withdrawals from savings accounts
+async function getSavingsAccountTransactionTotals(
+  tx: DbClient,
+  yearId: number,
+  budgetYear: number,
+  savingsAccountIds: Set<number>
+): Promise<Map<string, number>> {
+  if (savingsAccountIds.size === 0) {
+    return new Map();
+  }
+
+  const accountIdsArray = [...savingsAccountIds];
+
+  // Get all transactions where paymentMethodId is a savings account
+  // Sign depends on budget group type: income = positive, expense = negative
+  const result = await tx
+    .select({
+      paymentMethodId: transactions.paymentMethodId,
+      month: transactions.accountingMonth,
+      balanceChange: sql<string>`SUM(
+        CASE
+          WHEN ${budgetGroups.type} = 'income' THEN ${transactions.amount}
+          WHEN ${budgetGroups.type} = 'expense' THEN -${transactions.amount}
+          ELSE -${transactions.amount}
+        END
+      )`,
+    })
+    .from(transactions)
+    .leftJoin(budgetItems, eq(transactions.itemId, budgetItems.id))
+    .leftJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
+    .where(
+      and(
+        eq(transactions.yearId, yearId),
+        eq(transactions.accountingYear, budgetYear),
+        inArray(transactions.paymentMethodId, accountIdsArray)
+      )
+    )
+    .groupBy(transactions.paymentMethodId, transactions.accountingMonth);
+
+  const totalsMap = new Map<string, number>();
+  for (const row of result) {
+    if (row.paymentMethodId !== null) {
+      const key = `savings-${row.paymentMethodId}-${row.month}`;
+      totalsMap.set(key, parseFloat(row.balanceChange || '0'));
+    }
+  }
+
+  return totalsMap;
+}
+
 // Types for database query results
 interface MonthlyValueRecord {
   month: number;
@@ -101,11 +220,16 @@ interface ItemWithMonthlyValues {
   slug: string;
   sortOrder: number;
   yearlyBudget: string;
+  savingsAccountId?: number | null;
   monthlyValues?: MonthlyValueRecord[];
 }
 
 // Format item with monthly values and transaction actuals
-function formatItem(item: ItemWithMonthlyValues, transactionTotals: Map<string, number>): BudgetItem {
+function formatItem(
+  item: ItemWithMonthlyValues,
+  transactionTotals: Map<string, number>,
+  savingsBalanceChanges: Map<string, number>
+): BudgetItem {
   const months: MonthlyValue[] = Array(12)
     .fill(null)
     .map((_, i) => {
@@ -113,9 +237,16 @@ function formatItem(item: ItemWithMonthlyValues, transactionTotals: Map<string, 
       const transactionKey = `${item.id}-${i + 1}`;
       const transactionActual = transactionTotals.get(transactionKey) || 0;
 
+      // For savings items, add balance changes from transfers and transactions on the savings account
+      let savingsBalanceChange = 0;
+      if (item.savingsAccountId) {
+        const savingsKey = `savings-${item.savingsAccountId}-${i + 1}`;
+        savingsBalanceChange = savingsBalanceChanges.get(savingsKey) || 0;
+      }
+
       return {
         budget: monthData ? parseFloat(monthData.budget) : 0,
-        actual: transactionActual,
+        actual: transactionActual + savingsBalanceChange,
       };
     });
 
@@ -132,11 +263,14 @@ function formatItem(item: ItemWithMonthlyValues, transactionTotals: Map<string, 
 function calculateTotals(groups: BudgetGroup[]): {
   income: AnnualTotals;
   expenses: AnnualTotals;
+  savings: AnnualTotals;
 } {
   let incomeBudget = new Decimal(0);
   let incomeActual = new Decimal(0);
   let expensesBudget = new Decimal(0);
   let expensesActual = new Decimal(0);
+  let savingsBudget = new Decimal(0);
+  let savingsActual = new Decimal(0);
 
   groups.forEach((group) => {
     group.items.forEach((item) => {
@@ -146,6 +280,8 @@ function calculateTotals(groups: BudgetGroup[]): {
         incomeBudget = incomeBudget.plus(yearlyBudget);
       } else if (group.type === 'expense') {
         expensesBudget = expensesBudget.plus(yearlyBudget);
+      } else if (group.type === 'savings') {
+        savingsBudget = savingsBudget.plus(yearlyBudget);
       }
 
       item.months.forEach((month) => {
@@ -155,6 +291,9 @@ function calculateTotals(groups: BudgetGroup[]): {
         } else if (group.type === 'expense') {
           expensesBudget = expensesBudget.plus(month.budget);
           expensesActual = expensesActual.plus(month.actual);
+        } else if (group.type === 'savings') {
+          savingsBudget = savingsBudget.plus(month.budget);
+          savingsActual = savingsActual.plus(month.actual);
         }
       });
     });
@@ -163,13 +302,77 @@ function calculateTotals(groups: BudgetGroup[]): {
   return {
     income: { budget: incomeBudget.toNumber(), actual: incomeActual.toNumber() },
     expenses: { budget: expensesBudget.toNumber(), actual: expensesActual.toNumber() },
+    savings: { budget: savingsBudget.toNumber(), actual: savingsActual.toNumber() },
+  };
+}
+
+function calculateExpectedTotals(groups: BudgetGroup[], currentMonthIndex: number): {
+  income: number;
+  expenses: number;
+  savings: number;
+} {
+  const totals = {
+    income: new Decimal(0),
+    expenses: new Decimal(0),
+    savings: new Decimal(0),
+  };
+
+  for (const group of groups) {
+    if (group.type !== 'income' && group.type !== 'expense' && group.type !== 'savings') {
+      continue;
+    }
+
+    for (const item of group.items) {
+      for (let i = 0; i < 12; i++) {
+        const monthData = item.months[i];
+        const value = i <= currentMonthIndex ? monthData?.actual || 0 : monthData?.budget || 0;
+        if (group.type === 'income') {
+          totals.income = totals.income.plus(value);
+        } else if (group.type === 'expense') {
+          totals.expenses = totals.expenses.plus(value);
+        } else {
+          totals.savings = totals.savings.plus(value);
+        }
+      }
+
+      const yearlyBudget = item.yearlyBudget || 0;
+      if (yearlyBudget !== 0) {
+        const actualSpent = item.months.reduce((sum, m) => sum + (m?.actual || 0), 0);
+        const remaining = yearlyBudget - actualSpent;
+        if (group.type === 'income') {
+          totals.income = totals.income.plus(remaining);
+        } else if (group.type === 'expense') {
+          totals.expenses = totals.expenses.plus(remaining);
+        } else {
+          totals.savings = totals.savings.plus(remaining);
+        }
+      }
+    }
+  }
+
+  return {
+    income: totals.income.toNumber(),
+    expenses: totals.expenses.toNumber(),
+    savings: totals.savings.toNumber(),
   };
 }
 
 // Get full budget data for a year
-export async function getBudgetDataForYear(tx: DbClient, year: number, budgetId: number): Promise<BudgetData> {
+export async function getBudgetDataForYear(tx: DbClient, year: number, budgetId: number, userId: string): Promise<BudgetData> {
   const budgetYear = await getOrCreateYear(tx, year, budgetId);
+  const activeSavingsAccountIds = await getActiveSavingsAccountIds(tx, userId);
   const transactionTotals = await getTransactionTotals(tx, budgetYear.id, year);
+  const transferTotals = await getSavingsTransferTotals(tx, budgetYear.id, year, activeSavingsAccountIds);
+  const savingsAccountTransactionTotals = await getSavingsAccountTransactionTotals(tx, budgetYear.id, year, activeSavingsAccountIds);
+
+  // Combine transfer totals and savings account transaction totals into one map
+  const savingsBalanceChanges = new Map<string, number>();
+  for (const [key, value] of transferTotals) {
+    savingsBalanceChanges.set(key, (savingsBalanceChanges.get(key) || 0) + value);
+  }
+  for (const [key, value] of savingsAccountTransactionTotals) {
+    savingsBalanceChanges.set(key, (savingsBalanceChanges.get(key) || 0) + value);
+  }
 
   const groups = await tx.query.budgetGroups.findMany({
     where: eq(budgetGroups.budgetId, budgetId),
@@ -187,14 +390,33 @@ export async function getBudgetDataForYear(tx: DbClient, year: number, budgetId:
     },
   });
 
-  const formattedGroups: BudgetGroup[] = groups.map((group) => ({
-    id: group.id,
-    name: group.name,
-    slug: group.slug,
-    type: group.type as BudgetGroup['type'],
-    sortOrder: group.sortOrder,
-    items: group.items.filter((item) => item.groupId !== null).map((item) => formatItem(item, transactionTotals)),
-  }));
+  const formattedGroups: BudgetGroup[] = groups.flatMap((group) => {
+    const isSavingsGroup = group.type === SAVINGS_GROUP_TYPE;
+    const visibleItems = group.items
+      .filter((item) => item.groupId !== null)
+      .filter(
+        (item) =>
+          // For savings groups: ONLY show items with a valid savingsAccountId that is active
+          // All savings items must be linked to a savings account
+          !isSavingsGroup || (item.savingsAccountId !== null && activeSavingsAccountIds.has(item.savingsAccountId))
+      )
+      .map((item) => formatItem(item, transactionTotals, savingsBalanceChanges));
+
+    if (isSavingsGroup && visibleItems.length === 0) {
+      return [];
+    }
+
+    return [
+      {
+        id: group.id,
+        name: group.name,
+        slug: group.slug,
+        type: group.type as BudgetGroup['type'],
+        sortOrder: group.sortOrder,
+        items: visibleItems,
+      },
+    ];
+  });
 
   return {
     yearId: budgetYear.id,
@@ -205,19 +427,25 @@ export async function getBudgetDataForYear(tx: DbClient, year: number, budgetId:
 }
 
 // Calculate projected end of year balance
-function calculateProjectedEndOfYear(groups: BudgetGroup[], initialBalance: number): number {
-  const currentMonth = new Date().getMonth();
-  const maxActualMonth = currentMonth + 1;
+function calculateProjectedEndOfYear(
+  groups: BudgetGroup[],
+  initialBalance: number,
+  actualBalanceThroughMonth?: number
+): number {
+  const currentMonthIndex = new Date().getMonth();
+  const maxActualMonth = currentMonthIndex;
 
   let cumulativeActual = initialBalance;
 
   const sectionTotals = {
     income: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
     expense: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
+    savings: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
   };
 
   let incomeRemainingYearly = 0;
   let expenseRemainingYearly = 0;
+  let savingsRemainingYearly = 0;
 
   for (const group of groups) {
     const section = sectionTotals[group.type as keyof typeof sectionTotals];
@@ -239,35 +467,57 @@ function calculateProjectedEndOfYear(groups: BudgetGroup[], initialBalance: numb
           incomeRemainingYearly += remaining;
         } else if (group.type === 'expense') {
           expenseRemainingYearly += remaining;
+        } else if (group.type === 'savings') {
+          savingsRemainingYearly += remaining;
         }
       }
     }
   }
 
-  for (let i = 0; i <= Math.min(maxActualMonth, 11); i++) {
-    cumulativeActual += sectionTotals.income.monthlyActuals[i] - sectionTotals.expense.monthlyActuals[i];
+  if (actualBalanceThroughMonth !== undefined) {
+    cumulativeActual = actualBalanceThroughMonth;
+  } else {
+    for (let i = 0; i <= Math.min(maxActualMonth, 11); i++) {
+      cumulativeActual +=
+        sectionTotals.income.monthlyActuals[i] -
+        sectionTotals.expense.monthlyActuals[i] -
+        sectionTotals.savings.monthlyActuals[i];
+    }
   }
 
   let projectedEnd = cumulativeActual;
 
-  for (let i = maxActualMonth + 1; i < 12; i++) {
-    projectedEnd += sectionTotals.income.monthlyBudgets[i] - sectionTotals.expense.monthlyBudgets[i];
+  const budgetStartMonth =
+    actualBalanceThroughMonth !== undefined ? currentMonthIndex + 1 : maxActualMonth + 1;
+  for (let i = budgetStartMonth; i < 12; i++) {
+    projectedEnd +=
+      sectionTotals.income.monthlyBudgets[i] -
+      sectionTotals.expense.monthlyBudgets[i] -
+      sectionTotals.savings.monthlyBudgets[i];
   }
 
-  projectedEnd += incomeRemainingYearly - expenseRemainingYearly;
+  projectedEnd += incomeRemainingYearly - expenseRemainingYearly - savingsRemainingYearly;
 
   return projectedEnd;
 }
 
 // Get budget summary for a year
 export async function getBudgetSummary(tx: DbClient, year: number, budgetId: number, userId: string): Promise<BudgetSummary> {
-  const data = await getBudgetDataForYear(tx, year, budgetId);
-  const { income, expenses } = calculateTotals(data.groups);
+  const data = await getBudgetDataForYear(tx, year, budgetId, userId);
+  const { income, expenses, savings } = calculateTotals(data.groups);
+  const currentMonthIndex = new Date().getMonth();
+  const expectedTotals = calculateExpectedTotals(data.groups, currentMonthIndex);
 
   const paymentMethodAccounts = await tx
     .select({ id: paymentMethods.id })
     .from(paymentMethods)
-    .where(and(eq(paymentMethods.isAccount, true), eq(paymentMethods.userId, userId)));
+    .where(
+      and(
+        eq(paymentMethods.isAccount, true),
+        eq(paymentMethods.isSavingsAccount, false),
+        eq(paymentMethods.userId, userId)
+      )
+    );
 
   const paymentMethodIds = new Set(paymentMethodAccounts.map((pm) => pm.id));
 
@@ -277,12 +527,26 @@ export async function getBudgetSummary(tx: DbClient, year: number, budgetId: num
     .filter((b) => paymentMethodIds.has(b.paymentMethodId))
     .reduce((sum, b) => sum + parseFloat(b.initialBalance), 0);
 
-  const remainingBalance = calculateProjectedEndOfYear(data.groups, initialBalance);
+  let actualBalanceThroughMonth: number | undefined;
+  const accountsResponse = await accountsSvc.getAccountsForYear(tx, year, budgetId, userId);
+  const paymentAccounts = accountsResponse.accounts.filter((account) => !account.isSavingsAccount);
+  if (paymentAccounts.length > 0) {
+    const monthlyBalances = Array(12)
+      .fill(0)
+      .map((_, i) => paymentAccounts.reduce((sum, account) => sum + (account.monthlyBalances[i] || 0), 0));
+    actualBalanceThroughMonth = monthlyBalances[new Date().getMonth()] ?? initialBalance;
+  }
+
+  const remainingBalance = calculateProjectedEndOfYear(data.groups, initialBalance, actualBalanceThroughMonth);
 
   return {
     initialBalance,
     totalIncome: income,
     totalExpenses: expenses,
+    totalSavings: savings,
+    expectedIncome: expectedTotals.income,
+    expectedExpenses: expectedTotals.expenses,
+    expectedSavings: expectedTotals.savings,
     remainingBalance,
   };
 }
@@ -490,6 +754,12 @@ export async function createItem(tx: DbClient, data: {
     if (!group) {
       throw new Error('Group not found or does not belong to your budget');
     }
+
+    // Prevent creating savings items through the generic create function
+    // Savings items must be created through createSavingsBudgetItems() or createSavingsItemForYear()
+    if (group.type === SAVINGS_GROUP_TYPE) {
+      throw new Error('Cannot create savings items manually. Savings items are automatically created from savings accounts.');
+    }
   }
 
   const [newItem] = await tx
@@ -635,6 +905,12 @@ export async function moveItem(tx: DbClient, itemId: number, groupId: number | n
 
     if (!group) {
       return null;
+    }
+
+    // Prevent moving items into savings groups
+    // Savings items must be created through createSavingsBudgetItems() or createSavingsItemForYear()
+    if (group.type === SAVINGS_GROUP_TYPE) {
+      throw new Error('Cannot move items into savings groups. Savings items are automatically managed based on savings accounts.');
     }
   }
 

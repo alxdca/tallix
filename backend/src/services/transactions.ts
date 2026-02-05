@@ -1,8 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { budgetItems, budgetYears, transactions } from '../db/schema.js';
+import { budgetItems, budgetYears, paymentMethods, transactions } from '../db/schema.js';
 import type { DbClient } from '../db/index.js';
 import { getOrCreateUnclassifiedItem } from './budget.js';
-import { getPaymentMethodByName } from './paymentMethods.js';
 
 // Types for database query results
 interface TransactionWithRelations {
@@ -13,7 +12,7 @@ interface TransactionWithRelations {
   description: string | null;
   comment: string | null;
   thirdParty: string | null;
-  paymentMethod: string | null;
+  paymentMethodId: number;
   amount: string;
   accountingMonth: number;
   accountingYear: number;
@@ -23,6 +22,11 @@ interface TransactionWithRelations {
       name: string;
       type: string;
     } | null;
+  } | null;
+  paymentMethodRel?: {
+    id: number;
+    name: string;
+    institution: string | null;
   } | null;
 }
 
@@ -86,13 +90,20 @@ export function calculateAccountingPeriod(
 // Format transaction for response
 function formatTransaction(t: TransactionWithRelations) {
   const groupType = t.item?.group?.type || 'expense';
+  // Build payment method display name: "Name (Institution)" or just "Name"
+  const pm = t.paymentMethodRel;
+  const paymentMethodName = pm 
+    ? (pm.institution ? `${pm.name} (${pm.institution})` : pm.name)
+    : null;
+  
   return {
     id: t.id,
     date: formatDate(t.date),
     description: t.description,
     comment: t.comment,
     thirdParty: t.thirdParty,
-    paymentMethod: t.paymentMethod,
+    paymentMethodId: t.paymentMethodId,
+    paymentMethod: paymentMethodName,
     amount: parseFloat(t.amount),
     itemId: t.itemId,
     itemName: t.item?.name || null,
@@ -125,6 +136,7 @@ export async function getTransactionsForYear(tx: DbClient, year: number, budgetI
           group: true,
         },
       },
+      paymentMethodRel: true,
     },
   });
 
@@ -143,7 +155,7 @@ export async function createTransaction(
     description?: string;
     comment?: string;
     thirdParty?: string;
-    paymentMethod: string;
+    paymentMethodId: number;
     amount: number;
     accountingMonth?: number;
     accountingYear?: number;
@@ -175,8 +187,13 @@ export async function createTransaction(
   let accountingYear = data.accountingYear;
 
   if (accountingMonth === undefined || accountingYear === undefined) {
-    const pm = await getPaymentMethodByName(tx, userId, data.paymentMethod);
-    const settlementDay = pm?.settlementDay ?? null;
+    const pm = await tx.query.paymentMethods.findFirst({
+      where: and(eq(paymentMethods.id, data.paymentMethodId), eq(paymentMethods.userId, userId)),
+    });
+    if (!pm) {
+      throw new Error('Payment method not found or does not belong to you');
+    }
+    const settlementDay = pm.settlementDay ?? null;
     const accounting = calculateAccountingPeriod(data.date, settlementDay);
     accountingMonth = accountingMonth ?? accounting.accountingMonth;
     accountingYear = accountingYear ?? accounting.accountingYear;
@@ -191,7 +208,8 @@ export async function createTransaction(
       description: data.description || null,
       comment: data.comment || null,
       thirdParty: data.thirdParty || null,
-      paymentMethod: data.paymentMethod,
+      paymentMethodId: data.paymentMethodId,
+      paymentMethod: null, // Legacy field, no longer used
       amount: data.amount.toString(),
       accountingMonth,
       accountingYear,
@@ -204,7 +222,7 @@ export async function createTransaction(
     description: newTransaction.description,
     comment: newTransaction.comment,
     thirdParty: newTransaction.thirdParty,
-    paymentMethod: newTransaction.paymentMethod,
+    paymentMethodId: newTransaction.paymentMethodId,
     amount: parseFloat(newTransaction.amount),
     itemId: newTransaction.itemId,
     accountingMonth: newTransaction.accountingMonth,
@@ -224,7 +242,7 @@ export async function updateTransaction(
     description?: string;
     comment?: string;
     thirdParty?: string;
-    paymentMethod?: string;
+    paymentMethodId?: number;
     amount?: number;
     accountingMonth?: number;
     accountingYear?: number;
@@ -259,7 +277,7 @@ export async function updateTransaction(
     description: string | null;
     comment: string | null;
     thirdParty: string | null;
-    paymentMethod: string | null;
+    paymentMethodId: number;
     amount: string;
     accountingMonth: number;
     accountingYear: number;
@@ -271,7 +289,7 @@ export async function updateTransaction(
   if (data.description !== undefined) updateData.description = data.description || null;
   if (data.comment !== undefined) updateData.comment = data.comment || null;
   if (data.thirdParty !== undefined) updateData.thirdParty = data.thirdParty || null;
-  if (data.paymentMethod !== undefined) updateData.paymentMethod = data.paymentMethod || null;
+  if (data.paymentMethodId !== undefined) updateData.paymentMethodId = data.paymentMethodId;
   if (data.amount !== undefined) updateData.amount = data.amount.toString();
 
   if (data.accountingMonth !== undefined) updateData.accountingMonth = data.accountingMonth;
@@ -279,7 +297,7 @@ export async function updateTransaction(
 
   if (
     data.recalculateAccounting ||
-    ((data.date !== undefined || data.paymentMethod !== undefined) &&
+    ((data.date !== undefined || data.paymentMethodId !== undefined) &&
       data.accountingMonth === undefined &&
       data.accountingYear === undefined)
   ) {
@@ -288,8 +306,10 @@ export async function updateTransaction(
     });
     if (current) {
       const date = data.date ?? current.date;
-      const paymentMethodName = data.paymentMethod ?? current.paymentMethod;
-      const pm = paymentMethodName ? await getPaymentMethodByName(tx, userId, paymentMethodName) : null;
+      const paymentMethodId = data.paymentMethodId ?? current.paymentMethodId;
+      const pm = await tx.query.paymentMethods.findFirst({
+        where: and(eq(paymentMethods.id, paymentMethodId), eq(paymentMethods.userId, userId)),
+      });
       const settlementDay = pm?.settlementDay ?? null;
       const accounting = calculateAccountingPeriod(date, settlementDay);
       updateData.accountingMonth = accounting.accountingMonth;
@@ -301,12 +321,21 @@ export async function updateTransaction(
 
   if (!updated) return null;
 
+  // Get payment method for display name
+  const pm = await tx.query.paymentMethods.findFirst({
+    where: eq(paymentMethods.id, updated.paymentMethodId),
+  });
+  const paymentMethodName = pm 
+    ? (pm.institution ? `${pm.name} (${pm.institution})` : pm.name)
+    : null;
+
   return {
     id: updated.id,
     date: formatDate(updated.date),
     description: updated.description,
     thirdParty: updated.thirdParty,
-    paymentMethod: updated.paymentMethod,
+    paymentMethodId: updated.paymentMethodId,
+    paymentMethod: paymentMethodName,
     amount: parseFloat(updated.amount),
     itemId: updated.itemId,
     accountingMonth: updated.accountingMonth,
@@ -407,7 +436,7 @@ export async function bulkCreateTransactions(
     description?: string;
     comment?: string;
     thirdParty?: string;
-    paymentMethod: string;
+    paymentMethodId: number;
     amount: number;
     itemId?: number | null;
     accountingMonth?: number;
@@ -456,12 +485,18 @@ export async function bulkCreateTransactions(
     unclassifiedItemId = await getOrCreateUnclassifiedItem(tx, yearId, budgetId);
   }
 
-  const uniquePaymentMethods = [...new Set(transactionsData.map((t) => t.paymentMethod))];
-  const paymentMethodSettlements = new Map<string, number | null>();
+  // Get unique payment method IDs and their settlement days
+  const uniquePaymentMethodIds = [...new Set(transactionsData.map((t) => t.paymentMethodId))];
+  const paymentMethodSettlements = new Map<number, number | null>();
 
-  for (const pmName of uniquePaymentMethods) {
-    const pm = await getPaymentMethodByName(tx, userId, pmName);
-    paymentMethodSettlements.set(pmName, pm?.settlementDay ?? null);
+  for (const pmId of uniquePaymentMethodIds) {
+    const pm = await tx.query.paymentMethods.findFirst({
+      where: and(eq(paymentMethods.id, pmId), eq(paymentMethods.userId, userId)),
+    });
+    if (!pm) {
+      throw new Error(`Payment method ${pmId} not found or does not belong to you`);
+    }
+    paymentMethodSettlements.set(pmId, pm.settlementDay ?? null);
   }
 
   const inserted = await tx
@@ -472,7 +507,7 @@ export async function bulkCreateTransactions(
         let accountingYear = t.accountingYear;
 
         if (accountingMonth === undefined || accountingYear === undefined) {
-          const settlementDay = paymentMethodSettlements.get(t.paymentMethod) ?? null;
+          const settlementDay = paymentMethodSettlements.get(t.paymentMethodId) ?? null;
           const accounting = calculateAccountingPeriod(t.date, settlementDay);
           accountingMonth = accountingMonth ?? accounting.accountingMonth;
           accountingYear = accountingYear ?? accounting.accountingYear;
@@ -485,7 +520,8 @@ export async function bulkCreateTransactions(
           description: t.description || null,
           comment: t.comment || null,
           thirdParty: t.thirdParty || null,
-          paymentMethod: t.paymentMethod,
+          paymentMethodId: t.paymentMethodId,
+          paymentMethod: null, // Legacy field
           amount: t.amount.toString(),
           accountingMonth,
           accountingYear,

@@ -3,31 +3,44 @@ import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, MonthlyValue, O
 interface SectionLabels {
   income: string;
   expense: string;
+  savings: string;
 }
 
-// Organize flat budget data into 2-layer hierarchy (income and expenses)
+// Organize flat budget data into 3-layer hierarchy (income, expenses, and savings)
 export function organizeBudgetData(
   data: BudgetData,
-  labels: SectionLabels = { income: 'Income', expense: 'Expenses' }
+  labels: SectionLabels = { income: 'Income', expense: 'Expenses', savings: 'Savings' }
 ): OrganizedBudgetData {
   const incomeGroups = data.groups.filter((g) => g.type === 'income');
   const expenseGroups = data.groups.filter((g) => g.type === 'expense');
+  const savingsGroups = data.groups.filter((g) => g.type === 'savings');
+
+  const sections: OrganizedBudgetData['sections'] = [
+    {
+      type: 'income',
+      name: labels.income,
+      groups: incomeGroups,
+    },
+    {
+      type: 'expense',
+      name: labels.expense,
+      groups: expenseGroups,
+    },
+  ];
+
+  // Only add savings section if there are savings groups
+  if (savingsGroups.length > 0) {
+    sections.push({
+      type: 'savings',
+      name: labels.savings,
+      groups: savingsGroups,
+    });
+  }
 
   return {
     year: data.year,
     initialBalance: data.initialBalance,
-    sections: [
-      {
-        type: 'income',
-        name: labels.income,
-        groups: incomeGroups,
-      },
-      {
-        type: 'expense',
-        name: labels.expense,
-        groups: expenseGroups,
-      },
-    ],
+    sections,
   };
 }
 

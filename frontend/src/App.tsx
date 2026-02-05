@@ -23,6 +23,7 @@ function AppContent() {
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [months, setMonths] = useState<string[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [lastActiveMonth, setLastActiveMonth] = useState<number>(0);
   const [activeView, setActiveView] = useState('current');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,14 +35,23 @@ function AppContent() {
       ? organizeBudgetData(budgetData, {
           income: t('budget.income'),
           expense: t('budget.expenses'),
+          savings: t('budget.savings'),
         })
       : null;
   }, [budgetData, t]);
 
-  // Calculate total initial balance of all accounts
+  const paymentAccounts = useMemo(() => accounts.filter((account) => !account.isSavingsAccount), [accounts]);
+
+  // Calculate total initial balance of payment accounts (non-savings)
   const paymentAccountsInitialBalance = useMemo(() => {
-    return accounts.reduce((sum, a) => sum + a.initialBalance, 0);
-  }, [accounts]);
+    return paymentAccounts.reduce((sum, account) => sum + account.initialBalance, 0);
+  }, [paymentAccounts]);
+
+  const paymentAccountsMonthlyBalances = useMemo(() => {
+    return Array(12)
+      .fill(0)
+      .map((_, i) => paymentAccounts.reduce((sum, account) => sum + (account.monthlyBalances[i] || 0), 0));
+  }, [paymentAccounts]);
 
   const loadData = useCallback(async () => {
     try {
@@ -51,8 +61,9 @@ function AppContent() {
       setSummary(summaryData);
 
       // Fetch accounts for the year (needed for funds summary)
-      const accountsData = await fetchAccounts(data.year);
-      setAccounts(accountsData);
+      const accountsResponse = await fetchAccounts(data.year);
+      setAccounts(accountsResponse.accounts);
+      setLastActiveMonth(accountsResponse.lastActiveMonth);
 
       setError(null);
     } catch (err) {
@@ -70,8 +81,9 @@ function AppContent() {
       setSummary(summaryData);
 
       // Fetch accounts for the year (needed for funds summary)
-      const accountsData = await fetchAccounts(data.year);
-      setAccounts(accountsData);
+      const accountsResponse = await fetchAccounts(data.year);
+      setAccounts(accountsResponse.accounts);
+      setLastActiveMonth(accountsResponse.lastActiveMonth);
     } catch (err) {
       logger.error('Failed to refresh data', err);
     }
@@ -96,8 +108,9 @@ function AppContent() {
       setSummary(summaryData);
 
       // Also refresh accounts for updated fund balances
-      const accountsData = await fetchAccounts(data.year);
-      setAccounts(accountsData);
+      const accountsResponse = await fetchAccounts(data.year);
+      setAccounts(accountsResponse.accounts);
+      setLastActiveMonth(accountsResponse.lastActiveMonth);
     } catch (err) {
       logger.error('Failed to refresh budget data', err);
     }
@@ -134,8 +147,11 @@ function AppContent() {
           <div className="content-body">
             <BudgetSpreadsheet
               sections={organizedData?.sections || []}
+              year={currentYear}
               months={months}
               paymentAccountsInitialBalance={paymentAccountsInitialBalance}
+              paymentAccountsMonthlyBalances={paymentAccountsMonthlyBalances}
+              lastActiveMonth={lastActiveMonth}
             />
           </div>
         );
@@ -191,7 +207,11 @@ function AppContent() {
             year={currentYear}
             initialBalance={summary?.initialBalance || 0}
             totalIncome={summary?.totalIncome || { budget: 0, actual: 0 }}
+            totalSavings={summary?.totalSavings || { budget: 0, actual: 0 }}
             totalExpenses={summary?.totalExpenses || { budget: 0, actual: 0 }}
+            expectedIncome={summary?.expectedIncome || 0}
+            expectedExpenses={summary?.expectedExpenses || 0}
+            expectedSavings={summary?.expectedSavings || 0}
             remainingBalance={summary?.remainingBalance || 0}
           />
         )}

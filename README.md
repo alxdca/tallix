@@ -15,6 +15,10 @@ A personal budgeting application for tracking income, expenses, savings, and acc
 - **Transaction Tracking** - Record transactions with categories, payment methods, and third-party details
 - **Account Balances** - Track balances across savings accounts and payment methods
 - **Transfers** - Record money transfers between accounts
+- **Category Organization** - Drag-and-drop reorder groups/items and move items between groups
+- **Payment Method Management** - Add institutions, reorder methods, and manage account/savings flags
+- **Savings Accounts** - Mark payment methods as savings and categorize by type (e.g., epargne, prevoyance, investissements)
+- **User Preferences** - Theme toggle, decimal separator, and budget display options
 - **Spreadsheet Import** - Paste data from Excel/Sheets with configurable column mapping
 - **PDF Import** - Import transactions from bank statement PDFs with optional category suggestions
 - **AI-Powered Import (optional)** - DeepSeek LLM integration for intelligent transaction processing:
@@ -23,8 +27,8 @@ A personal budgeting application for tracking income, expenses, savings, and acc
   - **Language & Context Aware** - Uses user's language and country for accurate merchant and category detection
   - **Parallel Processing** - Processes up to 6 batches concurrently for fast classification of large imports
 - **Multi-user Authentication** - Email/password auth, per-user profile (name, language, country), settings, and payment methods (JWT-protected APIs)
-- **Settlement Days** - Configure payment method billing cycles for accurate monthly accounting
-- **Linked Accounts** - Link payment methods to their funding accounts
+- **Settlement Days** - Configure payment method billing cycles to auto-calculate accounting month/year
+- **Linked Accounts** - Link payment methods to their funding accounts so balances roll up correctly
 
 ## AI-Powered Transaction Processing
 
@@ -202,6 +206,11 @@ pnpm test
 | `pnpm build` | Build both packages for production |
 | `pnpm backend` | Start backend only |
 | `pnpm frontend` | Start frontend only |
+| `pnpm lint` | Run Biome lint |
+| `pnpm lint:fix` | Run Biome lint with auto-fix |
+| `pnpm format` | Run Biome formatter |
+| `pnpm check` | Run Biome checks |
+| `pnpm check:fix` | Run Biome checks with auto-fix |
 
 ### Backend
 
@@ -211,6 +220,7 @@ pnpm test
 | `pnpm build` | Compile TypeScript |
 | `pnpm db:push` | Push schema changes to database |
 | `pnpm db:generate` | Generate migration files |
+| `pnpm db:migrate` | Apply migrations |
 | `pnpm db:studio` | Open Drizzle Studio |
 
 ### Frontend
@@ -235,24 +245,28 @@ All endpoints below (except `/api/auth/*`) require a `Bearer` token.
 ### Budget
 - `GET /api/budget` - Get current year budget (includes yearly budgets per item)
 - `GET /api/budget/year/:year` - Get budget for specific year
+- `GET /api/budget/months` - List month names
 - `GET /api/budget/summary` - Get budget summary (includes yearly budgets in totals)
 - `GET /api/budget/years` - List all years
 - `POST /api/budget/years` - Create new year
 - `PUT /api/budget/years/:id` - Update year
 - `POST /api/budget/groups` - Create category group
+- `PUT /api/budget/groups/reorder` - Reorder groups
 - `PUT /api/budget/groups/:id` - Update group
 - `DELETE /api/budget/groups/:id` - Delete group
 - `POST /api/budget/items` - Create budget item
+- `PUT /api/budget/items/move` - Move item to a different group
+- `PUT /api/budget/items/reorder` - Reorder items within a group
 - `PUT /api/budget/items/:id` - Update item (name, slug, sortOrder, yearlyBudget)
 - `DELETE /api/budget/items/:id` - Delete item
-- `PUT /api/budget/monthly-value/:itemId/:month` - Update monthly budget value
+- `PUT /api/budget/items/:itemId/months/:month` - Update monthly budget/actual values
 
 ### Transactions
 - `GET /api/transactions/third-parties` - List distinct third parties (autocomplete)
 - `GET /api/transactions` - List transactions (current year)
 - `GET /api/transactions/year/:year` - List transactions for year
 - `POST /api/transactions` - Create transaction
-- `PUT /api/transactions/:id` - Update transaction
+- `PUT /api/transactions/:id` - Update transaction (supports `recalculateAccounting`)
 - `DELETE /api/transactions/:id` - Delete transaction
 - `DELETE /api/transactions/bulk` - Bulk delete
 
@@ -266,10 +280,13 @@ All endpoints below (except `/api/auth/*`) require a `Bearer` token.
 ### Accounts
 - `GET /api/accounts/:year` - Get accounts with balances
 - `PUT /api/accounts/:year/balance` - Set initial balance
+- `PUT /api/accounts/payment-method/:id/toggle` - Toggle payment method as account
+- `PUT /api/accounts/payment-method/:id/savings` - Toggle payment method as savings account
 
 ### Payment Methods
 - `GET /api/payment-methods` - List payment methods
 - `POST /api/payment-methods` - Create payment method
+- `PUT /api/payment-methods/reorder` - Reorder payment methods
 - `PUT /api/payment-methods/:id` - Update payment method
 - `DELETE /api/payment-methods/:id` - Delete payment method
 
@@ -291,30 +308,6 @@ All endpoints below (except `/api/auth/*`) require a `Bearer` token.
   - Returns categories, descriptions, third parties, payment methods, and confidence scores
   - Matches payment methods individually per transaction (from rawPaymentMethod field or patterns)
 - `POST /api/import/bulk` - Bulk create transactions from import preview
-
-## Recent Improvements
-
-### AI Classification Enhancements
-
-**Smart Payment Method Detection**
-- PDF imports: Document-level detection (one issuer for all transactions)
-- Spreadsheet imports: Transaction-level matching (from raw payment method column)
-- Full details returned: ID, name, and institution for proper display
-
-**Enhanced Logging & Debugging**
-- Comprehensive logging for payment method detection
-- Track which payment methods the LLM identifies and whether they're accepted
-- Raw LLM response logging (first 1000 chars) for troubleshooting
-
-**Improved UX**
-- Payment methods display correctly in import preview with "Name (Institution)" format
-- Fixed payment method application from PDF extractions
-- Consistent data structure across PDF and spreadsheet workflows
-
-**Token Efficiency**
-- Compact JSON formats for categories and responses
-- PDF extraction: Single issuer detection per document
-- Classification: Direct matching from raw data (no redundant detection)
 
 ## License
 

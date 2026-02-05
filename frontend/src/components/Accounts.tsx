@@ -59,11 +59,14 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<AccountsTab>('table');
 
+  // Show all months in the accounts view
+  const activeMonths = useMemo(() => months, [months]);
+
   const loadAccounts = useCallback(async () => {
     try {
       setLoading(true);
       const data = await fetchAccounts(year);
-      setAccounts(data);
+      setAccounts(data.accounts);
     } catch (error) {
       logger.error('Failed to load accounts', error);
     } finally {
@@ -126,7 +129,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
   ];
 
   const chartData = useMemo(() => {
-    const labels = [t('accounts.initial'), ...months.map((m) => m.substring(0, 3))];
+    const labels = [t('accounts.initial'), ...activeMonths.map((m) => m.substring(0, 3))];
 
     const datasets = accounts.map((account, index) => {
       const color = chartColors[index % chartColors.length];
@@ -159,7 +162,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
     }
 
     return { labels, datasets };
-  }, [accounts, months, overallTotals, t]);
+  }, [accounts, activeMonths, overallTotals, t]);
 
   const chartOptions = useMemo(
     () => ({
@@ -243,7 +246,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
               <tr>
                 <th className="account-name-col">{t('accounts.account')}</th>
                 <th className="account-initial-col">{t('accounts.initialBalance')}</th>
-                {months.map((month, i) => (
+                {activeMonths.map((month, i) => (
                   <th key={i} className="account-month-col">
                     {month.substring(0, 3)}
                   </th>
@@ -369,7 +372,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
               <tr>
                 <th className="account-name-col">{t('accounts.netWorth')}</th>
                 <th className="account-initial-col">{t('accounts.initialBalance')}</th>
-                {months.map((month, i) => (
+                {activeMonths.map((month, i) => (
                   <th key={i} className="account-month-col">
                     {month.substring(0, 3)}
                   </th>

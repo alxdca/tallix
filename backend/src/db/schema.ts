@@ -159,6 +159,11 @@ export const transactions = pgTable('transactions', {
   description: varchar('description', { length: 500 }),
   comment: varchar('comment', { length: 500 }),
   thirdParty: varchar('third_party', { length: 200 }),
+  // Payment method ID (foreign key to payment_methods table)
+  paymentMethodId: integer('payment_method_id')
+    .references(() => paymentMethods.id, { onDelete: 'restrict' })
+    .notNull(),
+  // Legacy payment method string (deprecated, kept for backwards compatibility)
   paymentMethod: varchar('payment_method', { length: 100 }),
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
   // Accounting month/year: when the transaction is accounted for (based on payment method's settlement day)
@@ -352,6 +357,10 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
   item: one(budgetItems, {
     fields: [transactions.itemId],
     references: [budgetItems.id],
+  }),
+  paymentMethodRel: one(paymentMethods, {
+    fields: [transactions.paymentMethodId],
+    references: [paymentMethods.id],
   }),
 }));
 

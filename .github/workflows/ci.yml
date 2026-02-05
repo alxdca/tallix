@@ -101,8 +101,8 @@ jobs:
       - name: Check rawDb allowlist
         run: cd backend && pnpm rls:guard
 
-      - name: Run RLS enforcement tests
-        run: cd backend && pnpm test:rls
+      - name: Run backend tests (Vitest)
+        run: cd backend && pnpm test
         env:
           # Connection components
           DB_HOST: localhost

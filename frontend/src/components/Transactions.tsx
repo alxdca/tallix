@@ -68,7 +68,7 @@ interface Filters {
   dateTo: Date | null;
   thirdParty: string;
   description: string;
-  paymentMethods: string[]; // Multiple payment methods can be selected
+  paymentMethods: number[]; // Multiple payment method IDs can be selected
   categoryFilter: string; // Combined: "section:income", "group:Salaires"
 }
 
@@ -107,7 +107,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const [newDate, setNewDate] = useState(getTodayDisplay());
   const [newDescription, setNewDescription] = useState('');
   const [newThirdParty, setNewThirdParty] = useState('');
-  const [newPaymentMethod, setNewPaymentMethod] = useState('');
+  const [newPaymentMethodId, setNewPaymentMethodId] = useState<number | null>(null);
   const [newAmount, setNewAmount] = useState('');
   const [newItemId, setNewItemId] = useState<number | null>(null);
   // Transfer-specific form state
@@ -119,14 +119,14 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const [editDescription, setEditDescription] = useState('');
   const [editComment, setEditComment] = useState('');
   const [editThirdParty, setEditThirdParty] = useState('');
-  const [editPaymentMethod, setEditPaymentMethod] = useState('');
+  const [editPaymentMethodId, setEditPaymentMethodId] = useState<number | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editItemId, setEditItemId] = useState<number | null>(null);
   const [editAccountingMonth, setEditAccountingMonth] = useState<number>(1);
   const [editAccountingYear, setEditAccountingYear] = useState<number>(new Date().getFullYear());
   // Track original values to detect if user explicitly changed accounting fields
   const [originalDate, setOriginalDate] = useState('');
-  const [originalPaymentMethod, setOriginalPaymentMethod] = useState('');
+  const [originalPaymentMethodId, setOriginalPaymentMethodId] = useState<number | null>(null);
   const [originalAccountingMonth, setOriginalAccountingMonth] = useState<number>(1);
   const [originalAccountingYear, setOriginalAccountingYear] = useState<number>(new Date().getFullYear());
   // Edit transfer state
@@ -148,18 +148,29 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
   // Get unique values for filter dropdowns (include transfer accounts)
   const uniquePaymentMethods = useMemo(() => {
-    const methods = new Set<string>();
-    // Add transaction payment methods
+    const methodIds = new Set<number>();
+    // Add transaction payment method IDs
     transactions.forEach((t) => {
-      if (t.paymentMethod) methods.add(t.paymentMethod);
+      if (t.paymentMethodId) methodIds.add(t.paymentMethodId);
     });
-    // Add transfer account names
+    // Add transfer account IDs
     transfers.forEach((x) => {
-      methods.add(x.sourceAccount.name);
-      methods.add(x.destinationAccount.name);
+      methodIds.add(x.sourceAccount.id);
+      methodIds.add(x.destinationAccount.id);
     });
-    return Array.from(methods).sort();
-  }, [transactions, transfers]);
+    // Convert IDs to payment method objects with display names
+    return Array.from(methodIds)
+      .map((id) => {
+        const pm = paymentMethods.find((m) => m.id === id);
+        if (!pm) return null;
+        return {
+          id: pm.id,
+          name: pm.institution ? `${pm.name} (${pm.institution})` : pm.name,
+        };
+      })
+      .filter((pm): pm is { id: number; name: string } => pm !== null)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [transactions, transfers, paymentMethods]);
 
   const loadData = useCallback(async () => {
     try {
@@ -289,13 +300,13 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     if (filters.paymentMethods.length > 0) {
       result = result.filter((e) => {
         if (e.type === 'transaction') {
-          return e.transaction?.paymentMethod && filters.paymentMethods.includes(e.transaction.paymentMethod);
+          return e.transaction?.paymentMethodId && filters.paymentMethods.includes(e.transaction.paymentMethodId);
         }
-        // For transfers, check if source or destination account matches any selected method
+        // For transfers, check if source or destination account ID matches any selected method
         if (e.type === 'transfer' && e.transfer) {
           return (
-            filters.paymentMethods.includes(e.transfer.sourceAccount.name) ||
-            filters.paymentMethods.includes(e.transfer.destinationAccount.name)
+            filters.paymentMethods.includes(e.transfer.sourceAccount.id) ||
+            filters.paymentMethods.includes(e.transfer.destinationAccount.id)
           );
         }
         return false;
@@ -523,7 +534,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     if (!newAmount || isSubmitting || !isValidDateFormat(newDate)) return;
 
     if (newEntryType === 'transaction') {
-      if (!newItemId) return;
+      if (!newItemId || !newPaymentMethodId) return;
 
       setIsSubmitting(true);
       try {
@@ -533,12 +544,12 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
           date: parseDateInput(newDate), // Convert DD/MM/YYYY to YYYY-MM-DD
           description: newDescription.trim() || undefined,
           thirdParty: newThirdParty.trim() || undefined,
-          paymentMethod: newPaymentMethod || undefined,
+          paymentMethodId: newPaymentMethodId,
           amount: parseFloat(newAmount),
         });
         setNewDescription('');
         setNewThirdParty('');
-        setNewPaymentMethod('');
+        setNewPaymentMethodId(null);
         setNewAmount('');
         setNewItemId(null);
         await loadTransactions();
@@ -584,14 +595,14 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     setEditDescription(transaction.description || '');
     setEditComment(transaction.comment || '');
     setEditThirdParty(transaction.thirdParty || '');
-    setEditPaymentMethod(transaction.paymentMethod || '');
+    setEditPaymentMethodId(transaction.paymentMethodId);
     setEditAmount(transaction.amount.toString());
     setEditItemId(transaction.itemId);
     setEditAccountingMonth(transaction.accountingMonth);
     setEditAccountingYear(transaction.accountingYear);
     // Store original values to detect explicit changes
     setOriginalDate(dateDisplay);
-    setOriginalPaymentMethod(transaction.paymentMethod || '');
+    setOriginalPaymentMethodId(transaction.paymentMethodId);
     setOriginalAccountingMonth(transaction.accountingMonth);
     setOriginalAccountingYear(transaction.accountingYear);
   };
@@ -608,7 +619,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     setEditAccountingYear(transfer.accountingYear);
     // Store original values to detect explicit changes
     setOriginalDate(dateDisplay);
-    setOriginalPaymentMethod('');
+    setOriginalPaymentMethodId(null);
     setOriginalAccountingMonth(transfer.accountingMonth);
     setOriginalAccountingYear(transfer.accountingYear);
   };
@@ -619,7 +630,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     setEditDescription('');
     setEditComment('');
     setEditThirdParty('');
-    setEditPaymentMethod('');
+    setEditPaymentMethodId(null);
     setEditAmount('');
     setEditItemId(null);
     setEditAccountingMonth(1);
@@ -628,7 +639,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     setEditDestAccount('');
     // Reset original values
     setOriginalDate('');
-    setOriginalPaymentMethod('');
+    setOriginalPaymentMethodId(null);
     setOriginalAccountingMonth(1);
     setOriginalAccountingYear(new Date().getFullYear());
   };
@@ -645,7 +656,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
     // Check if date or payment method changed (which would affect accounting calculation)
     const dateChanged = editDate !== originalDate;
-    const paymentMethodChanged = editPaymentMethod !== originalPaymentMethod;
+    const paymentMethodChanged = editPaymentMethodId !== originalPaymentMethodId;
 
     setIsSubmitting(true);
     try {
@@ -674,13 +685,15 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
         await updateTransfer(numericId, transferData);
       } else {
         // Update transaction
+        if (!editPaymentMethodId) return;
+        
         const transactionData: Parameters<typeof updateTransaction>[1] = {
           itemId: editItemId,
           date: parseDateInput(editDate),
           description: editDescription.trim(),
           comment: editComment.trim(),
           thirdParty: editThirdParty.trim() || undefined,
-          paymentMethod: editPaymentMethod || undefined,
+          paymentMethodId: editPaymentMethodId,
           amount: parseFloat(editAmount),
         };
 
@@ -985,15 +998,15 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
           {newEntryType === 'transaction' && (
             <div className="form-row">
               <select
-                value={newPaymentMethod}
-                onChange={(e) => setNewPaymentMethod(e.target.value)}
+                value={newPaymentMethodId ?? ''}
+                onChange={(e) => setNewPaymentMethodId(e.target.value ? Number(e.target.value) : null)}
                 className="form-select payment-method-select"
               >
                 <option value="">{t('transactions.paymentMethod')}</option>
                 {paymentMethods
                   .filter((m) => !m.isSavingsAccount)
                   .map((method) => (
-                    <option key={method.id} value={method.name}>
+                    <option key={method.id} value={method.id}>
                       {formatWithInstitution(method.name, method.institution)}
                     </option>
                   ))}
@@ -1002,7 +1015,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                     {paymentMethods
                       .filter((m) => m.isSavingsAccount)
                       .map((method) => (
-                        <option key={method.id} value={method.name}>
+                        <option key={method.id} value={method.id}>
                           {formatWithInstitution(method.name, method.institution)}
                         </option>
                       ))}
@@ -1194,7 +1207,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                       {filters.paymentMethods.length === 0
                         ? t('transactions.all')
                         : filters.paymentMethods.length === 1
-                          ? filters.paymentMethods[0]
+                          ? uniquePaymentMethods.find((m) => m.id === filters.paymentMethods[0])?.name || ''
                           : t('transactions.paymentMethodsSelected', { count: filters.paymentMethods.length })}
                     </button>
                     <div className="multi-select-dropdown">
@@ -1207,22 +1220,22 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                         <span>{t('transactions.all')}</span>
                       </label>
                       {uniquePaymentMethods.map((m) => (
-                        <label key={m} className="multi-select-option">
+                        <label key={m.id} className="multi-select-option">
                           <input
                             type="checkbox"
-                            checked={filters.paymentMethods.includes(m)}
+                            checked={filters.paymentMethods.includes(m.id)}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setFilters((f) => ({ ...f, paymentMethods: [...f.paymentMethods, m] }));
+                                setFilters((f) => ({ ...f, paymentMethods: [...f.paymentMethods, m.id] }));
                               } else {
                                 setFilters((f) => ({
                                   ...f,
-                                  paymentMethods: f.paymentMethods.filter((pm) => pm !== m),
+                                  paymentMethods: f.paymentMethods.filter((pm) => pm !== m.id),
                                 }));
                               }
                             }}
                           />
-                          <span>{m}</span>
+                          <span>{m.name}</span>
                         </label>
                       ))}
                     </div>
@@ -1582,15 +1595,15 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                           </td>
                           <td>
                             <select
-                              value={editPaymentMethod}
-                              onChange={(e) => setEditPaymentMethod(e.target.value)}
+                              value={editPaymentMethodId ?? ''}
+                              onChange={(e) => setEditPaymentMethodId(e.target.value ? Number(e.target.value) : null)}
                               className="edit-select"
                             >
                               <option value="">{t('common.none')}</option>
                               {paymentMethods
                                 .filter((m) => !m.isSavingsAccount)
                                 .map((method) => (
-                                  <option key={method.id} value={method.name}>
+                                  <option key={method.id} value={method.id}>
                                     {formatWithInstitution(method.name, method.institution)}
                                   </option>
                                 ))}
@@ -1599,7 +1612,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                   {paymentMethods
                                     .filter((m) => m.isSavingsAccount)
                                     .map((method) => (
-                                      <option key={method.id} value={method.name}>
+                                      <option key={method.id} value={method.id}>
                                         {formatWithInstitution(method.name, method.institution)}
                                       </option>
                                     ))}

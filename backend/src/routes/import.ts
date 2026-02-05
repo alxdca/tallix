@@ -162,9 +162,13 @@ router.post(
     }
 
     const budgetId = req.budget!.id;
-    const result = await withTenantContext(userId, budgetId, (tx) =>
-      transactionsSvc.bulkCreateTransactions(tx, userId, budgetId, yearId, transactionsData)
-    );
+    // Convert payment method names to IDs before creating transactions
+    const result = await withTenantContext(userId, budgetId, async (tx) => {
+      const transactionsWithIds = await importSvc.convertPaymentMethodNamesToIds(
+        tx, userId, transactionsData
+      );
+      return transactionsSvc.bulkCreateTransactions(tx, userId, budgetId, yearId, transactionsWithIds);
+    });
     res.status(201).json(result);
   })
 );
