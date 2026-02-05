@@ -7,6 +7,7 @@ import { logger } from '../utils/logger';
 interface ThirdPartyAutocompleteProps {
   value: string;
   onChange: (value: string) => void;
+  onCommit?: (value: string) => void;
   placeholder?: string;
   className?: string;
 }
@@ -14,6 +15,7 @@ interface ThirdPartyAutocompleteProps {
 export default function ThirdPartyAutocomplete({
   value,
   onChange,
+  onCommit,
   placeholder,
   className = '',
 }: ThirdPartyAutocompleteProps) {
@@ -95,6 +97,7 @@ export default function ThirdPartyAutocomplete({
 
   const handleSelectSuggestion = (suggestion: string) => {
     onChange(suggestion);
+    onCommit?.(suggestion);
     setIsOpen(false);
     setSuggestions([]);
   };
@@ -131,6 +134,7 @@ export default function ThirdPartyAutocomplete({
         value={value}
         onChange={handleInputChange}
         onFocus={handleInputFocus}
+        onBlur={() => onCommit?.(value)}
         onKeyDown={handleKeyDown}
         placeholder={resolvedPlaceholder}
         className={`autocomplete-input ${className}`}

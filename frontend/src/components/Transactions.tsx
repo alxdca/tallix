@@ -54,6 +54,10 @@ function formatAccountingPeriod(month: number, year: number, monthNames: string[
   return `${monthNames[month - 1]} ${year}`;
 }
 
+function normalizeThirdParty(value?: string | null): string {
+  return value?.trim().toLowerCase().replace(/\s+/g, ' ') ?? '';
+}
+
 interface TransactionsProps {
   year: number;
   yearId: number;
@@ -111,6 +115,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const [newPaymentMethodId, setNewPaymentMethodId] = useState<number | null>(null);
   const [newAmount, setNewAmount] = useState('');
   const [newItemId, setNewItemId] = useState<number | null>(null);
+  const [autoItemFromThirdParty, setAutoItemFromThirdParty] = useState(false);
   // Transfer-specific form state
   const [newSourceAccount, setNewSourceAccount] = useState(''); // Account ID
   const [newDestAccount, setNewDestAccount] = useState('');
@@ -230,6 +235,36 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       logger.error('Failed to load transactions', error);
     }
   };
+
+  const applyThirdPartyCategorySuggestion = useCallback(
+    (value: string) => {
+      const normalized = normalizeThirdParty(value);
+      if (!normalized) {
+        if (autoItemFromThirdParty) {
+          setNewItemId(null);
+          setAutoItemFromThirdParty(false);
+        }
+        return;
+      }
+
+      const lastMatch = transactions.find(
+        (transaction) =>
+          transaction.itemId &&
+          normalizeThirdParty(transaction.thirdParty) === normalized
+      );
+
+      if (lastMatch?.itemId) {
+        if (newItemId === null || autoItemFromThirdParty) {
+          setNewItemId(lastMatch.itemId);
+          setAutoItemFromThirdParty(true);
+        }
+      } else if (autoItemFromThirdParty) {
+        setNewItemId(null);
+        setAutoItemFromThirdParty(false);
+      }
+    },
+    [transactions, newItemId, autoItemFromThirdParty]
+  );
 
   // Combine transactions and transfers into unified entries
   const unifiedEntries = useMemo((): UnifiedEntry[] => {
@@ -553,6 +588,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
         setNewPaymentMethodId(null);
         setNewAmount('');
         setNewItemId(null);
+        setAutoItemFromThirdParty(false);
         await loadTransactions();
         onTransactionsChanged?.();
       } catch (error) {
@@ -939,6 +975,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               <ThirdPartyAutocomplete
                 value={newThirdParty}
                 onChange={setNewThirdParty}
+                onCommit={applyThirdPartyCategorySuggestion}
                 placeholder={t('transactions.thirdPartyPlaceholder')}
                 className="form-input third-party-input"
               />
@@ -1051,7 +1088,10 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
             {newEntryType === 'transaction' ? (
               <select
                 value={newItemId || ''}
-                onChange={(e) => setNewItemId(e.target.value ? Number(e.target.value) : null)}
+                onChange={(e) => {
+                  setNewItemId(e.target.value ? Number(e.target.value) : null);
+                  setAutoItemFromThirdParty(false);
+                }}
                 className="form-select category-select"
                 required
               >
