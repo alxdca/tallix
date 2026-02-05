@@ -38,8 +38,8 @@
   --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
 
   /* Typography */
-  --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   /* Sizing */
   --sidebar-width: 240px;
@@ -209,7 +209,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .nav-sub-item {
-  padding-left: 44px !important;
+  padding-left: 44px;
   font-size: 0.875rem;
 }
 
@@ -501,11 +501,11 @@ input[type="number"]::-webkit-inner-spin-button {
 .month-header {
   width: calc(var(--cell-width) * 2);
   min-width: calc(var(--cell-width) * 2);
-  text-align: center !important;
+  text-align: center;
 }
 
 .month-sub {
-  text-align: center !important;
+  text-align: center;
 }
 
 .header-types th {
@@ -547,8 +547,8 @@ input[type="number"]::-webkit-inner-spin-button {
   width: var(--category-width);
   min-width: var(--category-width);
   max-width: var(--category-width);
-  text-align: left !important;
-  padding-left: 16px !important;
+  text-align: left;
+  padding-left: 16px;
   border-right: 1px solid var(--border-color);
 }
 
@@ -665,15 +665,15 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .section-header.section-income td {
-  background: linear-gradient(90deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 50%, transparent 100%) !important;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 50%, transparent 100%);
 }
 
 .section-header.section-expense td {
-  background: linear-gradient(90deg, rgba(239, 68, 68, 0.12) 0%, rgba(239, 68, 68, 0.04) 50%, transparent 100%) !important;
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.12) 0%, rgba(239, 68, 68, 0.04) 50%, transparent 100%);
 }
 
 .section-header.section-savings td {
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 50%, transparent 100%) !important;
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 50%, transparent 100%);
 }
 
 .section-header td.category-cell {
@@ -724,13 +724,13 @@ input[type="number"]::-webkit-inner-spin-button {
   font-weight: 600;
   font-size: 0.8125rem;
   color: var(--text-primary);
-  background: var(--bg-tertiary) !important;
+  background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .group-header td.category-cell {
   padding-left: 28px;
-  background: var(--bg-tertiary) !important;
+  background: var(--bg-tertiary);
   cursor: pointer;
   user-select: none;
 }
@@ -756,7 +756,7 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .group-header td.annual-cell.budget-cell,
 .group-header td.annual-cell.actual-cell {
-  background: var(--bg-tertiary) !important;
+  background: var(--bg-tertiary);
 }
 
 /* Income rows */
@@ -1473,7 +1473,7 @@ td.zero {
 
 .drop-hint {
   text-align: center;
-  padding: 20px 16px !important;
+  padding: 20px 16px;
   color: var(--text-muted);
   font-style: italic;
   border: 2px dashed var(--border-subtle);
@@ -1621,7 +1621,7 @@ td.zero {
 }
 
 .settlement-day-input {
-  width: 60px !important;
+  width: 60px;
   text-align: center;
 }
 
@@ -1800,7 +1800,9 @@ td.zero {
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  transition: color var(--transition-fast), background var(--transition-fast);
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .date-picker-btn:hover {
@@ -1943,13 +1945,13 @@ td.zero {
 }
 
 .accounting-month-select {
-  width: 70px !important;
-  min-width: 70px !important;
+  width: 70px;
+  min-width: 70px;
 }
 
 .accounting-year-input {
-  width: 65px !important;
-  min-width: 65px !important;
+  width: 65px;
+  min-width: 65px;
 }
 
 .transactions-table .description-cell {
@@ -2192,14 +2194,14 @@ td.zero {
 .react-datepicker__day--selected,
 .react-datepicker__day--in-selecting-range,
 .react-datepicker__day--in-range {
-  background: var(--accent-budget) !important;
-  color: white !important;
+  background: var(--accent-budget);
+  color: white;
 }
 
 .react-datepicker__day--range-start,
 .react-datepicker__day--range-end {
-  background: var(--accent-budget) !important;
-  color: white !important;
+  background: var(--accent-budget);
+  color: white;
   font-weight: 600;
 }
 
@@ -2774,8 +2776,8 @@ td.zero {
 }
 
 .paste-format-hint {
-  color: var(--text-muted) !important;
-  font-size: 0.8125rem !important;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
 }
 
 .paste-format-hint code {
@@ -3249,13 +3251,13 @@ td.zero {
 }
 
 .preview-select.accounting-month {
-  width: 70px !important;
-  min-width: 70px !important;
+  width: 70px;
+  min-width: 70px;
 }
 
 .preview-input.accounting-year {
-  width: 60px !important;
-  min-width: 60px !important;
+  width: 60px;
+  min-width: 60px;
 }
 
 .preview-table .col-actions {
@@ -3327,8 +3329,8 @@ td.zero {
 .preview-input.missing-field,
 .preview-select.missing-field,
 .autocomplete-input.missing-field {
-  border-color: var(--accent-negative) !important;
-  background: rgba(239, 68, 68, 0.08) !important;
+  border-color: var(--accent-negative);
+  background: rgba(239, 68, 68, 0.08);
 }
 
 .preview-table tr.has-errors {
@@ -3812,7 +3814,7 @@ td.zero {
 }
 
 .toggle-slider::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 2px;
   left: 2px;
@@ -4710,9 +4712,10 @@ td.zero {
 
 /* Section rows */
 .spreadsheet .section-row {
-  background: linear-gradient(90deg, 
-    color-mix(in srgb, var(--section-color) 15%, transparent) 0%, 
-    color-mix(in srgb, var(--section-color) 5%, transparent) 50%, 
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--section-color) 15%, transparent) 0%,
+    color-mix(in srgb, var(--section-color) 5%, transparent) 50%,
     transparent 100%
   );
 }
@@ -4728,8 +4731,9 @@ td.zero {
 }
 
 .spreadsheet .section-row td.category-name {
-  background: linear-gradient(90deg, 
-    color-mix(in srgb, var(--section-color) 20%, var(--bg-secondary)) 0%, 
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--section-color) 20%, var(--bg-secondary)) 0%,
     color-mix(in srgb, var(--section-color) 8%, var(--bg-secondary)) 100%
   );
 }
@@ -4795,8 +4799,9 @@ td.zero {
 
 .spreadsheet .section-row:hover td,
 .spreadsheet .section-row:hover td.category-name {
-  background: linear-gradient(90deg, 
-    color-mix(in srgb, var(--section-color) 25%, var(--bg-hover)) 0%, 
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--section-color) 25%, var(--bg-hover)) 0%,
     color-mix(in srgb, var(--section-color) 10%, var(--bg-hover)) 100%
   );
 }
@@ -4863,7 +4868,7 @@ td.zero {
 }
 
 .spreadsheet .funds-summary-row td.cell.negative {
-  color: var(--accent-negative) !important;
+  color: var(--accent-negative);
 }
 
 .spreadsheet .funds-summary-row.start-of-month {
@@ -5057,9 +5062,10 @@ td.zero {
 
 /* Section rows */
 .budget-planning-table .section-row {
-  background: linear-gradient(90deg, 
-    color-mix(in srgb, var(--section-color) 15%, transparent) 0%, 
-    color-mix(in srgb, var(--section-color) 5%, transparent) 50%, 
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--section-color) 15%, transparent) 0%,
+    color-mix(in srgb, var(--section-color) 5%, transparent) 50%,
     transparent 100%
   );
 }
@@ -5087,8 +5093,9 @@ td.zero {
   position: sticky;
   left: 0;
   z-index: 5;
-  background: linear-gradient(90deg, 
-    color-mix(in srgb, var(--section-color) 20%, var(--bg-secondary)) 0%, 
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--section-color) 20%, var(--bg-secondary)) 0%,
     color-mix(in srgb, var(--section-color) 8%, var(--bg-secondary)) 100%
   );
   border-right: 1px solid var(--border-color);
@@ -5569,4 +5576,3 @@ td.zero {
   color: var(--text-primary);
   background: var(--bg-tertiary);
 }
-

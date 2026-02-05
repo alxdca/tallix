@@ -1,14 +1,24 @@
-import { eq, asc, isNull, and, sql } from 'drizzle-orm';
 import Decimal from 'decimal.js';
-import { db, budgetYears, budgetGroups, budgetItems, monthlyValues, transactions, transfers } from '../db/index.js';
-import type { BudgetData, BudgetGroup, BudgetItem, MonthlyValue, BudgetSummary, AnnualTotals } from '../types.js';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { budgetGroups, budgetItems, budgetYears, db, monthlyValues, transactions, transfers } from '../db/index.js';
+import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, BudgetSummary, MonthlyValue } from '../types.js';
 
 // Configure Decimal.js for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
 export const MONTHS = [
-  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
-  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+  'Janvier',
+  'Février',
+  'Mars',
+  'Avril',
+  'Mai',
+  'Juin',
+  'Juillet',
+  'Août',
+  'Septembre',
+  'Octobre',
+  'Novembre',
+  'Décembre',
 ] as const;
 
 // Default unclassified category constants
@@ -51,10 +61,7 @@ async function getTransactionTotals(yearId: number, budgetYear: number): Promise
       total: sql<string>`SUM(${transactions.amount})`,
     })
     .from(transactions)
-    .where(and(
-      eq(transactions.yearId, yearId),
-      eq(transactions.accountingYear, budgetYear)
-    ))
+    .where(and(eq(transactions.yearId, yearId), eq(transactions.accountingYear, budgetYear)))
     .groupBy(transactions.itemId, transactions.accountingMonth);
 
   const totalsMap = new Map<string, number>();
@@ -72,10 +79,7 @@ async function getTransactionTotals(yearId: number, budgetYear: number): Promise
   const transferResult = await db
     .select()
     .from(transfers)
-    .where(and(
-      eq(transfers.yearId, yearId),
-      eq(transfers.accountingYear, budgetYear)
-    ));
+    .where(and(eq(transfers.yearId, yearId), eq(transfers.accountingYear, budgetYear)));
 
   for (const t of transferResult) {
     const month = t.accountingMonth;
@@ -117,16 +121,18 @@ interface ItemWithMonthlyValues {
 
 // Format item with monthly values and transaction actuals
 function formatItem(item: ItemWithMonthlyValues, transactionTotals: Map<string, number>): BudgetItem {
-  const months: MonthlyValue[] = Array(12).fill(null).map((_, i) => {
-    const monthData = item.monthlyValues?.find((mv) => mv.month === i + 1);
-    const transactionKey = `${item.id}-${i + 1}`;
-    const transactionActual = transactionTotals.get(transactionKey) || 0;
-    
-    return {
-      budget: monthData ? parseFloat(monthData.budget) : 0,
-      actual: transactionActual,
-    };
-  });
+  const months: MonthlyValue[] = Array(12)
+    .fill(null)
+    .map((_, i) => {
+      const monthData = item.monthlyValues?.find((mv) => mv.month === i + 1);
+      const transactionKey = `${item.id}-${i + 1}`;
+      const transactionActual = transactionTotals.get(transactionKey) || 0;
+
+      return {
+        budget: monthData ? parseFloat(monthData.budget) : 0,
+        actual: transactionActual,
+      };
+    });
 
   return {
     id: item.id,
@@ -140,7 +146,11 @@ function formatItem(item: ItemWithMonthlyValues, transactionTotals: Map<string, 
 // Calculate totals for groups
 // Uses Decimal.js to avoid floating-point rounding errors over many additions
 // Includes both monthly budgets and yearly budgets
-function calculateTotals(groups: BudgetGroup[]): { income: AnnualTotals; expenses: AnnualTotals; savings: AnnualTotals } {
+function calculateTotals(groups: BudgetGroup[]): {
+  income: AnnualTotals;
+  expenses: AnnualTotals;
+  savings: AnnualTotals;
+} {
   let incomeBudget = new Decimal(0);
   let incomeActual = new Decimal(0);
   let expensesBudget = new Decimal(0);
@@ -152,7 +162,7 @@ function calculateTotals(groups: BudgetGroup[]): { income: AnnualTotals; expense
     group.items.forEach((item) => {
       // Add yearly budget to the total (once per item, not per month)
       const yearlyBudget = new Decimal(item.yearlyBudget || 0);
-      
+
       switch (group.type) {
         case 'income':
           incomeBudget = incomeBudget.plus(yearlyBudget);
@@ -164,7 +174,7 @@ function calculateTotals(groups: BudgetGroup[]): { income: AnnualTotals; expense
           savingsBudget = savingsBudget.plus(yearlyBudget);
           break;
       }
-      
+
       // Add monthly budgets and actuals
       item.months.forEach((month) => {
         switch (group.type) {
@@ -218,7 +228,7 @@ export async function getBudgetDataForYear(year: number): Promise<BudgetData> {
     slug: group.slug,
     type: group.type as BudgetGroup['type'],
     sortOrder: group.sortOrder,
-    items: group.items.filter(item => item.groupId !== null).map(item => formatItem(item, transactionTotals)),
+    items: group.items.filter((item) => item.groupId !== null).map((item) => formatItem(item, transactionTotals)),
   }));
 
   return {
@@ -249,10 +259,10 @@ export async function getAllYears() {
   const years = await db.query.budgetYears.findMany({
     orderBy: [asc(budgetYears.year)],
   });
-  return years.map((y) => ({ 
-    id: y.id, 
-    year: y.year, 
-    initialBalance: parseFloat(y.initialBalance) 
+  return years.map((y) => ({
+    id: y.id,
+    year: y.year,
+    initialBalance: parseFloat(y.initialBalance),
   }));
 }
 
@@ -261,15 +271,18 @@ export async function getAllYears() {
 // Uses try-catch on unique constraint to handle race conditions
 export async function createYear(year: number, initialBalance: number = 0) {
   try {
-    const [newYear] = await db.insert(budgetYears).values({
-      year,
-      initialBalance: initialBalance.toString(),
-    }).returning();
+    const [newYear] = await db
+      .insert(budgetYears)
+      .values({
+        year,
+        initialBalance: initialBalance.toString(),
+      })
+      .returning();
 
-    return { 
-      id: newYear.id, 
-      year: newYear.year, 
-      initialBalance: parseFloat(newYear.initialBalance) 
+    return {
+      id: newYear.id,
+      year: newYear.year,
+      initialBalance: parseFloat(newYear.initialBalance),
     };
   } catch (err: unknown) {
     // Check for unique constraint violation (PostgreSQL error code 23505)
@@ -282,17 +295,18 @@ export async function createYear(year: number, initialBalance: number = 0) {
 
 // Update a year
 export async function updateYear(id: number, initialBalance: number) {
-  const [updated] = await db.update(budgetYears)
+  const [updated] = await db
+    .update(budgetYears)
     .set({ initialBalance: initialBalance.toString(), updatedAt: new Date() })
     .where(eq(budgetYears.id, id))
     .returning();
 
   if (!updated) return null;
 
-  return { 
-    id: updated.id, 
-    year: updated.year, 
-    initialBalance: parseFloat(updated.initialBalance) 
+  return {
+    id: updated.id,
+    year: updated.year,
+    initialBalance: parseFloat(updated.initialBalance),
   };
 }
 
@@ -304,25 +318,32 @@ export async function createGroup(data: {
   type?: 'income' | 'expense' | 'savings';
   sortOrder?: number;
 }) {
-  const [newGroup] = await db.insert(budgetGroups).values({
-    yearId: data.yearId,
-    name: data.name,
-    slug: data.slug,
-    type: data.type ?? 'expense',
-    sortOrder: data.sortOrder ?? 0,
-  }).returning();
+  const [newGroup] = await db
+    .insert(budgetGroups)
+    .values({
+      yearId: data.yearId,
+      name: data.name,
+      slug: data.slug,
+      type: data.type ?? 'expense',
+      sortOrder: data.sortOrder ?? 0,
+    })
+    .returning();
 
   return newGroup;
 }
 
 // Update a group
-export async function updateGroup(id: number, data: {
-  name?: string;
-  slug?: string;
-  type?: 'income' | 'expense' | 'savings';
-  sortOrder?: number;
-}) {
-  const [updated] = await db.update(budgetGroups)
+export async function updateGroup(
+  id: number,
+  data: {
+    name?: string;
+    slug?: string;
+    type?: 'income' | 'expense' | 'savings';
+    sortOrder?: number;
+  }
+) {
+  const [updated] = await db
+    .update(budgetGroups)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(budgetGroups.id, id))
     .returning();
@@ -335,9 +356,7 @@ export async function updateGroup(id: number, data: {
 export async function reorderGroups(groups: { id: number; sortOrder: number }[]) {
   await db.transaction(async (tx) => {
     for (const { id, sortOrder } of groups) {
-      await tx.update(budgetGroups)
-        .set({ sortOrder, updatedAt: new Date() })
-        .where(eq(budgetGroups.id, id));
+      await tx.update(budgetGroups).set({ sortOrder, updatedAt: new Date() }).where(eq(budgetGroups.id, id));
     }
   });
 }
@@ -347,9 +366,7 @@ export async function reorderGroups(groups: { id: number; sortOrder: number }[])
 export async function reorderItems(items: { id: number; sortOrder: number }[]) {
   await db.transaction(async (tx) => {
     for (const { id, sortOrder } of items) {
-      await tx.update(budgetItems)
-        .set({ sortOrder, updatedAt: new Date() })
-        .where(eq(budgetItems.id, id));
+      await tx.update(budgetItems).set({ sortOrder, updatedAt: new Date() }).where(eq(budgetItems.id, id));
     }
   });
 }
@@ -362,29 +379,27 @@ export async function deleteGroup(id: number): Promise<boolean> {
   const existing = await db.query.budgetGroups.findFirst({
     where: eq(budgetGroups.id, id),
   });
-  
+
   if (!existing) {
     return false;
   }
-  
+
   // Use transaction to ensure both operations succeed or fail together
   await db.transaction(async (tx) => {
     // Move items to unassigned
-    await tx.update(budgetItems)
-      .set({ groupId: null, updatedAt: new Date() })
-      .where(eq(budgetItems.groupId, id));
-    
+    await tx.update(budgetItems).set({ groupId: null, updatedAt: new Date() }).where(eq(budgetItems.groupId, id));
+
     // Delete the group
     await tx.delete(budgetGroups).where(eq(budgetGroups.id, id));
   });
-  
+
   return true;
 }
 
 // Get unassigned items for a year
 export async function getUnassignedItems(yearId: number, budgetYear: number): Promise<BudgetItem[]> {
   const transactionTotals = await getTransactionTotals(yearId, budgetYear);
-  
+
   const items = await db.query.budgetItems.findMany({
     where: and(eq(budgetItems.yearId, yearId), isNull(budgetItems.groupId)),
     orderBy: [asc(budgetItems.sortOrder)],
@@ -395,7 +410,7 @@ export async function getUnassignedItems(yearId: number, budgetYear: number): Pr
     },
   });
 
-  return items.map(item => formatItem(item, transactionTotals));
+  return items.map((item) => formatItem(item, transactionTotals));
 }
 
 // Create a new item
@@ -406,21 +421,26 @@ export async function createItem(data: {
   slug: string;
   sortOrder?: number;
 }) {
-  const [newItem] = await db.insert(budgetItems).values({
-    yearId: data.yearId,
-    groupId: data.groupId || null,
-    name: data.name,
-    slug: data.slug,
-    sortOrder: data.sortOrder ?? 0,
-  }).returning();
+  const [newItem] = await db
+    .insert(budgetItems)
+    .values({
+      yearId: data.yearId,
+      groupId: data.groupId || null,
+      name: data.name,
+      slug: data.slug,
+      sortOrder: data.sortOrder ?? 0,
+    })
+    .returning();
 
   // Create empty monthly values for the item
-  const monthlyData = Array(12).fill(null).map((_, i) => ({
-    itemId: newItem.id,
-    month: i + 1,
-    budget: '0',
-    actual: '0',
-  }));
+  const monthlyData = Array(12)
+    .fill(null)
+    .map((_, i) => ({
+      itemId: newItem.id,
+      month: i + 1,
+      budget: '0',
+      actual: '0',
+    }));
   await db.insert(monthlyValues).values(monthlyData);
 
   return newItem;
@@ -470,12 +490,14 @@ export async function getOrCreateUnclassifiedItem(yearId: number): Promise<numbe
 
   if (!existingMonthlyValues) {
     // Create empty monthly values for the item
-    const monthlyData = Array(12).fill(null).map((_, i) => ({
-      itemId: unclassifiedItem.id,
-      month: i + 1,
-      budget: '0',
-      actual: '0',
-    }));
+    const monthlyData = Array(12)
+      .fill(null)
+      .map((_, i) => ({
+        itemId: unclassifiedItem.id,
+        month: i + 1,
+        budget: '0',
+        actual: '0',
+      }));
     await db.insert(monthlyValues).values(monthlyData);
   }
 
@@ -483,29 +505,30 @@ export async function getOrCreateUnclassifiedItem(yearId: number): Promise<numbe
 }
 
 // Update an item
-export async function updateItem(id: number, data: {
-  name?: string;
-  slug?: string;
-  sortOrder?: number;
-  yearlyBudget?: number;
-}) {
+export async function updateItem(
+  id: number,
+  data: {
+    name?: string;
+    slug?: string;
+    sortOrder?: number;
+    yearlyBudget?: number;
+  }
+) {
   const updateData: Record<string, unknown> = { updatedAt: new Date() };
   if (data.name !== undefined) updateData.name = data.name;
   if (data.slug !== undefined) updateData.slug = data.slug;
   if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
   if (data.yearlyBudget !== undefined) updateData.yearlyBudget = data.yearlyBudget.toString();
 
-  const [updated] = await db.update(budgetItems)
-    .set(updateData)
-    .where(eq(budgetItems.id, id))
-    .returning();
+  const [updated] = await db.update(budgetItems).set(updateData).where(eq(budgetItems.id, id)).returning();
 
   return updated || null;
 }
 
 // Move item to a group (or unassign)
 export async function moveItem(itemId: number, groupId: number | null) {
-  const [updated] = await db.update(budgetItems)
+  const [updated] = await db
+    .update(budgetItems)
     .set({ groupId: groupId || null, updatedAt: new Date() })
     .where(eq(budgetItems.id, itemId))
     .returning();
@@ -520,11 +543,11 @@ export async function deleteItem(id: number): Promise<boolean> {
   const existing = await db.query.budgetItems.findFirst({
     where: eq(budgetItems.id, id),
   });
-  
+
   if (!existing) {
     return false;
   }
-  
+
   await db.delete(budgetItems).where(eq(budgetItems.id, id));
   return true;
 }
@@ -532,15 +555,19 @@ export async function deleteItem(id: number): Promise<boolean> {
 // Update monthly values
 // Uses upsert pattern to avoid race conditions under concurrent requests
 // Note: Requires unique constraint on (item_id, month) - see migration
-export async function updateMonthlyValue(itemId: number, month: number, data: {
-  budget?: number;
-  actual?: number;
-}) {
+export async function updateMonthlyValue(
+  itemId: number,
+  month: number,
+  data: {
+    budget?: number;
+    actual?: number;
+  }
+) {
   // First, try to get existing to determine if this is create or update
   const existing = await db.query.monthlyValues.findFirst({
     where: (mv, { and }) => and(eq(mv.itemId, itemId), eq(mv.month, month)),
   });
-  
+
   const isCreate = !existing;
   const budgetValue = data.budget?.toString() ?? existing?.budget ?? '0';
   const actualValue = data.actual?.toString() ?? existing?.actual ?? '0';
@@ -564,8 +591,8 @@ export async function updateMonthlyValue(itemId: number, month: number, data: {
     })
     .returning();
 
-  return { 
-    budget: parseFloat(result.budget), 
+  return {
+    budget: parseFloat(result.budget),
     actual: parseFloat(result.actual),
     created: isCreate,
   };

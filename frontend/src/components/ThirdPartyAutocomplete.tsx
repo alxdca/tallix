@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import type React from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchThirdParties } from '../api';
 import { logger } from '../utils/logger';
 
@@ -34,9 +35,7 @@ export default function ThirdPartyAutocomplete({
     try {
       const results = await fetchThirdParties(search);
       // Filter out exact matches and current value
-      const filtered = results.filter(
-        tp => tp.toLowerCase() !== search.toLowerCase()
-      );
+      const filtered = results.filter((tp) => tp.toLowerCase() !== search.toLowerCase());
       setSuggestions(filtered);
       setHighlightedIndex(-1);
     } catch (error) {
@@ -103,15 +102,11 @@ export default function ThirdPartyAutocomplete({
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setHighlightedIndex(prev => 
-          prev < suggestions.length - 1 ? prev + 1 : 0
-        );
+        setHighlightedIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0));
         break;
       case 'ArrowUp':
         e.preventDefault();
-        setHighlightedIndex(prev => 
-          prev > 0 ? prev - 1 : suggestions.length - 1
-        );
+        setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1));
         break;
       case 'Enter':
         e.preventDefault();

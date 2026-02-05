@@ -8,7 +8,7 @@ export const ACCOUNT_TYPES = {
   PAYMENT_METHOD: 'payment_method',
 } as const;
 
-export type AccountType = typeof ACCOUNT_TYPES[keyof typeof ACCOUNT_TYPES];
+export type AccountType = (typeof ACCOUNT_TYPES)[keyof typeof ACCOUNT_TYPES];
 
 // Type guard for AccountType validation
 export function isValidAccountType(value: unknown): value is AccountType {

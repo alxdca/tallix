@@ -1,5 +1,16 @@
-import { pgTable, serial, varchar, integer, decimal, boolean, timestamp, text, date, uniqueIndex } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
+import {
+  boolean,
+  date,
+  decimal,
+  integer,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+  varchar,
+} from 'drizzle-orm/pg-core';
 
 // Budget Years
 export const budgetYears = pgTable('budget_years', {
@@ -12,57 +23,77 @@ export const budgetYears = pgTable('budget_years', {
 
 // Budget Groups (categories like REVENUS, MAISON, etc.)
 // type: 'income' | 'expense' | 'savings'
-export const budgetGroups = pgTable('budget_groups', {
-  id: serial('id').primaryKey(),
-  yearId: integer('year_id').references(() => budgetYears.id, { onDelete: 'cascade' }).notNull(),
-  name: varchar('name', { length: 100 }).notNull(),
-  slug: varchar('slug', { length: 100 }).notNull(),
-  type: varchar('type', { length: 20 }).notNull().default('expense'),
-  sortOrder: integer('sort_order').notNull().default(0),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => ({
-  // Unique constraint on (year_id, slug) to prevent duplicate slugs within a year
-  yearSlugUnique: uniqueIndex('budget_groups_year_slug_unique').on(table.yearId, table.slug),
-}));
+export const budgetGroups = pgTable(
+  'budget_groups',
+  {
+    id: serial('id').primaryKey(),
+    yearId: integer('year_id')
+      .references(() => budgetYears.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    slug: varchar('slug', { length: 100 }).notNull(),
+    type: varchar('type', { length: 20 }).notNull().default('expense'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Unique constraint on (year_id, slug) to prevent duplicate slugs within a year
+    yearSlugUnique: uniqueIndex('budget_groups_year_slug_unique').on(table.yearId, table.slug),
+  })
+);
 
 // Budget Items (individual line items within groups)
-export const budgetItems = pgTable('budget_items', {
-  id: serial('id').primaryKey(),
-  yearId: integer('year_id').references(() => budgetYears.id, { onDelete: 'cascade' }).notNull(),
-  groupId: integer('group_id').references(() => budgetGroups.id, { onDelete: 'set null' }), // nullable for unassigned items
-  name: varchar('name', { length: 200 }).notNull(),
-  slug: varchar('slug', { length: 200 }).notNull(),
-  sortOrder: integer('sort_order').notNull().default(0),
-  // Yearly budget for irregular/variable spending (e.g., vacations, restaurants)
-  // This is in addition to monthly budgets - some items may have both
-  yearlyBudget: decimal('yearly_budget', { precision: 12, scale: 2 }).notNull().default('0'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => ({
-  // Unique constraint on (year_id, group_id, slug) to prevent duplicate slugs within a group
-  // Note: This only applies when group_id is not null (partial index in migration)
-  yearGroupSlugUnique: uniqueIndex('budget_items_year_group_slug_unique').on(table.yearId, table.groupId, table.slug),
-}));
+export const budgetItems = pgTable(
+  'budget_items',
+  {
+    id: serial('id').primaryKey(),
+    yearId: integer('year_id')
+      .references(() => budgetYears.id, { onDelete: 'cascade' })
+      .notNull(),
+    groupId: integer('group_id').references(() => budgetGroups.id, { onDelete: 'set null' }), // nullable for unassigned items
+    name: varchar('name', { length: 200 }).notNull(),
+    slug: varchar('slug', { length: 200 }).notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    // Yearly budget for irregular/variable spending (e.g., vacations, restaurants)
+    // This is in addition to monthly budgets - some items may have both
+    yearlyBudget: decimal('yearly_budget', { precision: 12, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Unique constraint on (year_id, group_id, slug) to prevent duplicate slugs within a group
+    // Note: This only applies when group_id is not null (partial index in migration)
+    yearGroupSlugUnique: uniqueIndex('budget_items_year_group_slug_unique').on(table.yearId, table.groupId, table.slug),
+  })
+);
 
 // Monthly Values (budget and actual amounts per item per month)
-export const monthlyValues = pgTable('monthly_values', {
-  id: serial('id').primaryKey(),
-  itemId: integer('item_id').references(() => budgetItems.id, { onDelete: 'cascade' }).notNull(),
-  month: integer('month').notNull(), // 1-12
-  budget: decimal('budget', { precision: 12, scale: 2 }).notNull().default('0'),
-  actual: decimal('actual', { precision: 12, scale: 2 }).notNull().default('0'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => ({
-  // Unique constraint on (item_id, month) to enable upsert and prevent duplicates
-  itemMonthUnique: uniqueIndex('monthly_values_item_month_unique').on(table.itemId, table.month),
-}));
+export const monthlyValues = pgTable(
+  'monthly_values',
+  {
+    id: serial('id').primaryKey(),
+    itemId: integer('item_id')
+      .references(() => budgetItems.id, { onDelete: 'cascade' })
+      .notNull(),
+    month: integer('month').notNull(), // 1-12
+    budget: decimal('budget', { precision: 12, scale: 2 }).notNull().default('0'),
+    actual: decimal('actual', { precision: 12, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Unique constraint on (item_id, month) to enable upsert and prevent duplicates
+    itemMonthUnique: uniqueIndex('monthly_values_item_month_unique').on(table.itemId, table.month),
+  })
+);
 
 // Transactions
 export const transactions = pgTable('transactions', {
   id: serial('id').primaryKey(),
-  yearId: integer('year_id').references(() => budgetYears.id, { onDelete: 'cascade' }).notNull(),
+  yearId: integer('year_id')
+    .references(() => budgetYears.id, { onDelete: 'cascade' })
+    .notNull(),
   itemId: integer('item_id').references(() => budgetItems.id, { onDelete: 'set null' }), // nullable, can be unassigned
   date: date('date').notNull(),
   description: varchar('description', { length: 500 }),
@@ -97,24 +128,36 @@ export const paymentMethods = pgTable('payment_methods', {
 
 // Account Balances (initial balance per account per year)
 // accountType: 'savings_item' (budget item in savings group) | 'payment_method'
-export const accountBalances = pgTable('account_balances', {
-  id: serial('id').primaryKey(),
-  yearId: integer('year_id').references(() => budgetYears.id, { onDelete: 'cascade' }).notNull(),
-  accountType: varchar('account_type', { length: 20 }).notNull(), // 'savings_item' | 'payment_method'
-  accountId: integer('account_id').notNull(), // references budget_items or payment_methods
-  initialBalance: decimal('initial_balance', { precision: 12, scale: 2 }).notNull().default('0'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => ({
-  // Unique constraint on (year_id, account_type, account_id) to prevent duplicates and enable upsert
-  yearAccountUnique: uniqueIndex('account_balances_year_account_unique').on(table.yearId, table.accountType, table.accountId),
-}));
+export const accountBalances = pgTable(
+  'account_balances',
+  {
+    id: serial('id').primaryKey(),
+    yearId: integer('year_id')
+      .references(() => budgetYears.id, { onDelete: 'cascade' })
+      .notNull(),
+    accountType: varchar('account_type', { length: 20 }).notNull(), // 'savings_item' | 'payment_method'
+    accountId: integer('account_id').notNull(), // references budget_items or payment_methods
+    initialBalance: decimal('initial_balance', { precision: 12, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Unique constraint on (year_id, account_type, account_id) to prevent duplicates and enable upsert
+    yearAccountUnique: uniqueIndex('account_balances_year_account_unique').on(
+      table.yearId,
+      table.accountType,
+      table.accountId
+    ),
+  })
+);
 
 // Transfers (between accounts)
 // sourceAccountType/destinationAccountType: 'payment_method' or 'savings_item'
 export const transfers = pgTable('transfers', {
   id: serial('id').primaryKey(),
-  yearId: integer('year_id').references(() => budgetYears.id, { onDelete: 'cascade' }).notNull(),
+  yearId: integer('year_id')
+    .references(() => budgetYears.id, { onDelete: 'cascade' })
+    .notNull(),
   date: date('date').notNull(),
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
   description: varchar('description', { length: 500 }),

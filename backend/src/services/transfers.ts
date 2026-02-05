@@ -1,6 +1,6 @@
-import { eq, and, sql, desc } from 'drizzle-orm';
-import { db, budgetYears, budgetItems, budgetGroups, paymentMethods, transfers } from '../db/index.js';
-import { ACCOUNT_TYPES, type AccountType } from '../types/accounts.js';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import { budgetGroups, budgetItems, budgetYears, db, paymentMethods, transfers } from '../db/index.js';
+import type { AccountType } from '../types/accounts.js';
 
 export { ACCOUNT_TYPES, type AccountType } from '../types/accounts.js';
 
@@ -50,7 +50,7 @@ async function getAccountName(type: AccountType, id: number): Promise<string> {
       where: eq(budgetItems.id, id),
       with: { group: true },
     });
-    if (item && item.group) {
+    if (item?.group) {
       return `${item.group.name} → ${item.name}`;
     }
     return item?.name || UNKNOWN_ACCOUNT_NAME;
@@ -80,7 +80,7 @@ export async function getTransfersForYear(year: number): Promise<Transfer[]> {
   // Collect all unique account IDs by type for batch fetching
   const paymentMethodIds = new Set<number>();
   const savingsItemIds = new Set<number>();
-  
+
   for (const t of transferRecords) {
     if (t.sourceAccountType === 'payment_method') {
       paymentMethodIds.add(t.sourceAccountId);
@@ -104,7 +104,7 @@ export async function getTransfersForYear(year: number): Promise<Transfer[]> {
       .select({ id: paymentMethods.id, name: paymentMethods.name })
       .from(paymentMethods)
       .where(sql`${paymentMethods.id} IN ${[...paymentMethodIds]}`);
-    
+
     for (const pm of pmRecords) {
       paymentMethodNames.set(pm.id, pm.name);
     }
@@ -122,7 +122,7 @@ export async function getTransfersForYear(year: number): Promise<Transfer[]> {
       .from(budgetItems)
       .leftJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
       .where(sql`${budgetItems.id} IN ${[...savingsItemIds]}`);
-    
+
     for (const item of itemRecords) {
       const fullName = item.groupName ? `${item.groupName} → ${item.name}` : item.name;
       savingsItemNamesMap.set(item.id, fullName);
@@ -137,7 +137,7 @@ export async function getTransfersForYear(year: number): Promise<Transfer[]> {
     return savingsItemNamesMap.get(id) || UNKNOWN_ACCOUNT_NAME;
   };
 
-  return transferRecords.map(t => ({
+  return transferRecords.map((t) => ({
     id: t.id,
     date: t.date,
     amount: parseFloat(t.amount),
@@ -200,19 +200,22 @@ export async function createTransfer(year: number, data: CreateTransferData): Pr
     savingsItemId = data.sourceAccountId;
   }
 
-  const [inserted] = await db.insert(transfers).values({
-    yearId: budgetYear.id,
-    date: data.date,
-    amount: data.amount.toString(),
-    description: data.description || null,
-    sourceAccountType: data.sourceAccountType,
-    sourceAccountId: data.sourceAccountId,
-    destinationAccountType: data.destinationAccountType,
-    destinationAccountId: data.destinationAccountId,
-    savingsItemId,
-    accountingMonth,
-    accountingYear,
-  }).returning();
+  const [inserted] = await db
+    .insert(transfers)
+    .values({
+      yearId: budgetYear.id,
+      date: data.date,
+      amount: data.amount.toString(),
+      description: data.description || null,
+      sourceAccountType: data.sourceAccountType,
+      sourceAccountId: data.sourceAccountId,
+      destinationAccountType: data.destinationAccountType,
+      destinationAccountId: data.destinationAccountId,
+      savingsItemId,
+      accountingMonth,
+      accountingYear,
+    })
+    .returning();
 
   const sourceAccountName = await getAccountName(data.sourceAccountType, data.sourceAccountId);
   const destAccountName = await getAccountName(data.destinationAccountType, data.destinationAccountId);
@@ -223,7 +226,7 @@ export async function createTransfer(year: number, data: CreateTransferData): Pr
       where: eq(budgetItems.id, savingsItemId),
       with: { group: true },
     });
-    if (item && item.group) {
+    if (item?.group) {
       savingsItemName = `${item.group.name} → ${item.name}`;
     }
   }
@@ -268,7 +271,7 @@ export async function updateTransfer(id: number, data: Partial<CreateTransferDat
 
   // Build update object
   const updates: Record<string, any> = { updatedAt: new Date() };
-  
+
   if (data.date !== undefined) updates.date = data.date;
   if (data.amount !== undefined) updates.amount = data.amount.toString();
   if (data.description !== undefined) updates.description = data.description || null;
@@ -276,7 +279,7 @@ export async function updateTransfer(id: number, data: Partial<CreateTransferDat
   if (data.sourceAccountId !== undefined) updates.sourceAccountId = data.sourceAccountId;
   if (data.destinationAccountType !== undefined) updates.destinationAccountType = data.destinationAccountType;
   if (data.destinationAccountId !== undefined) updates.destinationAccountId = data.destinationAccountId;
-  
+
   // Handle accounting period: if explicit values provided, use them
   // Otherwise, recalculate if date changed
   if (data.accountingMonth !== undefined) {
@@ -285,12 +288,10 @@ export async function updateTransfer(id: number, data: Partial<CreateTransferDat
   if (data.accountingYear !== undefined) {
     updates.accountingYear = data.accountingYear;
   }
-  
+
   // Recalculate accounting period if date changed but no explicit accounting values provided
   // Use UTC parsing to avoid timezone shifts
-  if (data.date !== undefined && 
-      data.accountingMonth === undefined && 
-      data.accountingYear === undefined) {
+  if (data.date !== undefined && data.accountingMonth === undefined && data.accountingYear === undefined) {
     const dateParsed = parseDateForAccounting(data.date);
     updates.accountingMonth = dateParsed.month;
     updates.accountingYear = dateParsed.year;
@@ -301,7 +302,7 @@ export async function updateTransfer(id: number, data: Partial<CreateTransferDat
   const srcId = data.sourceAccountId ?? existing.sourceAccountId;
   const dstType = data.destinationAccountType ?? existing.destinationAccountType;
   const dstId = data.destinationAccountId ?? existing.destinationAccountId;
-  
+
   if (dstType === 'savings_item') {
     updates.savingsItemId = dstId;
   } else if (srcType === 'savings_item') {
@@ -310,14 +311,14 @@ export async function updateTransfer(id: number, data: Partial<CreateTransferDat
     updates.savingsItemId = null;
   }
 
-  const [updated] = await db.update(transfers)
-    .set(updates)
-    .where(eq(transfers.id, id))
-    .returning();
+  const [updated] = await db.update(transfers).set(updates).where(eq(transfers.id, id)).returning();
 
   // Fetch names for response
   const sourceAccountName = await getAccountName(updated.sourceAccountType as AccountType, updated.sourceAccountId);
-  const destAccountName = await getAccountName(updated.destinationAccountType as AccountType, updated.destinationAccountId);
+  const destAccountName = await getAccountName(
+    updated.destinationAccountType as AccountType,
+    updated.destinationAccountId
+  );
 
   let savingsItemName: string | null = null;
   if (updated.savingsItemId) {
@@ -325,7 +326,7 @@ export async function updateTransfer(id: number, data: Partial<CreateTransferDat
       where: eq(budgetItems.id, updated.savingsItemId),
       with: { group: true },
     });
-    if (item && item.group) {
+    if (item?.group) {
       savingsItemName = `${item.group.name} → ${item.name}`;
     }
   }
@@ -388,10 +389,7 @@ export async function getAvailableAccounts(year: number): Promise<AccountIdentif
     })
     .from(budgetItems)
     .innerJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
-    .where(and(
-      eq(budgetItems.yearId, budgetYear.id),
-      eq(budgetGroups.type, 'savings')
-    ))
+    .where(and(eq(budgetItems.yearId, budgetYear.id), eq(budgetGroups.type, 'savings')))
     .orderBy(budgetGroups.sortOrder, budgetItems.sortOrder);
 
   for (const item of savingsItems) {

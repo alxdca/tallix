@@ -1,10 +1,10 @@
-import type { BudgetGroup, BudgetItem, BudgetData, OrganizedBudgetData, AnnualTotals, MonthlyValue } from './types';
+import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, MonthlyValue, OrganizedBudgetData } from './types';
 
 // Organize flat budget data into 3-layer hierarchy
 export function organizeBudgetData(data: BudgetData): OrganizedBudgetData {
-  const incomeGroups = data.groups.filter(g => g.type === 'income');
-  const expenseGroups = data.groups.filter(g => g.type === 'expense');
-  const savingsGroups = data.groups.filter(g => g.type === 'savings');
+  const incomeGroups = data.groups.filter((g) => g.type === 'income');
+  const expenseGroups = data.groups.filter((g) => g.type === 'expense');
+  const savingsGroups = data.groups.filter((g) => g.type === 'savings');
 
   return {
     year: data.year,
@@ -36,7 +36,9 @@ export function calculateSectionTotals(groups: BudgetGroup[]): {
 } {
   const totals = {
     annual: { budget: 0, actual: 0 },
-    months: Array(12).fill(null).map(() => ({ budget: 0, actual: 0 })) as MonthlyValue[],
+    months: Array(12)
+      .fill(null)
+      .map(() => ({ budget: 0, actual: 0 })) as MonthlyValue[],
   };
 
   groups.forEach((group) => {
@@ -55,12 +57,12 @@ export function calculateSectionTotals(groups: BudgetGroup[]): {
 // Format number as Swiss currency
 export function formatCurrency(value: number, showZero = false): string {
   if (value === 0 && !showZero) return '–';
-  
+
   const formatted = Math.abs(value).toLocaleString('fr-CH', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  
+
   return value < 0 ? `-${formatted}` : formatted;
 }
 
@@ -82,13 +84,15 @@ export function calculateGroupTotals(items: BudgetItem[]): {
 } {
   const totals = {
     annual: { budget: 0, actual: 0 },
-    months: Array(12).fill(null).map(() => ({ budget: 0, actual: 0 })) as MonthlyValue[],
+    months: Array(12)
+      .fill(null)
+      .map(() => ({ budget: 0, actual: 0 })) as MonthlyValue[],
   };
 
   items.forEach((item) => {
     // Add yearly budget to annual total
     totals.annual.budget += item.yearlyBudget || 0;
-    
+
     item.months.forEach((month, i) => {
       totals.months[i].budget += month.budget;
       totals.months[i].actual += month.actual;
@@ -136,10 +140,8 @@ export function getTodayDisplay(): string {
 export function isValidDateFormat(dateStr: string): boolean {
   const regex = /^\d{2}\/\d{2}\/\d{4}$/;
   if (!regex.test(dateStr)) return false;
-  
+
   const [day, month, year] = dateStr.split('/').map(Number);
   const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && 
-         date.getMonth() === month - 1 && 
-         date.getDate() === day;
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
 }

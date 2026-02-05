@@ -1,12 +1,25 @@
-import React, { useState, useEffect, DragEvent } from 'react';
-import type { BudgetGroup, BudgetItem } from '../types';
-import { 
-  createGroup, updateGroup, deleteGroup, reorderGroups,
-  createItem, updateItem, deleteItem, moveItem, reorderItems, fetchUnassignedItems,
-  fetchPaymentMethods, createPaymentMethod, updatePaymentMethod, deletePaymentMethod, reorderPaymentMethods,
+import type React from 'react';
+import { type DragEvent, useCallback, useEffect, useState } from 'react';
+import {
+  createGroup,
+  createItem,
+  createPaymentMethod,
+  deleteGroup,
+  deleteItem,
+  deletePaymentMethod,
+  fetchPaymentMethods,
+  fetchUnassignedItems,
+  moveItem,
+  type PaymentMethod,
+  reorderGroups,
+  reorderItems,
+  reorderPaymentMethods,
   togglePaymentMethodAccount,
-  type PaymentMethod
+  updateGroup,
+  updateItem,
+  updatePaymentMethod,
 } from '../api';
+import type { BudgetGroup, BudgetItem } from '../types';
 import { logger } from '../utils/logger';
 
 interface SettingsProps {
@@ -33,13 +46,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   const [draggedItem, setDraggedItem] = useState<{ id: number; name: string; groupId: number | null } | null>(null);
   const [dropTarget, setDropTarget] = useState<number | 'unassigned' | null>(null);
   const [dropTargetItem, setDropTargetItem] = useState<number | null>(null);
-  
+
   // Inline add states
   const [addingGroupTo, setAddingGroupTo] = useState<'income' | 'expense' | 'savings' | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [addingItemTo, setAddingItemTo] = useState<number | null>(null);
   const [newItemName, setNewItemName] = useState('');
-  
+
   // Payment methods state
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [newPaymentMethod, setNewPaymentMethod] = useState('');
@@ -47,37 +60,37 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   const [editPaymentMethodName, setEditPaymentMethodName] = useState('');
   const [editSettlementDay, setEditSettlementDay] = useState<string>('');
   const [editLinkedPaymentMethodId, setEditLinkedPaymentMethodId] = useState<number | null>(null);
-  
+
   // Payment methods that are accounts (for linked account selection)
-  const accountPaymentMethods = paymentMethods.filter(pm => pm.isAccount);
+  const accountPaymentMethods = paymentMethods.filter((pm) => pm.isAccount);
 
   // Sort groups by sortOrder within their category
-  const incomeGroups = [...groups.filter(g => g.type === 'income')].sort((a, b) => a.sortOrder - b.sortOrder);
-  const expenseGroups = [...groups.filter(g => g.type === 'expense')].sort((a, b) => a.sortOrder - b.sortOrder);
-  const savingsGroups = [...groups.filter(g => g.type === 'savings')].sort((a, b) => a.sortOrder - b.sortOrder);
+  const incomeGroups = [...groups.filter((g) => g.type === 'income')].sort((a, b) => a.sortOrder - b.sortOrder);
+  const expenseGroups = [...groups.filter((g) => g.type === 'expense')].sort((a, b) => a.sortOrder - b.sortOrder);
+  const savingsGroups = [...groups.filter((g) => g.type === 'savings')].sort((a, b) => a.sortOrder - b.sortOrder);
 
-  useEffect(() => {
-    loadUnassignedItems();
-    loadPaymentMethods();
-  }, [yearId]);
-
-  const loadUnassignedItems = async () => {
+  const loadUnassignedItems = useCallback(async () => {
     try {
       const items = await fetchUnassignedItems();
       setUnassignedItems(items);
     } catch (error) {
       logger.error('Failed to load unassigned items', error);
     }
-  };
+  }, []);
 
-  const loadPaymentMethods = async () => {
+  const loadPaymentMethods = useCallback(async () => {
     try {
       const methods = await fetchPaymentMethods();
       setPaymentMethods(methods);
     } catch (error) {
       logger.error('Failed to load payment methods', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadUnassignedItems();
+    loadPaymentMethods();
+  }, [loadPaymentMethods, loadUnassignedItems]);
 
   const handleCreatePaymentMethod = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,13 +115,16 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     if (!editPaymentMethodName.trim() || isSubmitting) return;
 
     const settlementDay = editSettlementDay.trim() === '' ? null : parseInt(editSettlementDay, 10);
-    if (editSettlementDay.trim() !== '' && (isNaN(settlementDay!) || settlementDay! < 1 || settlementDay! > 31)) {
+    if (
+      editSettlementDay.trim() !== '' &&
+      (Number.isNaN(settlementDay!) || settlementDay! < 1 || settlementDay! > 31)
+    ) {
       return; // Invalid settlement day
     }
 
     setIsSubmitting(true);
     try {
-      await updatePaymentMethod(id, { 
+      await updatePaymentMethod(id, {
         name: editPaymentMethodName.trim(),
         settlementDay,
         linkedPaymentMethodId: editLinkedPaymentMethodId,
@@ -157,7 +173,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
   const handleMovePaymentMethod = async (index: number, direction: 'up' | 'down') => {
     if (isSubmitting) return;
-    
+
     const newIndex = direction === 'up' ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= paymentMethods.length) return;
 
@@ -199,12 +215,9 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   const handleCreateGroup = async (groupType: 'income' | 'expense' | 'savings') => {
     if (!newGroupName.trim() || isSubmitting) return;
 
-    const sectionGroups = groupType === 'income' ? incomeGroups 
-      : groupType === 'expense' ? expenseGroups 
-      : savingsGroups;
-    const maxSortOrder = sectionGroups.length > 0 
-      ? Math.max(...sectionGroups.map(g => g.sortOrder)) + 1 
-      : 0;
+    const sectionGroups =
+      groupType === 'income' ? incomeGroups : groupType === 'expense' ? expenseGroups : savingsGroups;
+    const maxSortOrder = sectionGroups.length > 0 ? Math.max(...sectionGroups.map((g) => g.sortOrder)) + 1 : 0;
 
     setIsSubmitting(true);
     try {
@@ -228,7 +241,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   const handleCreateItem = async (groupId: number) => {
     if (!newItemName.trim() || isSubmitting) return;
 
-    const group = groups.find(g => g.id === groupId);
+    const group = groups.find((g) => g.id === groupId);
     const sortOrder = group ? group.items.length : 0;
 
     setIsSubmitting(true);
@@ -288,7 +301,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
   const handleMoveGroup = async (sectionGroups: BudgetGroup[], index: number, direction: 'up' | 'down') => {
     if (isSubmitting) return;
-    
+
     const newIndex = direction === 'up' ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= sectionGroups.length) return;
 
@@ -390,7 +403,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     if (!draggedItem || isSubmitting) return;
 
     const sourceGroupId = draggedItem.groupId;
-    
+
     // If dropping on the same group, handle reordering
     if (sourceGroupId === targetGroupId && targetItemId !== undefined && targetItemId !== draggedItem.id) {
       // Find the group's items
@@ -398,14 +411,14 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       if (targetGroupId === null) {
         groupItems = unassignedItems;
       } else {
-        const group = groups.find(g => g.id === targetGroupId);
+        const group = groups.find((g) => g.id === targetGroupId);
         if (!group) return;
         groupItems = group.items;
       }
 
-      const draggedIndex = groupItems.findIndex(item => item.id === draggedItem.id);
-      const targetIndex = groupItems.findIndex(item => item.id === targetItemId);
-      
+      const draggedIndex = groupItems.findIndex((item) => item.id === draggedItem.id);
+      const targetIndex = groupItems.findIndex((item) => item.id === targetItemId);
+
       if (draggedIndex === -1 || targetIndex === -1) return;
 
       // Reorder items
@@ -497,7 +510,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
   const handleMoveItem = async (groupItems: BudgetItem[], index: number, direction: 'up' | 'down') => {
     if (isSubmitting) return;
-    
+
     const newIndex = direction === 'up' ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= groupItems.length) return;
 
@@ -520,9 +533,14 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     }
   };
 
-  const renderItem = (item: { id: number; name: string; slug: string }, groupItems: BudgetItem[], itemIndex: number, groupId: number | null) => (
-    <div 
-      key={item.id} 
+  const renderItem = (
+    item: { id: number; name: string; slug: string },
+    groupItems: BudgetItem[],
+    itemIndex: number,
+    groupId: number | null
+  ) => (
+    <div
+      key={item.id}
       className={`item-row ${draggedItem?.id === item.id ? 'dragging' : ''} ${dropTargetItem === item.id ? 'drop-target-item' : ''}`}
       draggable
       onDragStart={(e) => handleDragStart(e, item, groupId)}
@@ -541,7 +559,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
               if (e.key === 'Enter') handleUpdateItem(item.id);
               if (e.key === 'Escape') cancelEdit();
             }}
-            autoFocus
           />
           <button className="btn-icon save" onClick={() => handleUpdateItem(item.id)} title="Sauvegarder">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -558,8 +575,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       ) : (
         <>
           <div className="item-reorder">
-            <button 
-              className="btn-icon reorder" 
+            <button
+              className="btn-icon reorder"
               onClick={() => handleMoveItem(groupItems, itemIndex, 'up')}
               disabled={itemIndex === 0 || isSubmitting}
               title="Monter"
@@ -568,8 +585,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                 <path d="M18 15l-6-6-6 6" />
               </svg>
             </button>
-            <button 
-              className="btn-icon reorder" 
+            <button
+              className="btn-icon reorder"
               onClick={() => handleMoveItem(groupItems, itemIndex, 'down')}
               disabled={itemIndex === groupItems.length - 1 || isSubmitting}
               title="Descendre"
@@ -616,11 +633,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
           <span className={`section-indicator ${type}`}></span>
           {title}
         </h3>
-        <button 
-          className="btn-icon-add" 
-          onClick={() => startAddGroup(type)}
-          title="Ajouter un groupe"
-        >
+        <button className="btn-icon-add" onClick={() => startAddGroup(type)} title="Ajouter un groupe">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
@@ -640,11 +653,10 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
               if (e.key === 'Enter' && newGroupName.trim()) handleCreateGroup(type);
               if (e.key === 'Escape') cancelAddGroup();
             }}
-            autoFocus
           />
-          <button 
-            className="btn-icon save" 
-            onClick={() => handleCreateGroup(type)} 
+          <button
+            className="btn-icon save"
+            onClick={() => handleCreateGroup(type)}
             disabled={!newGroupName.trim() || isSubmitting}
             title="Ajouter"
           >
@@ -660,14 +672,12 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
           </button>
         </div>
       )}
-      
+
       <div className="groups-list">
-        {sectionGroups.length === 0 && addingGroupTo !== type && (
-          <p className="empty-message">Aucun groupe créé</p>
-        )}
+        {sectionGroups.length === 0 && addingGroupTo !== type && <p className="empty-message">Aucun groupe créé</p>}
         {sectionGroups.map((group, index) => (
-          <div 
-            key={group.id} 
+          <div
+            key={group.id}
             className={`group-card ${dropTarget === group.id ? 'drop-target' : ''}`}
             onDragOver={(e) => handleDragOver(e, group.id)}
             onDragLeave={handleDragLeave}
@@ -684,7 +694,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       if (e.key === 'Enter') handleUpdateGroup(group.id);
                       if (e.key === 'Escape') cancelEdit();
                     }}
-                    autoFocus
                   />
                   <button className="btn-icon save" onClick={() => handleUpdateGroup(group.id)} title="Sauvegarder">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -701,8 +710,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
               ) : (
                 <>
                   <div className="group-reorder">
-                    <button 
-                      className="btn-icon reorder" 
+                    <button
+                      className="btn-icon reorder"
                       onClick={() => handleMoveGroup(sectionGroups, index, 'up')}
                       disabled={index === 0 || isSubmitting}
                       title="Monter"
@@ -711,8 +720,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                         <path d="M18 15l-6-6-6 6" />
                       </svg>
                     </button>
-                    <button 
-                      className="btn-icon reorder" 
+                    <button
+                      className="btn-icon reorder"
                       onClick={() => handleMoveGroup(sectionGroups, index, 'down')}
                       disabled={index === sectionGroups.length - 1 || isSubmitting}
                       title="Descendre"
@@ -724,11 +733,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                   </div>
                   <span className="group-name">{group.name}</span>
                   <div className="group-actions">
-                    <button 
-                      className="btn-icon add" 
-                      onClick={() => startAddItem(group.id)} 
-                      title="Ajouter un élément"
-                    >
+                    <button className="btn-icon add" onClick={() => startAddItem(group.id)} title="Ajouter un élément">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <line x1="12" y1="5" x2="12" y2="19" />
                         <line x1="5" y1="12" x2="19" y2="12" />
@@ -750,13 +755,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                 </>
               )}
             </div>
-            
+
             <div className="items-list">
               {group.items.length === 0 && addingItemTo !== group.id && (
                 <p className="empty-items drop-hint">Glissez des éléments ici</p>
               )}
               {group.items.map((item, itemIndex) => renderItem(item, group.items, itemIndex, group.id))}
-              
+
               {/* Add item inline form */}
               {addingItemTo === group.id && (
                 <div className="inline-add-form">
@@ -769,11 +774,10 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       if (e.key === 'Enter' && newItemName.trim()) handleCreateItem(group.id);
                       if (e.key === 'Escape') cancelAddItem();
                     }}
-                    autoFocus
                   />
-                  <button 
-                    className="btn-icon save" 
-                    onClick={() => handleCreateItem(group.id)} 
+                  <button
+                    className="btn-icon save"
+                    onClick={() => handleCreateItem(group.id)}
                     disabled={!newItemName.trim() || isSubmitting}
                     title="Ajouter"
                   >
@@ -813,7 +817,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
         {/* Unassigned Items */}
         {unassignedItems.length > 0 && (
-          <div 
+          <div
             className={`unassigned-section ${dropTarget === 'unassigned' ? 'drop-target' : ''}`}
             onDragOver={(e) => handleDragOver(e, 'unassigned')}
             onDragLeave={handleDragLeave}
@@ -856,7 +860,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                             if (e.key === 'Escape') cancelEditPaymentMethod();
                           }}
                           placeholder="Nom"
-                          autoFocus
                         />
                       </div>
                       <div className="edit-field-group">
@@ -886,21 +889,40 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                         >
                           <option value="">Aucun</option>
                           {accountPaymentMethods
-                            .filter(pm => pm.id !== method.id) // Can't link to itself
-                            .map(pm => (
-                              <option key={pm.id} value={pm.id}>{pm.name}</option>
-                            ))
-                          }
+                            .filter((pm) => pm.id !== method.id) // Can't link to itself
+                            .map((pm) => (
+                              <option key={pm.id} value={pm.id}>
+                                {pm.name}
+                              </option>
+                            ))}
                         </select>
                       </div>
                       <div className="edit-actions">
-                        <button className="btn-icon save" onClick={() => handleUpdatePaymentMethod(method.id)} title="Sauvegarder">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <button
+                          className="btn-icon save"
+                          onClick={() => handleUpdatePaymentMethod(method.id)}
+                          title="Sauvegarder"
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
                             <polyline points="20 6 9 17 4 12" />
                           </svg>
                         </button>
                         <button className="btn-icon cancel" onClick={cancelEditPaymentMethod} title="Annuler">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
                             <line x1="18" y1="6" x2="6" y2="18" />
                             <line x1="6" y1="6" x2="18" y2="18" />
                           </svg>
@@ -910,23 +932,37 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                   ) : (
                     <>
                       <div className="payment-method-reorder">
-                        <button 
-                          className="btn-icon reorder" 
+                        <button
+                          className="btn-icon reorder"
                           onClick={() => handleMovePaymentMethod(index, 'up')}
                           disabled={index === 0 || isSubmitting}
                           title="Monter"
                         >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
                             <path d="M18 15l-6-6-6 6" />
                           </svg>
                         </button>
-                        <button 
-                          className="btn-icon reorder" 
+                        <button
+                          className="btn-icon reorder"
                           onClick={() => handleMovePaymentMethod(index, 'down')}
                           disabled={index === paymentMethods.length - 1 || isSubmitting}
                           title="Descendre"
                         >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
                             <path d="M6 9l6 6 6-6" />
                           </svg>
                         </button>
@@ -939,8 +975,11 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                           </span>
                         )}
                         {method.linkedPaymentMethodId && (
-                          <span className="linked-account-badge" title={`Lié à : ${paymentMethods.find(pm => pm.id === method.linkedPaymentMethodId)?.name || 'Inconnu'}`}>
-                            → {paymentMethods.find(pm => pm.id === method.linkedPaymentMethodId)?.name || '?'}
+                          <span
+                            className="linked-account-badge"
+                            title={`Lié à : ${paymentMethods.find((pm) => pm.id === method.linkedPaymentMethodId)?.name || 'Inconnu'}`}
+                          >
+                            → {paymentMethods.find((pm) => pm.id === method.linkedPaymentMethodId)?.name || '?'}
                           </span>
                         )}
                       </span>
@@ -955,14 +994,36 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                         <span className="toggle-label">Compte</span>
                       </label>
                       <div className="payment-method-actions">
-                        <button className="btn-icon edit" onClick={() => startEditPaymentMethod(method)} title="Modifier">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <button
+                          className="btn-icon edit"
+                          onClick={() => startEditPaymentMethod(method)}
+                          title="Modifier"
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                           </svg>
                         </button>
-                        <button className="btn-icon delete" onClick={() => handleDeletePaymentMethod(method.id)} title="Supprimer">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <button
+                          className="btn-icon delete"
+                          onClick={() => handleDeletePaymentMethod(method.id)}
+                          title="Supprimer"
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
                             <polyline points="3 6 5 6 21 6" />
                             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                           </svg>

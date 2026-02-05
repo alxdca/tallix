@@ -1,7 +1,13 @@
-import React, { useState, useCallback, DragEvent } from 'react';
+import React, { type DragEvent, useCallback, useState } from 'react';
+import {
+  bulkCreateTransactions,
+  fetchPaymentMethods,
+  type ParsedTransaction,
+  type PaymentMethod,
+  parsePdf,
+} from '../api';
 import type { BudgetGroup } from '../types';
-import { parsePdf, bulkCreateTransactions, fetchPaymentMethods, type ParsedTransaction, type PaymentMethod } from '../api';
-import { formatDateDisplay, parseDateInput, isValidDateFormat, getTodayDisplay } from '../utils';
+import { formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import CategoryCombobox from './CategoryCombobox';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
 
@@ -34,7 +40,15 @@ const AVAILABLE_COLUMNS: ColumnConfig[] = [
   { id: 'comment', label: 'Commentaire', color: '#64748b' },
 ];
 
-const DEFAULT_COLUMN_ORDER: ColumnType[] = ['date', 'description', 'category', 'thirdParty', 'paymentMethod', 'amount', 'comment'];
+const DEFAULT_COLUMN_ORDER: ColumnType[] = [
+  'date',
+  'description',
+  'category',
+  'thirdParty',
+  'paymentMethod',
+  'amount',
+  'comment',
+];
 
 const MONTH_NAMES = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 
@@ -74,13 +88,7 @@ interface EditableTransaction extends ParsedTransaction {
   isIncome: boolean; // True = income/refund (will be stored as negative for expense categories)
 }
 
-export default function BulkImportModal({ 
-  isOpen, 
-  onClose, 
-  yearId, 
-  groups,
-  onImportComplete 
-}: BulkImportModalProps) {
+export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImportComplete }: BulkImportModalProps) {
   const [step, setStep] = useState<ImportStep>('select');
   const [importSource, setImportSource] = useState<ImportSource>('pdf');
   const [isDragging, setIsDragging] = useState(false);
@@ -92,7 +100,7 @@ export default function BulkImportModal({
   const [pasteContent, setPasteContent] = useState('');
   const [columnOrder, setColumnOrder] = useState<ColumnType[]>(DEFAULT_COLUMN_ORDER);
   const [draggedColumn, setDraggedColumn] = useState<number | null>(null);
-  
+
   // Track newly created items during this session
   const [localGroups, setLocalGroups] = useState<BudgetGroup[]>(groups);
 
@@ -102,34 +110,47 @@ export default function BulkImportModal({
   }, [groups]);
 
   // Handle when a new item is created
-  const handleItemCreated = (newItem: { id: number; name: string; groupId: number; groupName: string; groupType: 'income' | 'expense' | 'savings' }) => {
-    setLocalGroups(prev => prev.map(group => {
-      if (group.id === newItem.groupId) {
-        return {
-          ...group,
-          items: [...group.items, {
-            id: newItem.id,
-            name: newItem.name,
-            slug: newItem.name.toLowerCase().replace(/\s+/g, '-'),
-            yearlyBudget: 0,
-            months: Array(12).fill({ budget: 0, actual: 0 }),
-          }],
-        };
-      }
-      return group;
-    }));
+  const handleItemCreated = (newItem: {
+    id: number;
+    name: string;
+    groupId: number;
+    groupName: string;
+    groupType: 'income' | 'expense' | 'savings';
+  }) => {
+    setLocalGroups((prev) =>
+      prev.map((group) => {
+        if (group.id === newItem.groupId) {
+          return {
+            ...group,
+            items: [
+              ...group.items,
+              {
+                id: newItem.id,
+                name: newItem.name,
+                slug: newItem.name.toLowerCase().replace(/\s+/g, '-'),
+                yearlyBudget: 0,
+                months: Array(12).fill({ budget: 0, actual: 0 }),
+              },
+            ],
+          };
+        }
+        return group;
+      })
+    );
   };
 
   // Get all items from all groups (use localGroups to include newly created items)
-  const allItems = localGroups.flatMap(g => g.items.map(item => ({
-    ...item,
-    groupName: g.name,
-    groupId: g.id,
-    groupType: g.type,
-  })));
+  const allItems = localGroups.flatMap((g) =>
+    g.items.map((item) => ({
+      ...item,
+      groupName: g.name,
+      groupId: g.id,
+      groupType: g.type,
+    }))
+  );
 
-  const incomeItems = allItems.filter(i => i.groupType === 'income');
-  const expenseItems = allItems.filter(i => i.groupType === 'expense');
+  const incomeItems = allItems.filter((i) => i.groupType === 'income');
+  const expenseItems = allItems.filter((i) => i.groupType === 'expense');
 
   const handleDragOver = useCallback((e: DragEvent) => {
     e.preventDefault();
@@ -143,21 +164,76 @@ export default function BulkImportModal({
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback(async (e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
+  const processFile = useCallback(
+    async (file: File) => {
+      setIsLoading(true);
+      setError(null);
 
-    const files = Array.from(e.dataTransfer.files);
-    const pdfFile = files.find(f => f.type === 'application/pdf');
+      try {
+        // Load payment methods
+        const methods = await fetchPaymentMethods();
+        setPaymentMethods(methods);
 
-    if (!pdfFile) {
-      setError('Please drop a PDF file');
-      return;
-    }
+        // Parse PDF with yearId for category suggestions
+        const result = await parsePdf(file, yearId);
 
-    await processFile(pdfFile);
-  }, []);
+        if (result.transactions.length === 0) {
+          setError('No transactions found in the PDF. The format may not be supported.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Convert to editable transactions, using suggested categories
+        // Convert dates from YYYY-MM-DD to DD/MM/YYYY for display
+        // Preserve isIncome flag from PDF detection for user review
+        const editableTransactions: EditableTransaction[] = result.transactions.map((t, index) => {
+          const dateDisplay = formatDateDisplay(t.date); // Convert to DD/MM/YYYY
+          // Default accounting period (no payment method yet, so use transaction date)
+          const { accountingMonth, accountingYear } = calculateAccountingPeriod(dateDisplay, null);
+          return {
+            ...t,
+            date: dateDisplay,
+            id: `import-${index}-${Date.now()}`,
+            itemId: t.suggestedItemId || null, // Use suggested category if available
+            paymentMethod: '',
+            comment: '',
+            selected: true,
+            accountingMonth,
+            accountingYear,
+            isIncome: t.isIncome ?? false, // Preserve PDF detection for user review
+          };
+        });
+
+        setTransactions(editableTransactions);
+        setImportSource('pdf');
+        setStep('preview');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to parse PDF');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [yearId]
+  );
+
+  const handleDrop = useCallback(
+    async (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+
+      const files = Array.from(e.dataTransfer.files);
+      const pdfFile = files.find((f) => f.type === 'application/pdf');
+
+      if (!pdfFile) {
+        setError('Please drop a PDF file');
+        return;
+      }
+
+      await processFile(pdfFile);
+    },
+    [processFile]
+  );
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -166,81 +242,29 @@ export default function BulkImportModal({
     }
   };
 
-  const processFile = async (file: File) => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // Load payment methods
-      const methods = await fetchPaymentMethods();
-      setPaymentMethods(methods);
-
-      // Parse PDF with yearId for category suggestions
-      const result = await parsePdf(file, yearId);
-
-      if (result.transactions.length === 0) {
-        setError('No transactions found in the PDF. The format may not be supported.');
-        setIsLoading(false);
-        return;
-      }
-
-      // Convert to editable transactions, using suggested categories
-      // Convert dates from YYYY-MM-DD to DD/MM/YYYY for display
-      // Preserve isIncome flag from PDF detection for user review
-      const editableTransactions: EditableTransaction[] = result.transactions.map((t, index) => {
-        const dateDisplay = formatDateDisplay(t.date); // Convert to DD/MM/YYYY
-        // Default accounting period (no payment method yet, so use transaction date)
-        const { accountingMonth, accountingYear } = calculateAccountingPeriod(dateDisplay, null);
-        return {
-          ...t,
-          date: dateDisplay,
-          id: `import-${index}-${Date.now()}`,
-          itemId: t.suggestedItemId || null, // Use suggested category if available
-          paymentMethod: '',
-          comment: '',
-          selected: true,
-          accountingMonth,
-          accountingYear,
-          isIncome: t.isIncome ?? false, // Preserve PDF detection for user review
-        };
-      });
-
-      setTransactions(editableTransactions);
-      setImportSource('pdf');
-      setStep('preview');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse PDF');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // Try to match a category name to an existing item
   // Returns the full item with groupType for determining income/expense
   const findCategory = (categoryName: string): { id: number; groupType: 'income' | 'expense' | 'savings' } | null => {
     if (!categoryName) return null;
     const normalized = categoryName.toLowerCase().trim();
-    
+
     // Try exact match first
-    const exactMatch = allItems.find(item => 
-      item.name.toLowerCase() === normalized
-    );
+    const exactMatch = allItems.find((item) => item.name.toLowerCase() === normalized);
     if (exactMatch) return { id: exactMatch.id, groupType: exactMatch.groupType };
-    
+
     // Try partial match (category name contains or is contained in item name)
-    const partialMatch = allItems.find(item => 
-      item.name.toLowerCase().includes(normalized) ||
-      normalized.includes(item.name.toLowerCase())
+    const partialMatch = allItems.find(
+      (item) => item.name.toLowerCase().includes(normalized) || normalized.includes(item.name.toLowerCase())
     );
     if (partialMatch) return { id: partialMatch.id, groupType: partialMatch.groupType };
-    
+
     // Try matching with group name prefix (e.g., "Maison → Loyer" or "Maison - Loyer")
-    const withGroupMatch = allItems.find(item => {
+    const withGroupMatch = allItems.find((item) => {
       const fullName = `${item.groupName} ${item.name}`.toLowerCase();
       return fullName.includes(normalized) || normalized.includes(fullName);
     });
     if (withGroupMatch) return { id: withGroupMatch.id, groupType: withGroupMatch.groupType };
-    
+
     return null;
   };
 
@@ -250,26 +274,27 @@ export default function BulkImportModal({
   const findPaymentMethod = (methodName: string, methods: PaymentMethod[] = paymentMethods): PaymentMethod | null => {
     if (!methodName) return null;
     const normalized = methodName.toLowerCase().trim();
-    
+
     // Try exact match first
-    const exactMatch = methods.find(m => 
-      m.name.toLowerCase() === normalized
-    );
+    const exactMatch = methods.find((m) => m.name.toLowerCase() === normalized);
     if (exactMatch) return exactMatch;
-    
+
     // Try partial match
-    const partialMatch = methods.find(m => 
-      m.name.toLowerCase().includes(normalized) ||
-      normalized.includes(m.name.toLowerCase())
+    const partialMatch = methods.find(
+      (m) => m.name.toLowerCase().includes(normalized) || normalized.includes(m.name.toLowerCase())
     );
     if (partialMatch) return partialMatch;
-    
+
     return null;
   };
 
   // Parse spreadsheet data using configured column order
   // Accepts methods list as parameter to avoid stale state issues
-  const parseSpreadsheetData = (data: string, columns: ColumnType[], methods: PaymentMethod[]): EditableTransaction[] => {
+  const parseSpreadsheetData = (
+    data: string,
+    columns: ColumnType[],
+    methods: PaymentMethod[]
+  ): EditableTransaction[] => {
     const lines = data.trim().split('\n');
     const transactions: EditableTransaction[] = [];
 
@@ -288,14 +313,24 @@ export default function BulkImportModal({
       }
 
       // Clean cells
-      cells = cells.map(c => c.trim().replace(/^["']|["']$/g, ''));
+      cells = cells.map((c) => c.trim().replace(/^["']|["']$/g, ''));
 
       // Skip header rows (detect by common header keywords)
       const firstCell = cells[0]?.toLowerCase() || '';
-      if (firstCell === 'date' || firstCell === 'datum' || firstCell === 'data' || 
-          firstCell === 'description' || firstCell === 'tiers' || firstCell === 'montant' ||
-          firstCell === 'amount' || firstCell === 'betrag' || firstCell === 'category' ||
-          firstCell === 'catégorie' || firstCell === 'kategorie' || firstCell === 'comment') {
+      if (
+        firstCell === 'date' ||
+        firstCell === 'datum' ||
+        firstCell === 'data' ||
+        firstCell === 'description' ||
+        firstCell === 'tiers' ||
+        firstCell === 'montant' ||
+        firstCell === 'amount' ||
+        firstCell === 'betrag' ||
+        firstCell === 'category' ||
+        firstCell === 'catégorie' ||
+        firstCell === 'kategorie' ||
+        firstCell === 'comment'
+      ) {
         continue;
       }
 
@@ -310,24 +345,26 @@ export default function BulkImportModal({
 
       columns.forEach((colType, index) => {
         const cellValue = cells[index] || '';
-        
+
         switch (colType) {
-          case 'date':
+          case 'date': {
             const parsedDate = tryParseDate(cellValue);
             if (parsedDate) date = parsedDate;
             break;
+          }
           case 'thirdParty':
             thirdParty = cellValue;
             break;
           case 'description':
             description = description ? `${description} ${cellValue}` : cellValue;
             break;
-          case 'amount':
+          case 'amount': {
             const parsedAmount = tryParseAmount(cellValue);
             if (parsedAmount !== null) {
               amount = parsedAmount;
             }
             break;
+          }
           case 'category':
             categoryName = cellValue;
             break;
@@ -347,16 +384,13 @@ export default function BulkImportModal({
       const matchedCategory = findCategory(categoryName);
       const matchedPM = findPaymentMethod(paymentMethodName, methods);
       const matchedPaymentMethod = matchedPM?.name || '';
-      
+
       // Calculate accounting period based on payment method's settlement day
-      const { accountingMonth, accountingYear } = calculateAccountingPeriod(
-        date,
-        matchedPM?.settlementDay ?? null
-      );
+      const { accountingMonth, accountingYear } = calculateAccountingPeriod(date, matchedPM?.settlementDay ?? null);
 
       // Determine if income based on matched category type or negative amount
       const isIncome = matchedCategory?.groupType === 'income' || amount < 0;
-      
+
       transactions.push({
         id: `paste-${i}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         date,
@@ -382,19 +416,19 @@ export default function BulkImportModal({
     const cleaned = str.trim();
 
     // DD/MM/YYYY or DD.MM.YYYY or DD-MM-YYYY
-    const dmyMatch = cleaned.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})$/);
+    const dmyMatch = cleaned.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
     if (dmyMatch) {
       const day = dmyMatch[1].padStart(2, '0');
       const month = dmyMatch[2].padStart(2, '0');
       let year = dmyMatch[3];
       if (year.length === 2) {
-        year = (parseInt(year) > 50 ? '19' : '20') + year;
+        year = (parseInt(year, 10) > 50 ? '19' : '20') + year;
       }
       return `${day}/${month}/${year}`;
     }
 
     // YYYY-MM-DD (ISO format)
-    const isoMatch = cleaned.match(/^(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})$/);
+    const isoMatch = cleaned.match(/^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})$/);
     if (isoMatch) {
       const day = isoMatch[3].padStart(2, '0');
       const month = isoMatch[2].padStart(2, '0');
@@ -430,9 +464,9 @@ export default function BulkImportModal({
     }
     // Handle apostrophe as thousand separator (Swiss format: 1'234.56)
     cleaned = cleaned.replace(/'/g, '');
-    
+
     const num = parseFloat(cleaned);
-    return isNaN(num) ? null : num;
+    return Number.isNaN(num) ? null : num;
   };
 
   const processSpreadsheetData = async () => {
@@ -459,7 +493,9 @@ export default function BulkImportModal({
       const parsedTransactions = parseSpreadsheetData(pasteContent, columnOrder, methods);
 
       if (parsedTransactions.length === 0) {
-        setError('Aucune transaction valide trouvée. Vérifiez que vos données correspondent à l\'ordre des colonnes configuré.');
+        setError(
+          "Aucune transaction valide trouvée. Vérifiez que vos données correspondent à l'ordre des colonnes configuré."
+        );
         setIsLoading(false);
         return;
       }
@@ -468,20 +504,18 @@ export default function BulkImportModal({
       setImportSource('spreadsheet');
       setStep('preview');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur lors de l\'analyse des données');
+      setError(err instanceof Error ? err.message : "Erreur lors de l'analyse des données");
     } finally {
       setIsLoading(false);
     }
   };
 
   const updateTransaction = (id: string, updates: Partial<EditableTransaction>) => {
-    setTransactions(prev => prev.map(t => 
-      t.id === id ? { ...t, ...updates } : t
-    ));
+    setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
   };
 
   const removeTransaction = (id: string) => {
-    setTransactions(prev => prev.filter(t => t.id !== id));
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
   };
 
   const addTransaction = () => {
@@ -502,31 +536,25 @@ export default function BulkImportModal({
       accountingYear: currentYear,
       isIncome: false, // Default to expense
     };
-    setTransactions(prev => [...prev, newTransaction]);
+    setTransactions((prev) => [...prev, newTransaction]);
   };
 
   const toggleSelect = (id: string) => {
-    setTransactions(prev => prev.map(t => 
-      t.id === id ? { ...t, selected: !t.selected } : t
-    ));
+    setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, selected: !t.selected } : t)));
   };
 
   const toggleSelectAll = () => {
-    const allSelected = transactions.every(t => t.selected);
-    setTransactions(prev => prev.map(t => ({ ...t, selected: !allSelected })));
+    const allSelected = transactions.every((t) => t.selected);
+    setTransactions((prev) => prev.map((t) => ({ ...t, selected: !allSelected })));
   };
 
   // Bulk apply functions
   const applyCategoryToAll = (itemId: number | null) => {
-    setTransactions(prev => prev.map(t => 
-      t.selected ? { ...t, itemId } : t
-    ));
+    setTransactions((prev) => prev.map((t) => (t.selected ? { ...t, itemId } : t)));
   };
 
   const applyPaymentMethodToAll = (paymentMethod: string) => {
-    setTransactions(prev => prev.map(t => 
-      t.selected ? { ...t, paymentMethod } : t
-    ));
+    setTransactions((prev) => prev.map((t) => (t.selected ? { ...t, paymentMethod } : t)));
   };
 
   // Check which required fields are missing for a transaction
@@ -539,7 +567,7 @@ export default function BulkImportModal({
   };
 
   const handleImport = async () => {
-    const selectedTransactions = transactions.filter(t => t.selected);
+    const selectedTransactions = transactions.filter((t) => t.selected);
 
     if (selectedTransactions.length === 0) {
       setError('Veuillez sélectionner au moins une transaction à importer');
@@ -549,18 +577,20 @@ export default function BulkImportModal({
     // Check for incomplete transactions
     const incompleteTransactions = selectedTransactions
       .map((t) => ({ transaction: t, rowNum: transactions.indexOf(t) + 1, missing: getMissingFields(t) }))
-      .filter(item => item.missing.length > 0);
+      .filter((item) => item.missing.length > 0);
 
     if (incompleteTransactions.length > 0) {
-      const rows = incompleteTransactions.map(item => item.rowNum).join(', ');
-      setError(`Les lignes ${rows} sont incomplètes. Chaque transaction doit avoir une date valide, un tiers, un mode de paiement et un montant.`);
+      const rows = incompleteTransactions.map((item) => item.rowNum).join(', ');
+      setError(
+        `Les lignes ${rows} sont incomplètes. Chaque transaction doit avoir une date valide, un tiers, un mode de paiement et un montant.`
+      );
       return;
     }
 
     // Check all have categories
-    const missingCategory = selectedTransactions.filter(t => !t.itemId);
+    const missingCategory = selectedTransactions.filter((t) => !t.itemId);
     if (missingCategory.length > 0) {
-      const rows = missingCategory.map(t => transactions.indexOf(t) + 1).join(', ');
+      const rows = missingCategory.map((t) => transactions.indexOf(t) + 1).join(', ');
       setError(`Les lignes ${rows} n'ont pas de catégorie. Veuillez assigner une catégorie à chaque transaction.`);
       return;
     }
@@ -571,20 +601,20 @@ export default function BulkImportModal({
     try {
       const result = await bulkCreateTransactions(
         yearId,
-        selectedTransactions.map(t => {
+        selectedTransactions.map((t) => {
           // Determine the final amount with correct sign:
           // - For income categories: always positive (income)
           // - For expense/savings categories with isIncome=true: negative (refund/credit)
           // - For expense/savings categories with isIncome=false: positive (expense)
-          const item = allItems.find(i => i.id === t.itemId);
+          const item = allItems.find((i) => i.id === t.itemId);
           const isIncomeCategory = item?.groupType === 'income';
           let finalAmount = Math.abs(t.amount);
-          
+
           if (!isIncomeCategory && t.isIncome) {
             // Refund/credit on expense category - store as negative
             finalAmount = -finalAmount;
           }
-          
+
           return {
             date: parseDateInput(t.date), // Convert DD/MM/YYYY back to YYYY-MM-DD
             description: t.description?.trim() || undefined,
@@ -602,7 +632,7 @@ export default function BulkImportModal({
       setImportedCount(result.created);
       setStep('success');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Échec de l\'importation des transactions');
+      setError(err instanceof Error ? err.message : "Échec de l'importation des transactions");
     } finally {
       setIsLoading(false);
     }
@@ -655,14 +685,14 @@ export default function BulkImportModal({
   };
 
   const getColumnConfig = (type: ColumnType): ColumnConfig => {
-    return AVAILABLE_COLUMNS.find(c => c.id === type) || AVAILABLE_COLUMNS[4];
+    return AVAILABLE_COLUMNS.find((c) => c.id === type) || AVAILABLE_COLUMNS[4];
   };
 
   if (!isOpen) return null;
 
   return (
     <div className="modal-overlay" onClick={handleClose}>
-      <div className="modal-content import-modal" onClick={e => e.stopPropagation()}>
+      <div className="modal-content import-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>
             {step === 'select' && 'Import en masse'}
@@ -695,10 +725,7 @@ export default function BulkImportModal({
             <div className="import-options">
               <p className="import-description">Sélectionnez la source des données à importer</p>
               <div className="import-option-cards">
-                <button 
-                  className="import-option-card"
-                  onClick={() => setStep('upload')}
-                >
+                <button className="import-option-card" onClick={() => setStep('upload')}>
                   <div className="option-icon">
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -710,10 +737,7 @@ export default function BulkImportModal({
                   <span className="option-label">PDF</span>
                   <span className="option-hint">Relevé bancaire PDF</span>
                 </button>
-                <button 
-                  className="import-option-card"
-                  onClick={() => setStep('paste')}
-                >
+                <button className="import-option-card" onClick={() => setStep('paste')}>
                   <div className="option-icon">
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <rect x="3" y="3" width="7" height="7" />
@@ -731,7 +755,7 @@ export default function BulkImportModal({
 
           {step === 'upload' && (
             <div className="upload-area">
-              <div 
+              <div
                 className={`drop-zone ${isDragging ? 'dragging' : ''}`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
@@ -745,7 +769,14 @@ export default function BulkImportModal({
                 ) : (
                   <>
                     <div className="drop-icon">
-                      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <svg
+                        width="64"
+                        height="64"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      >
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                         <polyline points="17 8 12 3 7 8" />
                         <line x1="12" y1="3" x2="12" y2="15" />
@@ -754,12 +785,7 @@ export default function BulkImportModal({
                     <p className="drop-text">Glissez-déposez votre fichier PDF ici</p>
                     <p className="drop-hint">ou</p>
                     <label className="file-select-btn">
-                      <input 
-                        type="file" 
-                        accept=".pdf,application/pdf" 
-                        onChange={handleFileSelect}
-                        hidden 
-                      />
+                      <input type="file" accept=".pdf,application/pdf" onChange={handleFileSelect} hidden />
                       Parcourir les fichiers
                     </label>
                   </>
@@ -781,7 +807,9 @@ export default function BulkImportModal({
                   </svg>
                 </div>
                 <div className="paste-instruction-text">
-                  <p><strong>Instructions :</strong></p>
+                  <p>
+                    <strong>Instructions :</strong>
+                  </p>
                   <ol>
                     <li>Configurez l'ordre des colonnes ci-dessous (glisser-déposer)</li>
                     <li>Ouvrez votre fichier Excel ou Google Sheets</li>
@@ -795,7 +823,7 @@ export default function BulkImportModal({
               <div className="column-configurator">
                 <div className="column-config-header">
                   <span className="column-config-label">Ordre des colonnes :</span>
-                  <button 
+                  <button
                     className="column-reset-btn"
                     onClick={() => setColumnOrder(DEFAULT_COLUMN_ORDER)}
                     title="Réinitialiser"
@@ -831,12 +859,15 @@ export default function BulkImportModal({
                           </svg>
                         </span>
                         <span className="column-chip-label">{config.label}</span>
-                        <button 
-                          className="column-chip-remove"
-                          onClick={() => removeColumn(index)}
-                          title="Supprimer"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <button className="column-chip-remove" onClick={() => removeColumn(index)} title="Supprimer">
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
                             <line x1="18" y1="6" x2="6" y2="18" />
                             <line x1="6" y1="6" x2="18" y2="18" />
                           </svg>
@@ -844,7 +875,7 @@ export default function BulkImportModal({
                       </div>
                     );
                   })}
-                  {AVAILABLE_COLUMNS.filter(col => !columnOrder.includes(col.id)).length > 0 && (
+                  {AVAILABLE_COLUMNS.filter((col) => !columnOrder.includes(col.id)).length > 0 && (
                     <div className="column-add-dropdown">
                       <select
                         onChange={(e) => {
@@ -856,17 +887,18 @@ export default function BulkImportModal({
                         className="column-add-select"
                       >
                         <option value="">+ Ajouter</option>
-                        {AVAILABLE_COLUMNS
-                          .filter(col => !columnOrder.includes(col.id))
-                          .map(col => (
-                            <option key={col.id} value={col.id}>{col.label}</option>
-                          ))}
+                        {AVAILABLE_COLUMNS.filter((col) => !columnOrder.includes(col.id)).map((col) => (
+                          <option key={col.id} value={col.id}>
+                            {col.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   )}
                 </div>
                 <p className="column-config-hint">
-                  <strong>Requis :</strong> Date, Tiers, Mode, Montant · <strong>Optionnel :</strong> Description, Catégorie, Commentaire
+                  <strong>Requis :</strong> Date, Tiers, Mode, Montant · <strong>Optionnel :</strong> Description,
+                  Catégorie, Commentaire
                 </p>
               </div>
 
@@ -878,10 +910,16 @@ export default function BulkImportModal({
                 rows={12}
               />
               <div className="paste-footer">
-                <button className="btn-back" onClick={() => { setStep('select'); setPasteContent(''); }}>
+                <button
+                  className="btn-back"
+                  onClick={() => {
+                    setStep('select');
+                    setPasteContent('');
+                  }}
+                >
                   ← Retour
                 </button>
-                <button 
+                <button
                   className="btn-primary"
                   onClick={processSpreadsheetData}
                   disabled={isLoading || !pasteContent.trim()}
@@ -908,21 +946,21 @@ export default function BulkImportModal({
             <div className="preview-area">
               {/* Summary totals */}
               {(() => {
-                const selected = transactions.filter(t => t.selected);
+                const selected = transactions.filter((t) => t.selected);
                 // Derive type from category's group type
                 const getGroupType = (itemId: number | null) => {
                   if (!itemId) return 'expense'; // Default to expense if no category
-                  const item = allItems.find(i => i.id === itemId);
+                  const item = allItems.find((i) => i.id === itemId);
                   return item?.groupType || 'expense';
                 };
-                
+
                 // Calculate totals considering isIncome flag:
                 // - Income category items: always income
                 // - Expense category items with isIncome=true: refund (reduces expenses)
                 // - Expense category items with isIncome=false: expense
                 let totalIncome = 0;
                 let totalExpenses = 0;
-                
+
                 for (const t of selected) {
                   const groupType = getGroupType(t.itemId);
                   if (groupType === 'income') {
@@ -937,9 +975,9 @@ export default function BulkImportModal({
                     }
                   }
                 }
-                
+
                 const netBalance = totalIncome - totalExpenses;
-                
+
                 return (
                   <div className="preview-summary">
                     <div className="summary-item income">
@@ -952,7 +990,10 @@ export default function BulkImportModal({
                     </div>
                     <div className={`summary-item net ${netBalance >= 0 ? 'positive' : 'negative'}`}>
                       <span className="summary-label">Solde net</span>
-                      <span className="summary-value">{netBalance >= 0 ? '+' : ''}{netBalance.toFixed(2)}</span>
+                      <span className="summary-value">
+                        {netBalance >= 0 ? '+' : ''}
+                        {netBalance.toFixed(2)}
+                      </span>
                     </div>
                   </div>
                 );
@@ -960,11 +1001,13 @@ export default function BulkImportModal({
 
               <div className="preview-header">
                 <div className="preview-stats">
-                  <span>{transactions.filter(t => t.selected).length} / {transactions.length} transactions sélectionnées</span>
+                  <span>
+                    {transactions.filter((t) => t.selected).length} / {transactions.length} transactions sélectionnées
+                  </span>
                 </div>
                 <div className="preview-actions">
                   <button className="btn-text" onClick={toggleSelectAll}>
-                    {transactions.every(t => t.selected) ? 'Tout désélectionner' : 'Tout sélectionner'}
+                    {transactions.every((t) => t.selected) ? 'Tout désélectionner' : 'Tout sélectionner'}
                   </button>
                   <button className="btn-add-row" onClick={addTransaction}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -983,7 +1026,7 @@ export default function BulkImportModal({
                   <div className="bulk-apply-field">
                     <label>Catégorie</label>
                     <select
-                      onChange={e => {
+                      onChange={(e) => {
                         if (e.target.value) {
                           applyCategoryToAll(Number(e.target.value));
                           e.target.value = '';
@@ -993,13 +1036,17 @@ export default function BulkImportModal({
                     >
                       <option value="">—</option>
                       <optgroup label="Revenus">
-                        {incomeItems.map(item => (
-                          <option key={item.id} value={item.id}>{item.groupName} → {item.name}</option>
+                        {incomeItems.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.groupName} → {item.name}
+                          </option>
                         ))}
                       </optgroup>
                       <optgroup label="Dépenses">
-                        {expenseItems.map(item => (
-                          <option key={item.id} value={item.id}>{item.groupName} → {item.name}</option>
+                        {expenseItems.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.groupName} → {item.name}
+                          </option>
                         ))}
                       </optgroup>
                     </select>
@@ -1007,15 +1054,17 @@ export default function BulkImportModal({
                   <div className="bulk-apply-field">
                     <label>Mode</label>
                     <select
-                      onChange={e => {
+                      onChange={(e) => {
                         applyPaymentMethodToAll(e.target.value);
                         // Don't reset for payment as empty is valid
                       }}
                       className="preview-select"
                     >
                       <option value="">—</option>
-                      {paymentMethods.map(m => (
-                        <option key={m.id} value={m.name}>{m.name}</option>
+                      {paymentMethods.map((m) => (
+                        <option key={m.id} value={m.name}>
+                          {m.name}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -1027,9 +1076,9 @@ export default function BulkImportModal({
                   <thead>
                     <tr>
                       <th className="col-select">
-                        <input 
-                          type="checkbox" 
-                          checked={transactions.every(t => t.selected)}
+                        <input
+                          type="checkbox"
+                          checked={transactions.every((t) => t.selected)}
                           onChange={toggleSelectAll}
                         />
                       </th>
@@ -1038,7 +1087,9 @@ export default function BulkImportModal({
                       <th className="col-description">Description</th>
                       <th className="col-third-party">Tiers *</th>
                       <th className="col-amount">Montant *</th>
-                      <th className="col-type" title="Type: Dépense ou Revenu/Crédit">Type</th>
+                      <th className="col-type" title="Type: Dépense ou Revenu/Crédit">
+                        Type
+                      </th>
                       <th className="col-category">Catégorie *</th>
                       <th className="col-payment">Mode *</th>
                       <th className="col-comment">Commentaire</th>
@@ -1050,175 +1101,212 @@ export default function BulkImportModal({
                       const missing = t.selected ? getMissingFields(t) : [];
                       const hasErrors = missing.length > 0;
                       const missingCategory = t.selected && !t.itemId;
-                      
+
                       return (
-                      <tr key={t.id} className={`${!t.selected ? 'deselected' : ''} ${hasErrors || missingCategory ? 'has-errors' : ''}`}>
-                        <td>
-                          <input 
-                            type="checkbox" 
-                            checked={t.selected}
-                            onChange={() => toggleSelect(t.id)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="text"
-                            value={t.date}
-                            onChange={e => {
-                              const newDate = e.target.value;
-                              if (isValidDateFormat(newDate)) {
-                                const pm = paymentMethods.find(m => m.name === t.paymentMethod);
-                                const newAccounting = calculateAccountingPeriod(newDate, pm?.settlementDay ?? null);
-                                updateTransaction(t.id, { 
-                                  date: newDate,
+                        <tr
+                          key={t.id}
+                          className={`${!t.selected ? 'deselected' : ''} ${hasErrors || missingCategory ? 'has-errors' : ''}`}
+                        >
+                          <td>
+                            <input type="checkbox" checked={t.selected} onChange={() => toggleSelect(t.id)} />
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={t.date}
+                              onChange={(e) => {
+                                const newDate = e.target.value;
+                                if (isValidDateFormat(newDate)) {
+                                  const pm = paymentMethods.find((m) => m.name === t.paymentMethod);
+                                  const newAccounting = calculateAccountingPeriod(newDate, pm?.settlementDay ?? null);
+                                  updateTransaction(t.id, {
+                                    date: newDate,
+                                    accountingMonth: newAccounting.accountingMonth,
+                                    accountingYear: newAccounting.accountingYear,
+                                  });
+                                } else {
+                                  updateTransaction(t.id, { date: newDate });
+                                }
+                              }}
+                              placeholder="JJ/MM/AAAA"
+                              className={`preview-input date ${missing.includes('date') ? 'missing-field' : ''} ${!isValidDateFormat(t.date) && t.date ? 'invalid' : ''}`}
+                            />
+                          </td>
+                          <td className="accounting-cell">
+                            <select
+                              value={t.accountingMonth}
+                              onChange={(e) =>
+                                updateTransaction(t.id, { accountingMonth: parseInt(e.target.value, 10) })
+                              }
+                              className="preview-select accounting-month"
+                            >
+                              {MONTH_NAMES.map((name, i) => (
+                                <option key={i + 1} value={i + 1}>
+                                  {name}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="number"
+                              value={t.accountingYear}
+                              onChange={(e) =>
+                                updateTransaction(t.id, {
+                                  accountingYear: parseInt(e.target.value, 10) || t.accountingYear,
+                                })
+                              }
+                              className="preview-input accounting-year"
+                              min="2000"
+                              max="2100"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={t.description}
+                              onChange={(e) => updateTransaction(t.id, { description: e.target.value })}
+                              className="preview-input description"
+                              placeholder="Description"
+                            />
+                          </td>
+                          <td>
+                            <ThirdPartyAutocomplete
+                              value={t.thirdParty || ''}
+                              onChange={(value) => updateTransaction(t.id, { thirdParty: value })}
+                              placeholder="Tiers *"
+                              className={`preview-input third-party ${missing.includes('tiers') ? 'missing-field' : ''}`}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              value={t.amount}
+                              onChange={(e) => updateTransaction(t.id, { amount: parseFloat(e.target.value) || 0 })}
+                              className={`preview-input amount ${missing.includes('montant') ? 'missing-field' : ''}`}
+                              step="0.01"
+                            />
+                          </td>
+                          <td className="type-cell">
+                            <button
+                              type="button"
+                              className={`type-toggle ${t.isIncome ? 'income' : 'expense'}`}
+                              onClick={() => updateTransaction(t.id, { isIncome: !t.isIncome })}
+                              title={
+                                t.isIncome
+                                  ? 'Revenu/Crédit (cliquer pour changer en Dépense)'
+                                  : 'Dépense (cliquer pour changer en Revenu/Crédit)'
+                              }
+                            >
+                              {t.isIncome ? (
+                                <>
+                                  <svg
+                                    width="12"
+                                    height="12"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                  >
+                                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                                    <polyline points="17 6 23 6 23 12" />
+                                  </svg>
+                                  <span>Crédit</span>
+                                </>
+                              ) : (
+                                <>
+                                  <svg
+                                    width="12"
+                                    height="12"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                  >
+                                    <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" />
+                                    <polyline points="17 18 23 18 23 12" />
+                                  </svg>
+                                  <span>Dépense</span>
+                                </>
+                              )}
+                            </button>
+                          </td>
+                          <td>
+                            <CategoryCombobox
+                              value={t.itemId}
+                              onChange={(itemId) => updateTransaction(t.id, { itemId })}
+                              groups={localGroups}
+                              yearId={yearId}
+                              isRequired={t.selected && !t.itemId}
+                              onItemCreated={handleItemCreated}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              value={t.paymentMethod}
+                              onChange={(e) => {
+                                const pm = paymentMethods.find((m) => m.name === e.target.value);
+                                const newAccounting = calculateAccountingPeriod(t.date, pm?.settlementDay ?? null);
+                                updateTransaction(t.id, {
+                                  paymentMethod: e.target.value,
                                   accountingMonth: newAccounting.accountingMonth,
                                   accountingYear: newAccounting.accountingYear,
                                 });
-                              } else {
-                                updateTransaction(t.id, { date: newDate });
-                              }
-                            }}
-                            placeholder="JJ/MM/AAAA"
-                            className={`preview-input date ${missing.includes('date') ? 'missing-field' : ''} ${!isValidDateFormat(t.date) && t.date ? 'invalid' : ''}`}
-                          />
-                        </td>
-                        <td className="accounting-cell">
-                          <select
-                            value={t.accountingMonth}
-                            onChange={e => updateTransaction(t.id, { accountingMonth: parseInt(e.target.value) })}
-                            className="preview-select accounting-month"
-                          >
-                            {MONTH_NAMES.map((name, i) => (
-                              <option key={i + 1} value={i + 1}>{name}</option>
-                            ))}
-                          </select>
-                          <input
-                            type="number"
-                            value={t.accountingYear}
-                            onChange={e => updateTransaction(t.id, { accountingYear: parseInt(e.target.value) || t.accountingYear })}
-                            className="preview-input accounting-year"
-                            min="2000"
-                            max="2100"
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="text"
-                            value={t.description}
-                            onChange={e => updateTransaction(t.id, { description: e.target.value })}
-                            className="preview-input description"
-                            placeholder="Description"
-                          />
-                        </td>
-                        <td>
-                          <ThirdPartyAutocomplete
-                            value={t.thirdParty || ''}
-                            onChange={value => updateTransaction(t.id, { thirdParty: value })}
-                            placeholder="Tiers *"
-                            className={`preview-input third-party ${missing.includes('tiers') ? 'missing-field' : ''}`}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            value={t.amount}
-                            onChange={e => updateTransaction(t.id, { amount: parseFloat(e.target.value) || 0 })}
-                            className={`preview-input amount ${missing.includes('montant') ? 'missing-field' : ''}`}
-                            step="0.01"
-                          />
-                        </td>
-                        <td className="type-cell">
-                          <button
-                            type="button"
-                            className={`type-toggle ${t.isIncome ? 'income' : 'expense'}`}
-                            onClick={() => updateTransaction(t.id, { isIncome: !t.isIncome })}
-                            title={t.isIncome ? 'Revenu/Crédit (cliquer pour changer en Dépense)' : 'Dépense (cliquer pour changer en Revenu/Crédit)'}
-                          >
-                            {t.isIncome ? (
-                              <>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-                                  <polyline points="17 6 23 6 23 12" />
-                                </svg>
-                                <span>Crédit</span>
-                              </>
-                            ) : (
-                              <>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" />
-                                  <polyline points="17 18 23 18 23 12" />
-                                </svg>
-                                <span>Dépense</span>
-                              </>
-                            )}
-                          </button>
-                        </td>
-                        <td>
-                          <CategoryCombobox
-                            value={t.itemId}
-                            onChange={(itemId) => updateTransaction(t.id, { itemId })}
-                            groups={localGroups}
-                            yearId={yearId}
-                            isRequired={t.selected && !t.itemId}
-                            onItemCreated={handleItemCreated}
-                          />
-                        </td>
-                        <td>
-                          <select
-                            value={t.paymentMethod}
-                            onChange={e => {
-                              const pm = paymentMethods.find(m => m.name === e.target.value);
-                              const newAccounting = calculateAccountingPeriod(t.date, pm?.settlementDay ?? null);
-                              updateTransaction(t.id, { 
-                                paymentMethod: e.target.value,
-                                accountingMonth: newAccounting.accountingMonth,
-                                accountingYear: newAccounting.accountingYear,
-                              });
-                            }}
-                            className={`preview-select ${missing.includes('mode') ? 'missing-field' : ''}`}
-                          >
-                            <option value="">- Mode * -</option>
-                            {paymentMethods.map(m => (
-                              <option key={m.id} value={m.name}>{m.name}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <input
-                            type="text"
-                            value={t.comment || ''}
-                            onChange={e => updateTransaction(t.id, { comment: e.target.value })}
-                            className="preview-input comment"
-                            placeholder="Commentaire"
-                          />
-                        </td>
-                        <td>
-                          <button 
-                            className="btn-icon delete"
-                            onClick={() => removeTransaction(t.id)}
-                            title="Supprimer"
-                          >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <line x1="18" y1="6" x2="6" y2="18" />
-                              <line x1="6" y1="6" x2="18" y2="18" />
-                            </svg>
-                          </button>
-                        </td>
-                      </tr>
-                    );
+                              }}
+                              className={`preview-select ${missing.includes('mode') ? 'missing-field' : ''}`}
+                            >
+                              <option value="">- Mode * -</option>
+                              {paymentMethods.map((m) => (
+                                <option key={m.id} value={m.name}>
+                                  {m.name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={t.comment || ''}
+                              onChange={(e) => updateTransaction(t.id, { comment: e.target.value })}
+                              className="preview-input comment"
+                              placeholder="Commentaire"
+                            />
+                          </td>
+                          <td>
+                            <button
+                              className="btn-icon delete"
+                              onClick={() => removeTransaction(t.id)}
+                              title="Supprimer"
+                            >
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            </button>
+                          </td>
+                        </tr>
+                      );
                     })}
                   </tbody>
                 </table>
               </div>
 
               <div className="preview-footer">
-                <button className="btn-back" onClick={() => setStep(importSource === 'spreadsheet' ? 'paste' : 'upload')}>
+                <button
+                  className="btn-back"
+                  onClick={() => setStep(importSource === 'spreadsheet' ? 'paste' : 'upload')}
+                >
                   ← Retour
                 </button>
-                <button 
+                <button
                   className="btn-primary"
                   onClick={handleImport}
-                  disabled={isLoading || transactions.filter(t => t.selected && t.itemId).length === 0}
+                  disabled={isLoading || transactions.filter((t) => t.selected && t.itemId).length === 0}
                 >
                   {isLoading ? (
                     <>
@@ -1230,7 +1318,7 @@ export default function BulkImportModal({
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
-                      Importer {transactions.filter(t => t.selected && t.itemId).length} transactions
+                      Importer {transactions.filter((t) => t.selected && t.itemId).length} transactions
                     </>
                   )}
                 </button>

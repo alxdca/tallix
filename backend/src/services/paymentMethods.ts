@@ -1,4 +1,4 @@
-import { eq, asc } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { db, paymentMethods } from '../db/index.js';
 
 // Type for payment method from database
@@ -33,22 +33,28 @@ export async function getAllPaymentMethods() {
 
 // Create a new payment method
 export async function createPaymentMethod(name: string, sortOrder: number = 0) {
-  const [newMethod] = await db.insert(paymentMethods).values({
-    name,
-    sortOrder,
-  }).returning();
+  const [newMethod] = await db
+    .insert(paymentMethods)
+    .values({
+      name,
+      sortOrder,
+    })
+    .returning();
 
   return formatPaymentMethod(newMethod);
 }
 
 // Update a payment method
-export async function updatePaymentMethod(id: number, data: {
-  name?: string;
-  sortOrder?: number;
-  isAccount?: boolean;
-  settlementDay?: number | null;
-  linkedPaymentMethodId?: number | null;
-}) {
+export async function updatePaymentMethod(
+  id: number,
+  data: {
+    name?: string;
+    sortOrder?: number;
+    isAccount?: boolean;
+    settlementDay?: number | null;
+    linkedPaymentMethodId?: number | null;
+  }
+) {
   const updateData: Partial<{
     name: string;
     sortOrder: number;
@@ -57,17 +63,14 @@ export async function updatePaymentMethod(id: number, data: {
     linkedPaymentMethodId: number | null;
     updatedAt: Date;
   }> = { updatedAt: new Date() };
-  
+
   if (data.name !== undefined) updateData.name = data.name;
   if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
   if (data.isAccount !== undefined) updateData.isAccount = data.isAccount;
   if (data.settlementDay !== undefined) updateData.settlementDay = data.settlementDay;
   if (data.linkedPaymentMethodId !== undefined) updateData.linkedPaymentMethodId = data.linkedPaymentMethodId;
 
-  const [updated] = await db.update(paymentMethods)
-    .set(updateData)
-    .where(eq(paymentMethods.id, id))
-    .returning();
+  const [updated] = await db.update(paymentMethods).set(updateData).where(eq(paymentMethods.id, id)).returning();
 
   if (!updated) return null;
 
@@ -86,9 +89,7 @@ export async function getPaymentMethodByName(name: string) {
 export async function reorderPaymentMethods(methods: { id: number; sortOrder: number }[]) {
   await Promise.all(
     methods.map(({ id, sortOrder }) =>
-      db.update(paymentMethods)
-        .set({ sortOrder, updatedAt: new Date() })
-        .where(eq(paymentMethods.id, id))
+      db.update(paymentMethods).set({ sortOrder, updatedAt: new Date() }).where(eq(paymentMethods.id, id))
     )
   );
 }
@@ -96,9 +97,7 @@ export async function reorderPaymentMethods(methods: { id: number; sortOrder: nu
 // Delete a payment method
 // Returns true if payment method was deleted, false if it didn't exist
 export async function deletePaymentMethod(id: number): Promise<boolean> {
-  const result = await db.delete(paymentMethods)
-    .where(eq(paymentMethods.id, id))
-    .returning({ id: paymentMethods.id });
-  
+  const result = await db.delete(paymentMethods).where(eq(paymentMethods.id, id)).returning({ id: paymentMethods.id });
+
   return result.length > 0;
 }

@@ -1,16 +1,16 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
-import { fetchBudgetData, fetchBudgetSummary, fetchMonths, fetchAccounts, type Account } from './api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type Account, fetchAccounts, fetchBudgetData, fetchBudgetSummary, fetchMonths } from './api';
+import Accounts from './components/Accounts';
+import BudgetPlanning from './components/BudgetPlanning';
+import BudgetSpreadsheet from './components/BudgetSpreadsheet';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import Header from './components/Header';
+import Settings from './components/Settings';
+import Sidebar from './components/Sidebar';
+import Transactions from './components/Transactions';
 import type { BudgetData, BudgetSummary } from './types';
 import { organizeBudgetData } from './utils';
 import { logger } from './utils/logger';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import Sidebar from './components/Sidebar';
-import Header from './components/Header';
-import BudgetSpreadsheet from './components/BudgetSpreadsheet';
-import Settings from './components/Settings';
-import Transactions from './components/Transactions';
-import Accounts from './components/Accounts';
-import BudgetPlanning from './components/BudgetPlanning';
 
 function App() {
   const [budgetData, setBudgetData] = useState<BudgetData | null>(null);
@@ -28,9 +28,7 @@ function App() {
 
   // Calculate total initial balance of payment method accounts (excluding savings)
   const paymentAccountsInitialBalance = useMemo(() => {
-    return accounts
-      .filter(a => a.type === 'payment_method')
-      .reduce((sum, a) => sum + a.initialBalance, 0);
+    return accounts.filter((a) => a.type === 'payment_method').reduce((sum, a) => sum + a.initialBalance, 0);
   }, [accounts]);
 
   const loadData = useCallback(async () => {
@@ -44,11 +42,11 @@ function App() {
       setBudgetData(data);
       setSummary(summaryData);
       setMonths(monthsData);
-      
+
       // Fetch accounts for the year (needed for funds summary)
       const accountsData = await fetchAccounts(data.year);
       setAccounts(accountsData);
-      
+
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -68,7 +66,7 @@ function App() {
       setBudgetData(data);
       setSummary(summaryData);
       setMonths(monthsData);
-      
+
       // Fetch accounts for the year (needed for funds summary)
       const accountsData = await fetchAccounts(data.year);
       setAccounts(accountsData);
@@ -87,13 +85,10 @@ function App() {
   // Refresh budget data when transactions might have changed
   const handleTransactionsChanged = useCallback(async () => {
     try {
-      const [data, summaryData] = await Promise.all([
-        fetchBudgetData(),
-        fetchBudgetSummary(),
-      ]);
+      const [data, summaryData] = await Promise.all([fetchBudgetData(), fetchBudgetSummary()]);
       setBudgetData(data);
       setSummary(summaryData);
-      
+
       // Also refresh accounts for updated fund balances
       const accountsData = await fetchAccounts(data.year);
       setAccounts(accountsData);
@@ -163,21 +158,9 @@ function App() {
           />
         );
       case 'settings':
-        return (
-          <Settings
-            yearId={yearId}
-            groups={budgetData?.groups || []}
-            onDataChanged={refreshData}
-          />
-        );
+        return <Settings yearId={yearId} groups={budgetData?.groups || []} onDataChanged={refreshData} />;
       case 'accounts':
-        return (
-          <Accounts
-            year={currentYear}
-            months={months}
-            onDataChanged={refreshData}
-          />
-        );
+        return <Accounts year={currentYear} months={months} onDataChanged={refreshData} />;
       case 'budget-planning':
         return (
           <BudgetPlanning
@@ -195,14 +178,8 @@ function App() {
   return (
     <ErrorBoundary>
       <div className="app">
-        <Sidebar
-          activeView={activeView}
-          onViewChange={setActiveView}
-          currentYear={currentYear}
-        />
-        <main className="main-content">
-          {renderContent()}
-        </main>
+        <Sidebar activeView={activeView} onViewChange={setActiveView} currentYear={currentYear} />
+        <main className="main-content">{renderContent()}</main>
       </div>
     </ErrorBoundary>
   );

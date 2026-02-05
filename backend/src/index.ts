@@ -1,14 +1,14 @@
 import 'dotenv/config';
-import express from 'express';
 import cors from 'cors';
+import express from 'express';
 import logger from './logger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import accountsRoutes from './routes/accounts.js';
 import budgetRoutes from './routes/budget.js';
+import importRoutes from './routes/import.js';
+import paymentMethodsRoutes from './routes/paymentMethods.js';
 import settingsRoutes from './routes/settings.js';
 import transactionsRoutes from './routes/transactions.js';
-import paymentMethodsRoutes from './routes/paymentMethods.js';
-import importRoutes from './routes/import.js';
-import accountsRoutes from './routes/accounts.js';
 import transfersRoutes from './routes/transfers.js';
 
 const app = express();

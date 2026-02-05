@@ -1,6 +1,15 @@
-import { eq, and, sql, asc } from 'drizzle-orm';
 import Decimal from 'decimal.js';
-import { db, budgetYears, budgetGroups, budgetItems, paymentMethods, accountBalances, transactions, transfers } from '../db/index.js';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import {
+  accountBalances,
+  budgetGroups,
+  budgetItems,
+  budgetYears,
+  db,
+  paymentMethods,
+  transactions,
+  transfers,
+} from '../db/index.js';
 import { ACCOUNT_TYPES, type AccountType } from '../types/accounts.js';
 
 export { ACCOUNT_TYPES, type AccountType } from '../types/accounts.js';
@@ -24,7 +33,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
   const budgetYear = await db.query.budgetYears.findFirst({
     where: eq(budgetYears.year, year),
   });
-  
+
   if (!budgetYear) {
     return [];
   }
@@ -43,21 +52,15 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
     })
     .from(budgetItems)
     .innerJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
-    .where(and(
-      eq(budgetItems.yearId, yearId),
-      eq(budgetGroups.type, 'savings')
-    ))
+    .where(and(eq(budgetItems.yearId, yearId), eq(budgetGroups.type, 'savings')))
     .orderBy(asc(budgetGroups.sortOrder), asc(budgetItems.sortOrder));
 
   // 2. Get all payment methods (we need all to know which are linked)
-  const allPaymentMethods = await db
-    .select()
-    .from(paymentMethods)
-    .orderBy(asc(paymentMethods.sortOrder));
+  const allPaymentMethods = await db.select().from(paymentMethods).orderBy(asc(paymentMethods.sortOrder));
 
   // Filter to just accounts
-  const paymentMethodAccounts = allPaymentMethods.filter(pm => pm.isAccount);
-  
+  const paymentMethodAccounts = allPaymentMethods.filter((pm) => pm.isAccount);
+
   // Build reverse map: account ID -> list of payment method names that are linked to it
   const accountLinkedMethods = new Map<number, string[]>();
   for (const pm of allPaymentMethods) {
@@ -69,10 +72,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
   }
 
   // 3. Get initial balances for all accounts
-  const balances = await db
-    .select()
-    .from(accountBalances)
-    .where(eq(accountBalances.yearId, yearId));
+  const balances = await db.select().from(accountBalances).where(eq(accountBalances.yearId, yearId));
 
   // Use Decimal for precise balance calculations
   const balanceMap = new Map<string, Decimal>();
@@ -93,11 +93,9 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
     .from(transactions)
     .innerJoin(budgetItems, eq(transactions.itemId, budgetItems.id))
     .innerJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
-    .where(and(
-      eq(transactions.yearId, yearId),
-      eq(transactions.accountingYear, year),
-      eq(budgetGroups.type, 'savings')
-    ))
+    .where(
+      and(eq(transactions.yearId, yearId), eq(transactions.accountingYear, year), eq(budgetGroups.type, 'savings'))
+    )
     .groupBy(transactions.itemId, transactions.accountingMonth);
 
   // 5. Calculate monthly transaction totals for payment method accounts
@@ -124,10 +122,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
     .from(transactions)
     .leftJoin(budgetItems, eq(transactions.itemId, budgetItems.id))
     .leftJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
-    .where(and(
-      eq(transactions.yearId, yearId),
-      eq(transactions.accountingYear, year)
-    ))
+    .where(and(eq(transactions.yearId, yearId), eq(transactions.accountingYear, year)))
     .groupBy(transactions.paymentMethod, transactions.accountingMonth);
 
   // 6. Get all transfers for balance adjustment
@@ -135,18 +130,15 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
   const allTransfers = await db
     .select()
     .from(transfers)
-    .where(and(
-      eq(transfers.yearId, yearId),
-      eq(transfers.accountingYear, year)
-    ));
+    .where(and(eq(transfers.yearId, yearId), eq(transfers.accountingYear, year)));
 
   // Build transfer impact maps using Decimal: accountKey -> month -> { incoming, outgoing }
   const transferImpact = new Map<string, Map<number, { incoming: Decimal; outgoing: Decimal }>>();
-  
+
   for (const t of allTransfers) {
     const amount = new Decimal(t.amount);
     const month = t.accountingMonth;
-    
+
     // Source account loses money
     const sourceKey = `${t.sourceAccountType}_${t.sourceAccountId}`;
     if (!transferImpact.has(sourceKey)) {
@@ -158,7 +150,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
     }
     const sourceEntry = sourceMonthMap.get(month)!;
     sourceEntry.outgoing = sourceEntry.outgoing.plus(amount);
-    
+
     // Destination account gains money
     const destKey = `${t.destinationAccountType}_${t.destinationAccountId}`;
     if (!transferImpact.has(destKey)) {
@@ -176,10 +168,10 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
   for (const item of savingsItems) {
     const key = `savings_item_${item.id}`;
     const initialBalance = balanceMap.get(key) || new Decimal(0);
-    
+
     // Calculate cumulative balance per month (transactions + transfers)
     const monthlyTotals = new Map<number, Decimal>();
-    
+
     // Add transactions
     for (const t of savingsTransactions) {
       if (t.itemId === item.id) {
@@ -187,7 +179,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
         monthlyTotals.set(t.month, current.plus(new Decimal(t.total || '0')));
       }
     }
-    
+
     // Add transfers
     const itemTransfers = transferImpact.get(key);
     if (itemTransfers) {
@@ -228,12 +220,12 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
 
     // Calculate cumulative balance per month (transactions + transfers) using Decimal
     const monthlyTotals = new Map<number, { balanceChange: Decimal; transferIn: Decimal; transferOut: Decimal }>();
-    
+
     // Initialize
     for (let m = 1; m <= 12; m++) {
       monthlyTotals.set(m, { balanceChange: new Decimal(0), transferIn: new Decimal(0), transferOut: new Decimal(0) });
     }
-    
+
     // Add transactions (including from linked payment methods)
     for (const t of pmTransactions) {
       if (affectingMethods.includes(t.paymentMethod || '')) {
@@ -241,7 +233,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
         existing.balanceChange = existing.balanceChange.plus(new Decimal(t.balanceChange || '0'));
       }
     }
-    
+
     // Add transfers
     const pmTransfers = transferImpact.get(key);
     if (pmTransfers) {
@@ -305,9 +297,9 @@ export async function setAccountBalance(
     })
     .onConflictDoUpdate({
       target: [accountBalances.yearId, accountBalances.accountType, accountBalances.accountId],
-      set: { 
-        initialBalance: initialBalance.toString(), 
-        updatedAt: new Date() 
+      set: {
+        initialBalance: initialBalance.toString(),
+        updatedAt: new Date(),
       },
     });
 }
@@ -318,7 +310,7 @@ export async function getPaymentMethodsWithAccountFlag() {
     orderBy: (pm, { asc }) => [asc(pm.sortOrder)],
   });
 
-  return methods.map(m => ({
+  return methods.map((m) => ({
     id: m.id,
     name: m.name,
     sortOrder: m.sortOrder,
@@ -328,7 +320,5 @@ export async function getPaymentMethodsWithAccountFlag() {
 
 // Update payment method isAccount flag
 export async function setPaymentMethodAsAccount(id: number, isAccount: boolean): Promise<void> {
-  await db.update(paymentMethods)
-    .set({ isAccount, updatedAt: new Date() })
-    .where(eq(paymentMethods.id, id));
+  await db.update(paymentMethods).set({ isAccount, updatedAt: new Date() }).where(eq(paymentMethods.id, id));
 }

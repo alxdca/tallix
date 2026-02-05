@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
-import type { BudgetGroup, GroupType } from '../types';
+import type React from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createItem } from '../api';
+import type { BudgetGroup, GroupType } from '../types';
 import { logger } from '../utils/logger';
 
 interface CategoryItem {
@@ -17,7 +18,13 @@ interface CategoryComboboxProps {
   groups: BudgetGroup[];
   yearId: number;
   isRequired?: boolean;
-  onItemCreated?: (item: { id: number; name: string; groupId: number; groupName: string; groupType: GroupType }) => void;
+  onItemCreated?: (item: {
+    id: number;
+    name: string;
+    groupId: number;
+    groupName: string;
+    groupType: GroupType;
+  }) => void;
 }
 
 export default function CategoryCombobox({
@@ -37,8 +44,8 @@ export default function CategoryCombobox({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Flatten all items from groups
-  const allItems: CategoryItem[] = groups.flatMap(g => 
-    g.items.map(item => ({
+  const allItems: CategoryItem[] = groups.flatMap((g) =>
+    g.items.map((item) => ({
       id: item.id,
       name: item.name,
       groupName: g.name,
@@ -48,25 +55,24 @@ export default function CategoryCombobox({
   );
 
   // Find selected item
-  const selectedItem = allItems.find(item => item.id === value);
+  const selectedItem = allItems.find((item) => item.id === value);
 
   // Filter items based on search
   const filteredItems = search
-    ? allItems.filter(item => 
-        item.name.toLowerCase().includes(search.toLowerCase()) ||
-        item.groupName.toLowerCase().includes(search.toLowerCase())
+    ? allItems.filter(
+        (item) =>
+          item.name.toLowerCase().includes(search.toLowerCase()) ||
+          item.groupName.toLowerCase().includes(search.toLowerCase())
       )
     : allItems;
 
   // Group filtered items by type
-  const incomeItems = filteredItems.filter(i => i.groupType === 'income');
-  const expenseItems = filteredItems.filter(i => i.groupType === 'expense');
-  const savingsItems = filteredItems.filter(i => i.groupType === 'savings');
+  const incomeItems = filteredItems.filter((i) => i.groupType === 'income');
+  const expenseItems = filteredItems.filter((i) => i.groupType === 'expense');
+  const savingsItems = filteredItems.filter((i) => i.groupType === 'savings');
 
   // Check if search matches exactly any existing item
-  const exactMatch = allItems.some(item => 
-    item.name.toLowerCase() === search.toLowerCase()
-  );
+  const exactMatch = allItems.some((item) => item.name.toLowerCase() === search.toLowerCase());
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -108,7 +114,11 @@ export default function CategoryCombobox({
 
     setIsSubmitting(true);
     try {
-      const slug = search.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+      const slug = search
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '');
       const newItem = await createItem({
         yearId,
         groupId: selectedGroupId,
@@ -116,8 +126,8 @@ export default function CategoryCombobox({
         slug,
       });
 
-      const group = groups.find(g => g.id === selectedGroupId);
-      
+      const group = groups.find((g) => g.id === selectedGroupId);
+
       // Notify parent about the new item so it can update its state
       if (onItemCreated && group) {
         onItemCreated({
@@ -148,9 +158,12 @@ export default function CategoryCombobox({
 
   const getGroupTypeLabel = (type: GroupType) => {
     switch (type) {
-      case 'income': return 'Revenu';
-      case 'expense': return 'Dépense';
-      case 'savings': return 'Épargne';
+      case 'income':
+        return 'Revenu';
+      case 'expense':
+        return 'Dépense';
+      case 'savings':
+        return 'Épargne';
     }
   };
 
@@ -160,32 +173,23 @@ export default function CategoryCombobox({
         <input
           ref={inputRef}
           type="text"
-          value={isOpen ? search : (selectedItem ? `${selectedItem.groupName} → ${selectedItem.name}` : '')}
+          value={isOpen ? search : selectedItem ? `${selectedItem.groupName} → ${selectedItem.name}` : ''}
           onChange={handleInputChange}
           onFocus={handleInputFocus}
           placeholder="Sélectionner ou créer..."
           className="combobox-input"
         />
         {value && !isOpen && (
-          <button 
-            type="button" 
-            className="combobox-clear" 
-            onClick={handleClear}
-            title="Effacer"
-          >
+          <button type="button" className="combobox-clear" onClick={handleClear} title="Effacer">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         )}
-        <button 
-          type="button" 
-          className="combobox-toggle" 
-          onClick={() => setIsOpen(!isOpen)}
-        >
+        <button type="button" className="combobox-toggle" onClick={() => setIsOpen(!isOpen)}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points={isOpen ? "18 15 12 9 6 15" : "6 9 12 15 18 9"} />
+            <polyline points={isOpen ? '18 15 12 9 6 15' : '6 9 12 15 18 9'} />
           </svg>
         </button>
       </div>
@@ -200,7 +204,7 @@ export default function CategoryCombobox({
               <div className="create-form-body">
                 <label>Assigner au groupe :</label>
                 <div className="group-options">
-                  {groups.map(group => (
+                  {groups.map((group) => (
                     <button
                       key={group.id}
                       type="button"
@@ -214,15 +218,11 @@ export default function CategoryCombobox({
                 </div>
               </div>
               <div className="create-form-actions">
-                <button 
-                  type="button" 
-                  className="btn-cancel" 
-                  onClick={() => setIsCreating(false)}
-                >
+                <button type="button" className="btn-cancel" onClick={() => setIsCreating(false)}>
                   Annuler
                 </button>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   className="btn-confirm"
                   onClick={handleCreateItem}
                   disabled={!selectedGroupId || isSubmitting}
@@ -245,22 +245,18 @@ export default function CategoryCombobox({
               )}
 
               {/* Empty state */}
-              {!search && allItems.length === 0 && (
-                <div className="combobox-empty">Aucune catégorie disponible</div>
-              )}
+              {!search && allItems.length === 0 && <div className="combobox-empty">Aucune catégorie disponible</div>}
 
               {/* No results */}
               {search && filteredItems.length === 0 && (
-                <div className="combobox-no-results">
-                  Aucun résultat pour "{search}"
-                </div>
+                <div className="combobox-no-results">Aucun résultat pour "{search}"</div>
               )}
 
               {/* Income items */}
               {incomeItems.length > 0 && (
                 <div className="combobox-group">
                   <div className="combobox-group-label">Revenus</div>
-                  {incomeItems.map(item => (
+                  {incomeItems.map((item) => (
                     <div
                       key={item.id}
                       className={`combobox-option ${item.id === value ? 'selected' : ''}`}
@@ -278,7 +274,7 @@ export default function CategoryCombobox({
               {expenseItems.length > 0 && (
                 <div className="combobox-group">
                   <div className="combobox-group-label">Dépenses</div>
-                  {expenseItems.map(item => (
+                  {expenseItems.map((item) => (
                     <div
                       key={item.id}
                       className={`combobox-option ${item.id === value ? 'selected' : ''}`}
@@ -296,7 +292,7 @@ export default function CategoryCombobox({
               {savingsItems.length > 0 && (
                 <div className="combobox-group">
                   <div className="combobox-group-label">Épargne</div>
-                  {savingsItems.map(item => (
+                  {savingsItems.map((item) => (
                     <div
                       key={item.id}
                       className={`combobox-option ${item.id === value ? 'selected' : ''}`}

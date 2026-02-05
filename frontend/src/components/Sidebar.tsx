@@ -13,7 +13,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
           <span className="logo-text">Tallix</span>
         </div>
       </div>
-      
+
       <nav className="sidebar-nav">
         {/* Current Year with sub-items */}
         <div className="nav-group">
@@ -31,7 +31,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
             </span>
             <span className="nav-label">{currentYear}</span>
           </button>
-          
+
           {/* Sub-item: Transactions */}
           <button
             className={`nav-item nav-sub-item ${activeView === 'transactions' ? 'active' : ''}`}

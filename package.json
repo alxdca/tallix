@@ -7,9 +7,15 @@
     "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
     "build": "pnpm --filter backend build && pnpm --filter frontend build",
     "backend": "pnpm --filter backend dev",
-    "frontend": "pnpm --filter frontend dev"
+    "frontend": "pnpm --filter frontend dev",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write .",
+    "check": "biome check .",
+    "check:fix": "biome check --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.3.13",
     "concurrently": "^8.2.2"
   },
   "packageManager": "pnpm@9.0.0"

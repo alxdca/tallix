@@ -1,14 +1,25 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import type { BudgetGroup } from '../types';
-import { 
-  fetchTransactions, createTransaction, updateTransaction, deleteTransaction,
-  fetchPaymentMethods, bulkDeleteTransactions,
-  fetchTransfers, fetchTransferAccounts, createTransfer, updateTransfer, deleteTransfer,
-  type Transaction, type PaymentMethod, type Transfer, type AccountIdentifier
+import {
+  type AccountIdentifier,
+  bulkDeleteTransactions,
+  createTransaction,
+  createTransfer,
+  deleteTransaction,
+  deleteTransfer,
+  fetchPaymentMethods,
+  fetchTransactions,
+  fetchTransferAccounts,
+  fetchTransfers,
+  type PaymentMethod,
+  type Transaction,
+  type Transfer,
+  updateTransaction,
+  updateTransfer,
 } from '../api';
-import { formatCurrency, formatDateDisplay, parseDateInput, getTodayDisplay, isValidDateFormat } from '../utils';
+import type { BudgetGroup } from '../types';
+import { formatCurrency, formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import { logger } from '../utils/logger';
 import BulkImportModal from './BulkImportModal';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
@@ -18,7 +29,7 @@ const MONTH_NAMES = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août'
 type EntryType = 'transaction' | 'transfer';
 
 interface UnifiedEntry {
-  id: string;  // "t_123" for transactions, "x_456" for transfers
+  id: string; // "t_123" for transactions, "x_456" for transfers
   type: EntryType;
   date: string;
   description: string | null;
@@ -50,8 +61,8 @@ interface Filters {
   dateTo: Date | null;
   thirdParty: string;
   description: string;
-  paymentMethods: string[];  // Multiple payment methods can be selected
-  categoryFilter: string;  // Combined: "section:income", "group:Salaires", "item:Salaires → Alexandre"
+  paymentMethods: string[]; // Multiple payment methods can be selected
+  categoryFilter: string; // Combined: "section:income", "group:Salaires", "item:Salaires → Alexandre"
 }
 
 export default function Transactions({ year, yearId, groups, onTransactionsChanged }: TransactionsProps) {
@@ -61,12 +72,12 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const [transferAccounts, setTransferAccounts] = useState<AccountIdentifier[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);  // "t_123" or "x_456"
+  const [editingId, setEditingId] = useState<string | null>(null); // "t_123" or "x_456"
   const [showImportModal, setShowImportModal] = useState(false);
-  
+
   // Selection state
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());  // "t_123" or "x_456"
-  
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // "t_123" or "x_456"
+
   // Filters state
   const [filters, setFilters] = useState<Filters>({
     dateFrom: null,
@@ -76,11 +87,11 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     paymentMethods: [],
     categoryFilter: '',
   });
-  
+
   // Sort state
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  
+
   // Form state (dates stored in DD/MM/YYYY display format)
   const [newEntryType, setNewEntryType] = useState<EntryType>('transaction');
   const [newDate, setNewDate] = useState(getTodayDisplay());
@@ -90,9 +101,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const [newAmount, setNewAmount] = useState('');
   const [newItemId, setNewItemId] = useState<number | null>(null);
   // Transfer-specific form state
-  const [newSourceAccount, setNewSourceAccount] = useState('');  // "payment_method:1" or "savings_item:2"
+  const [newSourceAccount, setNewSourceAccount] = useState(''); // "payment_method:1" or "savings_item:2"
   const [newDestAccount, setNewDestAccount] = useState('');
-  
+
   // Edit form state
   const [editDate, setEditDate] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -113,51 +124,34 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const [editDestAccount, setEditDestAccount] = useState('');
 
   // Get all items from all groups
-  const allItems = groups.flatMap(g => g.items.map(item => ({
-    ...item,
-    groupName: g.name,
-    groupType: g.type,
-  })));
+  const allItems = groups.flatMap((g) =>
+    g.items.map((item) => ({
+      ...item,
+      groupName: g.name,
+      groupType: g.type,
+    }))
+  );
 
-  const incomeItems = allItems.filter(i => i.groupType === 'income');
-  const expenseItems = allItems.filter(i => i.groupType === 'expense');
-  const savingsItems = allItems.filter(i => i.groupType === 'savings');
+  const incomeItems = allItems.filter((i) => i.groupType === 'income');
+  const expenseItems = allItems.filter((i) => i.groupType === 'expense');
+  const savingsItems = allItems.filter((i) => i.groupType === 'savings');
 
   // Get unique values for filter dropdowns (include transfer accounts)
   const uniquePaymentMethods = useMemo(() => {
     const methods = new Set<string>();
     // Add transaction payment methods
-    transactions.forEach(t => {
+    transactions.forEach((t) => {
       if (t.paymentMethod) methods.add(t.paymentMethod);
     });
     // Add transfer account names
-    transfers.forEach(x => {
+    transfers.forEach((x) => {
       methods.add(x.sourceAccount.name);
       methods.add(x.destinationAccount.name);
     });
     return Array.from(methods).sort();
   }, [transactions, transfers]);
 
-
-  useEffect(() => {
-    loadData();
-  }, [year, yearId]);
-
-  // Close multi-select dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as Element;
-      if (!target.closest('.multi-select-filter')) {
-        document.querySelectorAll('.multi-select-dropdown.open').forEach(el => {
-          el.classList.remove('open');
-        });
-      }
-    };
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [transactionsData, methodsData, transfersData, accountsData] = await Promise.all([
@@ -175,22 +169,37 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     } finally {
       setLoading(false);
     }
-  };
+  }, [year]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Close multi-select dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Element;
+      if (!target.closest('.multi-select-filter')) {
+        document.querySelectorAll('.multi-select-dropdown.open').forEach((el) => {
+          el.classList.remove('open');
+        });
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
 
   const loadTransactions = async () => {
     try {
-      const [transactionsData, transfersData] = await Promise.all([
-        fetchTransactions(),
-        fetchTransfers(year),
-      ]);
+      const [transactionsData, transfersData] = await Promise.all([fetchTransactions(), fetchTransfers(year)]);
       setTransactions(transactionsData);
       setTransfers(transfersData);
       // Clear selections that no longer exist
-      setSelectedIds(prev => {
+      setSelectedIds((prev) => {
         const newSet = new Set<string>();
-        const existingTxIds = new Set(transactionsData.map(t => `t_${t.id}`));
-        const existingXferIds = new Set(transfersData.map(x => `x_${x.id}`));
-        prev.forEach(id => {
+        const existingTxIds = new Set(transactionsData.map((t) => `t_${t.id}`));
+        const existingXferIds = new Set(transfersData.map((x) => `x_${x.id}`));
+        prev.forEach((id) => {
           if (existingTxIds.has(id) || existingXferIds.has(id)) newSet.add(id);
         });
         return newSet;
@@ -202,7 +211,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
   // Combine transactions and transfers into unified entries
   const unifiedEntries = useMemo((): UnifiedEntry[] => {
-    const txEntries: UnifiedEntry[] = transactions.map(t => ({
+    const txEntries: UnifiedEntry[] = transactions.map((t) => ({
       id: `t_${t.id}`,
       type: 'transaction' as EntryType,
       date: t.date,
@@ -212,8 +221,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       accountingYear: t.accountingYear,
       transaction: t,
     }));
-    
-    const xferEntries: UnifiedEntry[] = transfers.map(x => ({
+
+    const xferEntries: UnifiedEntry[] = transfers.map((x) => ({
       id: `x_${x.id}`,
       type: 'transfer' as EntryType,
       date: x.date,
@@ -223,7 +232,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       accountingYear: x.accountingYear,
       transfer: x,
     }));
-    
+
     return [...txEntries, ...xferEntries];
   }, [transactions, transfers]);
 
@@ -233,10 +242,10 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
     // Apply date range filter
     if (filters.dateFrom || filters.dateTo) {
-      result = result.filter(e => {
+      result = result.filter((e) => {
         // Parse entry date (handles both YYYY-MM-DD and datetime strings)
         const entryDate = new Date(e.date.split('T')[0]);
-        
+
         if (filters.dateFrom) {
           const from = new Date(filters.dateFrom);
           from.setHours(0, 0, 0, 0);
@@ -252,7 +261,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     }
     if (filters.thirdParty) {
       const search = filters.thirdParty.toLowerCase();
-      result = result.filter(e => {
+      result = result.filter((e) => {
         if (e.type === 'transaction') {
           return e.transaction?.thirdParty?.toLowerCase().includes(search);
         } else {
@@ -265,19 +274,19 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     }
     if (filters.description) {
       const search = filters.description.toLowerCase();
-      result = result.filter(e => 
-        e.description?.toLowerCase().includes(search)
-      );
+      result = result.filter((e) => e.description?.toLowerCase().includes(search));
     }
     if (filters.paymentMethods.length > 0) {
-      result = result.filter(e => {
+      result = result.filter((e) => {
         if (e.type === 'transaction') {
           return e.transaction?.paymentMethod && filters.paymentMethods.includes(e.transaction.paymentMethod);
         }
         // For transfers, check if source or destination account matches any selected method
         if (e.type === 'transfer' && e.transfer) {
-          return filters.paymentMethods.includes(e.transfer.sourceAccount.name) ||
-                 filters.paymentMethods.includes(e.transfer.destinationAccount.name);
+          return (
+            filters.paymentMethods.includes(e.transfer.sourceAccount.name) ||
+            filters.paymentMethods.includes(e.transfer.destinationAccount.name)
+          );
         }
         return false;
       });
@@ -287,14 +296,14 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       const [filterType, filterValue] = filters.categoryFilter.split(':');
       if (filterType === 'section') {
         if (filterValue === 'transfer') {
-          result = result.filter(e => e.type === 'transfer');
+          result = result.filter((e) => e.type === 'transfer');
         } else {
-          result = result.filter(e => e.type === 'transaction' && e.transaction?.groupType === filterValue);
+          result = result.filter((e) => e.type === 'transaction' && e.transaction?.groupType === filterValue);
         }
       } else if (filterType === 'group') {
-        result = result.filter(e => e.type === 'transaction' && e.transaction?.groupName === filterValue);
+        result = result.filter((e) => e.type === 'transaction' && e.transaction?.groupName === filterValue);
       } else if (filterType === 'item') {
-        result = result.filter(e => {
+        result = result.filter((e) => {
           if (e.type !== 'transaction') return false;
           const t = e.transaction!;
           const cat = t.groupName && t.itemName ? `${t.groupName} → ${t.itemName}` : null;
@@ -306,37 +315,48 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     // Apply sorting
     result.sort((a, b) => {
       let comparison = 0;
-      
+
       switch (sortField) {
         case 'date':
           comparison = a.date.localeCompare(b.date);
           break;
-        case 'thirdParty':
-          const thirdPartyA = a.type === 'transaction' 
-            ? (a.transaction?.thirdParty || '') 
-            : `${a.transfer?.sourceAccount.name} → ${a.transfer?.destinationAccount.name}`;
-          const thirdPartyB = b.type === 'transaction' 
-            ? (b.transaction?.thirdParty || '') 
-            : `${b.transfer?.sourceAccount.name} → ${b.transfer?.destinationAccount.name}`;
+        case 'thirdParty': {
+          const thirdPartyA =
+            a.type === 'transaction'
+              ? a.transaction?.thirdParty || ''
+              : `${a.transfer?.sourceAccount.name} → ${a.transfer?.destinationAccount.name}`;
+          const thirdPartyB =
+            b.type === 'transaction'
+              ? b.transaction?.thirdParty || ''
+              : `${b.transfer?.sourceAccount.name} → ${b.transfer?.destinationAccount.name}`;
           comparison = thirdPartyA.localeCompare(thirdPartyB);
           break;
+        }
         case 'description':
           comparison = (a.description || '').localeCompare(b.description || '');
           break;
-        case 'paymentMethod':
-          const pmA = a.type === 'transaction' ? (a.transaction?.paymentMethod || '') : '';
-          const pmB = b.type === 'transaction' ? (b.transaction?.paymentMethod || '') : '';
+        case 'paymentMethod': {
+          const pmA = a.type === 'transaction' ? a.transaction?.paymentMethod || '' : '';
+          const pmB = b.type === 'transaction' ? b.transaction?.paymentMethod || '' : '';
           comparison = pmA.localeCompare(pmB);
           break;
-        case 'category':
-          const catA = a.type === 'transaction' && a.transaction?.groupName && a.transaction?.itemName 
-            ? `${a.transaction.groupName} → ${a.transaction.itemName}` 
-            : a.type === 'transfer' ? 'Transfert' : '';
-          const catB = b.type === 'transaction' && b.transaction?.groupName && b.transaction?.itemName 
-            ? `${b.transaction.groupName} → ${b.transaction.itemName}` 
-            : b.type === 'transfer' ? 'Transfert' : '';
+        }
+        case 'category': {
+          const catA =
+            a.type === 'transaction' && a.transaction?.groupName && a.transaction?.itemName
+              ? `${a.transaction.groupName} → ${a.transaction.itemName}`
+              : a.type === 'transfer'
+                ? 'Transfert'
+                : '';
+          const catB =
+            b.type === 'transaction' && b.transaction?.groupName && b.transaction?.itemName
+              ? `${b.transaction.groupName} → ${b.transaction.itemName}`
+              : b.type === 'transfer'
+                ? 'Transfert'
+                : '';
           comparison = catA.localeCompare(catB);
           break;
+        }
         case 'amount':
           comparison = a.amount - b.amount;
           break;
@@ -350,7 +370,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
   // Selection handlers
   const toggleSelect = useCallback((id: string) => {
-    setSelectedIds(prev => {
+    setSelectedIds((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(id)) {
         newSet.delete(id);
@@ -362,21 +382,25 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   }, []);
 
   const toggleSelectAll = useCallback(() => {
-    const filteredIds = filteredEntries.map(e => e.id);
-    const allSelected = filteredIds.every(id => selectedIds.has(id));
-    
+    const filteredIds = filteredEntries.map((e) => e.id);
+    const allSelected = filteredIds.every((id) => selectedIds.has(id));
+
     if (allSelected) {
       // Deselect all filtered
-      setSelectedIds(prev => {
+      setSelectedIds((prev) => {
         const newSet = new Set(prev);
-        filteredIds.forEach(id => newSet.delete(id));
+        for (const id of filteredIds) {
+          newSet.delete(id);
+        }
         return newSet;
       });
     } else {
       // Select all filtered
-      setSelectedIds(prev => {
+      setSelectedIds((prev) => {
         const newSet = new Set(prev);
-        filteredIds.forEach(id => newSet.add(id));
+        for (const id of filteredIds) {
+          newSet.add(id);
+        }
         return newSet;
       });
     }
@@ -384,7 +408,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    
+
     const count = selectedIds.size;
     if (!confirm(`Supprimer ${count} élément${count > 1 ? 's' : ''} ?`)) return;
 
@@ -393,14 +417,14 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       // Separate transaction IDs and transfer IDs
       const txIds: number[] = [];
       const xferIds: number[] = [];
-      selectedIds.forEach(id => {
+      selectedIds.forEach((id) => {
         if (id.startsWith('t_')) {
-          txIds.push(parseInt(id.substring(2)));
+          txIds.push(parseInt(id.substring(2), 10));
         } else if (id.startsWith('x_')) {
-          xferIds.push(parseInt(id.substring(2)));
+          xferIds.push(parseInt(id.substring(2), 10));
         }
       });
-      
+
       // Delete transactions in bulk
       if (txIds.length > 0) {
         await bulkDeleteTransactions(txIds);
@@ -409,7 +433,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       for (const id of xferIds) {
         await deleteTransfer(id);
       }
-      
+
       setSelectedIds(new Set());
       await loadTransactions();
       onTransactionsChanged?.();
@@ -423,7 +447,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   // Sort handler
   const handleSort = (field: SortField) => {
     if (sortField === field) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortField(field);
       setSortDirection('desc');
@@ -461,15 +485,20 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     });
   };
 
-  const hasActiveFilters = filters.dateFrom || filters.dateTo || filters.thirdParty || filters.description || 
-    filters.paymentMethods.length > 0 || filters.categoryFilter;
+  const hasActiveFilters =
+    filters.dateFrom ||
+    filters.dateTo ||
+    filters.thirdParty ||
+    filters.description ||
+    filters.paymentMethods.length > 0 ||
+    filters.categoryFilter;
 
   // Parse account string like "payment_method:1" or "savings_item:2"
   const parseAccountString = (str: string): { type: 'payment_method' | 'savings_item'; id: number } | null => {
     if (!str) return null;
     const [type, idStr] = str.split(':');
     if (type !== 'payment_method' && type !== 'savings_item') return null;
-    return { type, id: parseInt(idStr) };
+    return { type, id: parseInt(idStr, 10) };
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -478,7 +507,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
     if (newEntryType === 'transaction') {
       if (!newItemId) return;
-      
+
       setIsSubmitting(true);
       try {
         await createTransaction({
@@ -507,7 +536,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       const source = parseAccountString(newSourceAccount);
       const dest = parseAccountString(newDestAccount);
       if (!source || !dest) return;
-      
+
       setIsSubmitting(true);
       try {
         await createTransfer(year, {
@@ -534,7 +563,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   };
 
   const startEditTransaction = (transaction: Transaction) => {
-    setEditingId(`t_${transaction.id}`);  // Use entry ID format
+    setEditingId(`t_${transaction.id}`); // Use entry ID format
     const dateDisplay = formatDateDisplay(transaction.date);
     setEditDate(dateDisplay); // Convert YYYY-MM-DD to DD/MM/YYYY
     setEditDescription(transaction.description || '');
@@ -553,7 +582,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   };
 
   const startEditTransfer = (transfer: Transfer) => {
-    setEditingId(`x_${transfer.id}`);  // Use entry ID format
+    setEditingId(`x_${transfer.id}`); // Use entry ID format
     const dateDisplay = formatDateDisplay(transfer.date);
     setEditDate(dateDisplay);
     setEditDescription(transfer.description || '');
@@ -593,13 +622,12 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     if (!editAmount || !editingId || isSubmitting || !isValidDateFormat(editDate)) return;
 
     const isTransferEdit = editingId.startsWith('x_');
-    const numericId = parseInt(editingId.substring(2));
+    const numericId = parseInt(editingId.substring(2), 10);
 
     // Check if user explicitly changed accounting fields
-    const accountingExplicitlyChanged = 
-      editAccountingMonth !== originalAccountingMonth || 
-      editAccountingYear !== originalAccountingYear;
-    
+    const accountingExplicitlyChanged =
+      editAccountingMonth !== originalAccountingMonth || editAccountingYear !== originalAccountingYear;
+
     // Check if date or payment method changed (which would affect accounting calculation)
     const dateChanged = editDate !== originalDate;
     const paymentMethodChanged = editPaymentMethod !== originalPaymentMethod;
@@ -623,7 +651,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
           destinationAccountType: dest.type,
           destinationAccountId: dest.id,
         };
-        
+
         if (accountingExplicitlyChanged) {
           transferData.accountingMonth = editAccountingMonth;
           transferData.accountingYear = editAccountingYear;
@@ -673,9 +701,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     setIsSubmitting(true);
     try {
       if (isTransfer) {
-        await deleteTransfer(parseInt(entryId.substring(2)));
+        await deleteTransfer(parseInt(entryId.substring(2), 10));
       } else {
-        await deleteTransaction(parseInt(entryId.substring(2)));
+        await deleteTransaction(parseInt(entryId.substring(2), 10));
       }
       await loadTransactions();
       onTransactionsChanged?.();
@@ -687,24 +715,23 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   };
 
   // Calculate totals (on filtered entries - only transactions affect budget)
-  const filteredTx = filteredEntries.filter(e => e.type === 'transaction').map(e => e.transaction!);
-  const totalIncome = filteredTx.filter(t => t.groupType === 'income').reduce((sum, t) => sum + t.amount, 0);
-  const totalExpenses = filteredTx.filter(t => t.groupType === 'expense').reduce((sum, t) => sum + t.amount, 0);
-  
+  const filteredTx = filteredEntries.filter((e) => e.type === 'transaction').map((e) => e.transaction!);
+  const totalIncome = filteredTx.filter((t) => t.groupType === 'income').reduce((sum, t) => sum + t.amount, 0);
+  const totalExpenses = filteredTx.filter((t) => t.groupType === 'expense').reduce((sum, t) => sum + t.amount, 0);
+
   // Calculate total moved to savings (transfers where destination is a savings item)
-  const filteredTransfers = filteredEntries.filter(e => e.type === 'transfer').map(e => e.transfer!);
+  const filteredTransfers = filteredEntries.filter((e) => e.type === 'transfer').map((e) => e.transfer!);
   const totalToSavings = filteredTransfers
-    .filter(t => t.destinationAccount.type === 'savings_item')
+    .filter((t) => t.destinationAccount.type === 'savings_item')
     .reduce((sum, t) => sum + t.amount, 0);
   const totalFromSavings = filteredTransfers
-    .filter(t => t.sourceAccount.type === 'savings_item')
+    .filter((t) => t.sourceAccount.type === 'savings_item')
     .reduce((sum, t) => sum + t.amount, 0);
   const netSavings = totalToSavings - totalFromSavings;
 
   // Check if all filtered entries are selected
-  const allFilteredSelected = filteredEntries.length > 0 && 
-    filteredEntries.every(e => selectedIds.has(e.id));
-  const someFilteredSelected = filteredEntries.some(e => selectedIds.has(e.id));
+  const allFilteredSelected = filteredEntries.length > 0 && filteredEntries.every((e) => selectedIds.has(e.id));
+  const someFilteredSelected = filteredEntries.some((e) => selectedIds.has(e.id));
 
   if (loading) {
     return (
@@ -724,11 +751,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
           <h2>Transactions</h2>
           <div className="transactions-actions">
             {selectedIds.size > 0 && (
-              <button 
-                className="btn-danger"
-                onClick={handleBulkDelete}
-                disabled={isSubmitting}
-              >
+              <button className="btn-danger" onClick={handleBulkDelete} disabled={isSubmitting}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
@@ -745,10 +768,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 Effacer les filtres
               </button>
             )}
-            <button 
-              className="btn-import"
-              onClick={() => setShowImportModal(true)}
-            >
+            <button className="btn-import" onClick={() => setShowImportModal(true)}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="17 8 12 3 7 8" />
@@ -762,7 +782,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
         <div className="transactions-summary">
           <div className="summary-item count">
             <span className="summary-label">Affichées</span>
-            <span className="summary-value">{filteredEntries.length} / {unifiedEntries.length}</span>
+            <span className="summary-value">
+              {filteredEntries.length} / {unifiedEntries.length}
+            </span>
           </div>
           <div className="summary-item income">
             <span className="summary-label">Revenus</span>
@@ -825,7 +847,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
             Transfert
           </button>
         </div>
-        
+
         <form onSubmit={handleCreate} className="transaction-form">
           <div className="form-row">
             <div className="date-input-wrapper">
@@ -865,7 +887,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 </svg>
               </button>
             </div>
-            
+
             {newEntryType === 'transaction' ? (
               <ThirdPartyAutocomplete
                 value={newThirdParty}
@@ -883,14 +905,22 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 >
                   <option value="">Compte source</option>
                   <optgroup label="Comptes de paiement">
-                    {transferAccounts.filter(a => a.type === 'payment_method').map(a => (
-                      <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>{a.name}</option>
-                    ))}
+                    {transferAccounts
+                      .filter((a) => a.type === 'payment_method')
+                      .map((a) => (
+                        <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>
+                          {a.name}
+                        </option>
+                      ))}
                   </optgroup>
                   <optgroup label="Comptes d'épargne">
-                    {transferAccounts.filter(a => a.type === 'savings_item').map(a => (
-                      <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>{a.name}</option>
-                    ))}
+                    {transferAccounts
+                      .filter((a) => a.type === 'savings_item')
+                      .map((a) => (
+                        <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>
+                          {a.name}
+                        </option>
+                      ))}
                   </optgroup>
                 </select>
                 <span className="transfer-arrow">→</span>
@@ -902,19 +932,27 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 >
                   <option value="">Compte destination</option>
                   <optgroup label="Comptes de paiement">
-                    {transferAccounts.filter(a => a.type === 'payment_method').map(a => (
-                      <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>{a.name}</option>
-                    ))}
+                    {transferAccounts
+                      .filter((a) => a.type === 'payment_method')
+                      .map((a) => (
+                        <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>
+                          {a.name}
+                        </option>
+                      ))}
                   </optgroup>
                   <optgroup label="Comptes d'épargne">
-                    {transferAccounts.filter(a => a.type === 'savings_item').map(a => (
-                      <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>{a.name}</option>
-                    ))}
+                    {transferAccounts
+                      .filter((a) => a.type === 'savings_item')
+                      .map((a) => (
+                        <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>
+                          {a.name}
+                        </option>
+                      ))}
                   </optgroup>
                 </select>
               </>
             )}
-            
+
             <input
               type="text"
               placeholder="Description (optionnel)"
@@ -923,7 +961,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               className="form-input description-input"
             />
           </div>
-          
+
           {newEntryType === 'transaction' && (
             <div className="form-row">
               <select
@@ -932,8 +970,10 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 className="form-select payment-method-select"
               >
                 <option value="">Moyen de paiement</option>
-                {paymentMethods.map(method => (
-                  <option key={method.id} value={method.name}>{method.name}</option>
+                {paymentMethods.map((method) => (
+                  <option key={method.id} value={method.name}>
+                    {method.name}
+                  </option>
                 ))}
               </select>
               <input
@@ -946,7 +986,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               />
             </div>
           )}
-          
+
           <div className="form-row">
             {newEntryType === 'transaction' ? (
               <select
@@ -957,18 +997,24 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               >
                 <option value="">Sélectionner une catégorie</option>
                 <optgroup label="Revenus">
-                  {incomeItems.map(item => (
-                    <option key={item.id} value={item.id}>{item.groupName} → {item.name}</option>
+                  {incomeItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.groupName} → {item.name}
+                    </option>
                   ))}
                 </optgroup>
                 <optgroup label="Dépenses">
-                  {expenseItems.map(item => (
-                    <option key={item.id} value={item.id}>{item.groupName} → {item.name}</option>
+                  {expenseItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.groupName} → {item.name}
+                    </option>
                   ))}
                 </optgroup>
                 <optgroup label="Épargne">
-                  {savingsItems.map(item => (
-                    <option key={item.id} value={item.id}>{item.groupName} → {item.name}</option>
+                  {savingsItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.groupName} → {item.name}
+                    </option>
                   ))}
                 </optgroup>
               </select>
@@ -982,11 +1028,12 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 className="form-input amount-input"
               />
             )}
-            <button 
-              type="submit" 
-              className="btn-primary" 
+            <button
+              type="submit"
+              className="btn-primary"
               disabled={
-                !newAmount || isSubmitting || 
+                !newAmount ||
+                isSubmitting ||
                 (newEntryType === 'transaction' && !newItemId) ||
                 (newEntryType === 'transfer' && (!newSourceAccount || !newDestAccount))
               }
@@ -1018,17 +1065,19 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
             <p>Aucune transaction ne correspond aux filtres</p>
-            <button className="btn-link" onClick={clearFilters}>Effacer les filtres</button>
+            <button className="btn-link" onClick={clearFilters}>
+              Effacer les filtres
+            </button>
           </div>
         ) : (
           <table className="transactions-table">
             <thead>
               <tr className="header-row">
                 <th className="col-select">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     checked={allFilteredSelected}
-                    ref={el => {
+                    ref={(el) => {
                       if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
                     }}
                     onChange={toggleSelectAll}
@@ -1069,7 +1118,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                       endDate={filters.dateTo}
                       onChange={(dates) => {
                         const [start, end] = dates as [Date | null, Date | null];
-                        setFilters(f => ({ ...f, dateFrom: start, dateTo: end }));
+                        setFilters((f) => ({ ...f, dateFrom: start, dateTo: end }));
                       }}
                       placeholderText="Sélectionner..."
                       className="column-filter date-range-input"
@@ -1084,7 +1133,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                     type="text"
                     placeholder="Filtrer..."
                     value={filters.thirdParty}
-                    onChange={e => setFilters(f => ({ ...f, thirdParty: e.target.value }))}
+                    onChange={(e) => setFilters((f) => ({ ...f, thirdParty: e.target.value }))}
                     className="column-filter"
                   />
                 </th>
@@ -1093,23 +1142,23 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                     type="text"
                     placeholder="Filtrer..."
                     value={filters.description}
-                    onChange={e => setFilters(f => ({ ...f, description: e.target.value }))}
+                    onChange={(e) => setFilters((f) => ({ ...f, description: e.target.value }))}
                     className="column-filter"
                   />
                 </th>
                 <th></th>
                 <th className="multi-select-filter-cell">
                   <div className="multi-select-filter">
-                    <button 
+                    <button
                       className={`multi-select-trigger ${filters.paymentMethods.length > 0 ? 'has-selection' : ''}`}
                       onClick={(e) => {
                         const dropdown = e.currentTarget.nextElementSibling as HTMLElement;
                         dropdown.classList.toggle('open');
                       }}
                     >
-                      {filters.paymentMethods.length === 0 
-                        ? 'Tous' 
-                        : filters.paymentMethods.length === 1 
+                      {filters.paymentMethods.length === 0
+                        ? 'Tous'
+                        : filters.paymentMethods.length === 1
                           ? filters.paymentMethods[0]
                           : `${filters.paymentMethods.length} sélectionnés`}
                     </button>
@@ -1118,20 +1167,23 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                         <input
                           type="checkbox"
                           checked={filters.paymentMethods.length === 0}
-                          onChange={() => setFilters(f => ({ ...f, paymentMethods: [] }))}
+                          onChange={() => setFilters((f) => ({ ...f, paymentMethods: [] }))}
                         />
                         <span>Tous</span>
                       </label>
-                      {uniquePaymentMethods.map(m => (
+                      {uniquePaymentMethods.map((m) => (
                         <label key={m} className="multi-select-option">
                           <input
                             type="checkbox"
                             checked={filters.paymentMethods.includes(m)}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setFilters(f => ({ ...f, paymentMethods: [...f.paymentMethods, m] }));
+                                setFilters((f) => ({ ...f, paymentMethods: [...f.paymentMethods, m] }));
                               } else {
-                                setFilters(f => ({ ...f, paymentMethods: f.paymentMethods.filter(pm => pm !== m) }));
+                                setFilters((f) => ({
+                                  ...f,
+                                  paymentMethods: f.paymentMethods.filter((pm) => pm !== m),
+                                }));
                               }
                             }}
                           />
@@ -1144,54 +1196,69 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 <th>
                   <select
                     value={filters.categoryFilter}
-                    onChange={e => setFilters(f => ({ ...f, categoryFilter: e.target.value }))}
+                    onChange={(e) => setFilters((f) => ({ ...f, categoryFilter: e.target.value }))}
                     className="column-filter category-filter-hierarchical"
                   >
                     <option value="">Toutes</option>
                     <option value="section:transfer">↔ TRANSFERTS</option>
-                    {groups.filter(g => g.type === 'income').length > 0 && (
+                    {groups.filter((g) => g.type === 'income').length > 0 && (
                       <>
                         <option value="section:income">▸ REVENUS</option>
-                        {groups.filter(g => g.type === 'income').map(group => (
-                          <React.Fragment key={group.id}>
-                            <option value={`group:${group.name}`}>{'\u00A0\u00A0'}▪ {group.name}</option>
-                            {group.items.map(item => (
-                              <option key={item.id} value={`item:${group.name} → ${item.name}`}>
-                                {'\u00A0\u00A0\u00A0\u00A0\u00A0'}{item.name}
+                        {groups
+                          .filter((g) => g.type === 'income')
+                          .map((group) => (
+                            <React.Fragment key={group.id}>
+                              <option value={`group:${group.name}`}>
+                                {'\u00A0\u00A0'}▪ {group.name}
                               </option>
-                            ))}
-                          </React.Fragment>
-                        ))}
+                              {group.items.map((item) => (
+                                <option key={item.id} value={`item:${group.name} → ${item.name}`}>
+                                  {'\u00A0\u00A0\u00A0\u00A0\u00A0'}
+                                  {item.name}
+                                </option>
+                              ))}
+                            </React.Fragment>
+                          ))}
                       </>
                     )}
-                    {groups.filter(g => g.type === 'expense').length > 0 && (
+                    {groups.filter((g) => g.type === 'expense').length > 0 && (
                       <>
                         <option value="section:expense">▸ DÉPENSES</option>
-                        {groups.filter(g => g.type === 'expense').map(group => (
-                          <React.Fragment key={group.id}>
-                            <option value={`group:${group.name}`}>{'\u00A0\u00A0'}▪ {group.name}</option>
-                            {group.items.map(item => (
-                              <option key={item.id} value={`item:${group.name} → ${item.name}`}>
-                                {'\u00A0\u00A0\u00A0\u00A0\u00A0'}{item.name}
+                        {groups
+                          .filter((g) => g.type === 'expense')
+                          .map((group) => (
+                            <React.Fragment key={group.id}>
+                              <option value={`group:${group.name}`}>
+                                {'\u00A0\u00A0'}▪ {group.name}
                               </option>
-                            ))}
-                          </React.Fragment>
-                        ))}
+                              {group.items.map((item) => (
+                                <option key={item.id} value={`item:${group.name} → ${item.name}`}>
+                                  {'\u00A0\u00A0\u00A0\u00A0\u00A0'}
+                                  {item.name}
+                                </option>
+                              ))}
+                            </React.Fragment>
+                          ))}
                       </>
                     )}
-                    {groups.filter(g => g.type === 'savings').length > 0 && (
+                    {groups.filter((g) => g.type === 'savings').length > 0 && (
                       <>
                         <option value="section:savings">▸ ÉPARGNE</option>
-                        {groups.filter(g => g.type === 'savings').map(group => (
-                          <React.Fragment key={group.id}>
-                            <option value={`group:${group.name}`}>{'\u00A0\u00A0'}▪ {group.name}</option>
-                            {group.items.map(item => (
-                              <option key={item.id} value={`item:${group.name} → ${item.name}`}>
-                                {'\u00A0\u00A0\u00A0\u00A0\u00A0'}{item.name}
+                        {groups
+                          .filter((g) => g.type === 'savings')
+                          .map((group) => (
+                            <React.Fragment key={group.id}>
+                              <option value={`group:${group.name}`}>
+                                {'\u00A0\u00A0'}▪ {group.name}
                               </option>
-                            ))}
-                          </React.Fragment>
-                        ))}
+                              {group.items.map((item) => (
+                                <option key={item.id} value={`item:${group.name} → ${item.name}`}>
+                                  {'\u00A0\u00A0\u00A0\u00A0\u00A0'}
+                                  {item.name}
+                                </option>
+                              ))}
+                            </React.Fragment>
+                          ))}
                       </>
                     )}
                   </select>
@@ -1201,14 +1268,14 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               </tr>
             </thead>
             <tbody>
-              {filteredEntries.map(entry => {
+              {filteredEntries.map((entry) => {
                 const isTransfer = entry.type === 'transfer';
                 const transaction = entry.transaction;
                 const transfer = entry.transfer;
-                
+
                 return (
-                  <tr 
-                    key={entry.id} 
+                  <tr
+                    key={entry.id}
                     className={`${isTransfer ? 'transfer' : transaction?.groupType} ${selectedIds.has(entry.id) ? 'selected' : ''}`}
                   >
                     {editingId === entry.id ? (
@@ -1246,7 +1313,14 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                   hiddenInput?.showPicker?.();
                                 }}
                               >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
                                   <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
                                   <line x1="16" y1="2" x2="16" y2="6" />
                                   <line x1="8" y1="2" x2="8" y2="6" />
@@ -1262,7 +1336,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               className="edit-select accounting-month-select"
                             >
                               {MONTH_NAMES.map((name, i) => (
-                                <option key={i + 1} value={i + 1}>{name}</option>
+                                <option key={i + 1} value={i + 1}>
+                                  {name}
+                                </option>
                               ))}
                             </select>
                             <input
@@ -1283,14 +1359,22 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               >
                                 <option value="">Source</option>
                                 <optgroup label="Comptes de paiement">
-                                  {transferAccounts.filter(a => a.type === 'payment_method').map(a => (
-                                    <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>{a.name}</option>
-                                  ))}
+                                  {transferAccounts
+                                    .filter((a) => a.type === 'payment_method')
+                                    .map((a) => (
+                                      <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>
+                                        {a.name}
+                                      </option>
+                                    ))}
                                 </optgroup>
                                 <optgroup label="Comptes d'épargne">
-                                  {transferAccounts.filter(a => a.type === 'savings_item').map(a => (
-                                    <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>{a.name}</option>
-                                  ))}
+                                  {transferAccounts
+                                    .filter((a) => a.type === 'savings_item')
+                                    .map((a) => (
+                                      <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>
+                                        {a.name}
+                                      </option>
+                                    ))}
                                 </optgroup>
                               </select>
                               <span className="transfer-arrow-small">→</span>
@@ -1301,14 +1385,22 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               >
                                 <option value="">Destination</option>
                                 <optgroup label="Comptes de paiement">
-                                  {transferAccounts.filter(a => a.type === 'payment_method').map(a => (
-                                    <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>{a.name}</option>
-                                  ))}
+                                  {transferAccounts
+                                    .filter((a) => a.type === 'payment_method')
+                                    .map((a) => (
+                                      <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>
+                                        {a.name}
+                                      </option>
+                                    ))}
                                 </optgroup>
                                 <optgroup label="Comptes d'épargne">
-                                  {transferAccounts.filter(a => a.type === 'savings_item').map(a => (
-                                    <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>{a.name}</option>
-                                  ))}
+                                  {transferAccounts
+                                    .filter((a) => a.type === 'savings_item')
+                                    .map((a) => (
+                                      <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>
+                                        {a.name}
+                                      </option>
+                                    ))}
                                 </optgroup>
                               </select>
                             </div>
@@ -1338,12 +1430,26 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                           </td>
                           <td className="actions-cell">
                             <button className="btn-icon save" onClick={handleUpdate} title="Sauvegarder">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
                                 <polyline points="20 6 9 17 4 12" />
                               </svg>
                             </button>
                             <button className="btn-icon cancel" onClick={cancelEdit} title="Annuler">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
                                 <line x1="18" y1="6" x2="6" y2="18" />
                                 <line x1="6" y1="6" x2="18" y2="18" />
                               </svg>
@@ -1354,8 +1460,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                         // Edit mode for transactions
                         <>
                           <td>
-                            <input 
-                              type="checkbox" 
+                            <input
+                              type="checkbox"
                               checked={selectedIds.has(entry.id)}
                               onChange={() => toggleSelect(entry.id)}
                               disabled
@@ -1391,7 +1497,14 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 }}
                                 title="Ouvrir le calendrier"
                               >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
                                   <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
                                   <line x1="16" y1="2" x2="16" y2="6" />
                                   <line x1="8" y1="2" x2="8" y2="6" />
@@ -1407,7 +1520,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               className="edit-select accounting-month-select"
                             >
                               {MONTH_NAMES.map((name, i) => (
-                                <option key={i + 1} value={i + 1}>{name}</option>
+                                <option key={i + 1} value={i + 1}>
+                                  {name}
+                                </option>
                               ))}
                             </select>
                             <input
@@ -1452,8 +1567,10 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               className="edit-select"
                             >
                               <option value="">-</option>
-                              {paymentMethods.map(method => (
-                                <option key={method.id} value={method.name}>{method.name}</option>
+                              {paymentMethods.map((method) => (
+                                <option key={method.id} value={method.name}>
+                                  {method.name}
+                                </option>
                               ))}
                             </select>
                           </td>
@@ -1465,18 +1582,24 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             >
                               <option value="">Non catégorisé</option>
                               <optgroup label="Revenus">
-                                {incomeItems.map(item => (
-                                  <option key={item.id} value={item.id}>{item.groupName} → {item.name}</option>
+                                {incomeItems.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.groupName} → {item.name}
+                                  </option>
                                 ))}
                               </optgroup>
                               <optgroup label="Dépenses">
-                                {expenseItems.map(item => (
-                                  <option key={item.id} value={item.id}>{item.groupName} → {item.name}</option>
+                                {expenseItems.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.groupName} → {item.name}
+                                  </option>
                                 ))}
                               </optgroup>
                               <optgroup label="Épargne">
-                                {savingsItems.map(item => (
-                                  <option key={item.id} value={item.id}>{item.groupName} → {item.name}</option>
+                                {savingsItems.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.groupName} → {item.name}
+                                  </option>
                                 ))}
                               </optgroup>
                             </select>
@@ -1492,12 +1615,26 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                           </td>
                           <td className="actions-cell">
                             <button className="btn-icon save" onClick={handleUpdate} title="Sauvegarder">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
                                 <polyline points="20 6 9 17 4 12" />
                               </svg>
                             </button>
                             <button className="btn-icon cancel" onClick={cancelEdit} title="Annuler">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
                                 <line x1="18" y1="6" x2="6" y2="18" />
                                 <line x1="6" y1="6" x2="18" y2="18" />
                               </svg>
@@ -1508,14 +1645,16 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                     ) : (
                       <>
                         <td>
-                          <input 
-                            type="checkbox" 
+                          <input
+                            type="checkbox"
                             checked={selectedIds.has(entry.id)}
                             onChange={() => toggleSelect(entry.id)}
                           />
                         </td>
                         <td className="date-cell">{formatDateDisplay(entry.date)}</td>
-                        <td className="accounting-cell">{formatAccountingPeriod(entry.accountingMonth, entry.accountingYear)}</td>
+                        <td className="accounting-cell">
+                          {formatAccountingPeriod(entry.accountingMonth, entry.accountingYear)}
+                        </td>
                         <td className="third-party-cell">
                           {isTransfer ? (
                             <span className="transfer-accounts">
@@ -1527,8 +1666,16 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             transaction?.thirdParty || <span className="empty-field">-</span>
                           )}
                         </td>
-                        <td className="description-cell">{entry.description || <span className="empty-field">-</span>}</td>
-                        <td className="comment-cell">{!isTransfer && transaction?.comment ? transaction.comment : <span className="empty-field">-</span>}</td>
+                        <td className="description-cell">
+                          {entry.description || <span className="empty-field">-</span>}
+                        </td>
+                        <td className="comment-cell">
+                          {!isTransfer && transaction?.comment ? (
+                            transaction.comment
+                          ) : (
+                            <span className="empty-field">-</span>
+                          )}
+                        </td>
                         <td className="payment-cell">
                           {isTransfer ? (
                             <span className="empty-field">-</span>
@@ -1539,7 +1686,14 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                         <td className="category-cell">
                           {isTransfer ? (
                             <span className="transfer-badge">
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
                                 <polyline points="17 1 21 5 17 9" />
                                 <path d="M3 11V9a4 4 0 0 1 4-4h14" />
                                 <polyline points="7 23 3 19 7 15" />
@@ -1553,22 +1707,40 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             <span className="uncategorized">Non catégorisé</span>
                           )}
                         </td>
-                        <td className={`amount-cell ${isTransfer ? (transfer?.sourceAccount.type === 'savings_item' || transfer?.destinationAccount.type === 'savings_item' ? 'savings-transfer' : 'transfer') : transaction?.groupType} ${entry.amount < 0 ? 'negative' : ''}`}>
+                        <td
+                          className={`amount-cell ${isTransfer ? (transfer?.sourceAccount.type === 'savings_item' || transfer?.destinationAccount.type === 'savings_item' ? 'savings-transfer' : 'transfer') : transaction?.groupType} ${entry.amount < 0 ? 'negative' : ''}`}
+                        >
                           {formatCurrency(entry.amount, true)}
                         </td>
                         <td className="actions-cell">
-                          <button 
-                            className="btn-icon edit" 
-                            onClick={() => isTransfer ? startEditTransfer(transfer!) : startEditTransaction(transaction!)} 
+                          <button
+                            className="btn-icon edit"
+                            onClick={() =>
+                              isTransfer ? startEditTransfer(transfer!) : startEditTransaction(transaction!)
+                            }
                             title="Modifier"
                           >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
                               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
                           </button>
                           <button className="btn-icon delete" onClick={() => handleDelete(entry.id)} title="Supprimer">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
                               <polyline points="3 6 5 6 21 6" />
                               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                             </svg>

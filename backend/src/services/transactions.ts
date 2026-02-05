@@ -1,8 +1,7 @@
-import { eq, desc, sql, isNotNull } from 'drizzle-orm';
-import { db, transactions, budgetYears } from '../db/index.js';
+import { desc, eq, isNotNull, sql } from 'drizzle-orm';
+import { budgetYears, db, transactions } from '../db/index.js';
 import { getOrCreateUnclassifiedItem } from './budget.js';
 import { getPaymentMethodByName } from './paymentMethods.js';
-import type { GroupType } from '../types.js';
 
 // Types for database query results
 interface TransactionWithRelations {
@@ -165,7 +164,7 @@ export async function createTransaction(data: {
   // Calculate accounting period if not provided
   let accountingMonth = data.accountingMonth;
   let accountingYear = data.accountingYear;
-  
+
   if (accountingMonth === undefined || accountingYear === undefined) {
     // Look up payment method's settlement day
     const pm = await getPaymentMethodByName(data.paymentMethod);
@@ -175,18 +174,21 @@ export async function createTransaction(data: {
     accountingYear = accountingYear ?? accounting.accountingYear;
   }
 
-  const [newTransaction] = await db.insert(transactions).values({
-    yearId: data.yearId,
-    itemId,
-    date: data.date,
-    description: data.description || null,
-    comment: data.comment || null,
-    thirdParty: data.thirdParty || null,
-    paymentMethod: data.paymentMethod,
-    amount: data.amount.toString(),
-    accountingMonth,
-    accountingYear,
-  }).returning();
+  const [newTransaction] = await db
+    .insert(transactions)
+    .values({
+      yearId: data.yearId,
+      itemId,
+      date: data.date,
+      description: data.description || null,
+      comment: data.comment || null,
+      thirdParty: data.thirdParty || null,
+      paymentMethod: data.paymentMethod,
+      amount: data.amount.toString(),
+      accountingMonth,
+      accountingYear,
+    })
+    .returning();
 
   return {
     id: newTransaction.id,
@@ -203,18 +205,21 @@ export async function createTransaction(data: {
 }
 
 // Update a transaction
-export async function updateTransaction(id: number, data: {
-  itemId?: number | null;
-  date?: string;
-  description?: string;
-  comment?: string;
-  thirdParty?: string;
-  paymentMethod?: string;
-  amount?: number;
-  accountingMonth?: number;
-  accountingYear?: number;
-  recalculateAccounting?: boolean; // If true, recalculate based on date/payment method
-}) {
+export async function updateTransaction(
+  id: number,
+  data: {
+    itemId?: number | null;
+    date?: string;
+    description?: string;
+    comment?: string;
+    thirdParty?: string;
+    paymentMethod?: string;
+    amount?: number;
+    accountingMonth?: number;
+    accountingYear?: number;
+    recalculateAccounting?: boolean; // If true, recalculate based on date/payment method
+  }
+) {
   const updateData: Partial<{
     itemId: number | null;
     date: string;
@@ -227,7 +232,7 @@ export async function updateTransaction(id: number, data: {
     accountingYear: number;
     updatedAt: Date;
   }> = { updatedAt: new Date() };
-  
+
   if (data.itemId !== undefined) updateData.itemId = data.itemId || null;
   if (data.date !== undefined) updateData.date = data.date;
   if (data.description !== undefined) updateData.description = data.description || null;
@@ -235,15 +240,18 @@ export async function updateTransaction(id: number, data: {
   if (data.thirdParty !== undefined) updateData.thirdParty = data.thirdParty || null;
   if (data.paymentMethod !== undefined) updateData.paymentMethod = data.paymentMethod || null;
   if (data.amount !== undefined) updateData.amount = data.amount.toString();
-  
+
   // Handle accounting period
   if (data.accountingMonth !== undefined) updateData.accountingMonth = data.accountingMonth;
   if (data.accountingYear !== undefined) updateData.accountingYear = data.accountingYear;
-  
+
   // Recalculate accounting period if requested or if date/payment method changed without explicit accounting values
-  if (data.recalculateAccounting || 
-      ((data.date !== undefined || data.paymentMethod !== undefined) && 
-       data.accountingMonth === undefined && data.accountingYear === undefined)) {
+  if (
+    data.recalculateAccounting ||
+    ((data.date !== undefined || data.paymentMethod !== undefined) &&
+      data.accountingMonth === undefined &&
+      data.accountingYear === undefined)
+  ) {
     // Need to get current transaction to know date and payment method
     const current = await db.query.transactions.findFirst({
       where: eq(transactions.id, id),
@@ -259,10 +267,7 @@ export async function updateTransaction(id: number, data: {
     }
   }
 
-  const [updated] = await db.update(transactions)
-    .set(updateData)
-    .where(eq(transactions.id, id))
-    .returning();
+  const [updated] = await db.update(transactions).set(updateData).where(eq(transactions.id, id)).returning();
 
   if (!updated) return null;
 
@@ -282,10 +287,8 @@ export async function updateTransaction(id: number, data: {
 // Delete a transaction
 // Returns true if transaction was deleted, false if it didn't exist
 export async function deleteTransaction(id: number): Promise<boolean> {
-  const result = await db.delete(transactions)
-    .where(eq(transactions.id, id))
-    .returning({ id: transactions.id });
-  
+  const result = await db.delete(transactions).where(eq(transactions.id, id)).returning({ id: transactions.id });
+
   return result.length > 0;
 }
 
@@ -295,7 +298,8 @@ export async function bulkDeleteTransactions(ids: number[]) {
     return { deleted: 0 };
   }
 
-  const result = await db.delete(transactions)
+  const result = await db
+    .delete(transactions)
     .where(sql`${transactions.id} IN ${ids}`)
     .returning({ id: transactions.id });
 
@@ -317,29 +321,23 @@ export async function getThirdParties(search?: string): Promise<string[]> {
     .orderBy(desc(sql`COUNT(*)`))
     .limit(50);
 
-  if (search && search.trim()) {
+  if (search?.trim()) {
     const results = await db
       .select({
         thirdParty: transactions.thirdParty,
         count: sql<number>`COUNT(*)`.as('count'),
       })
       .from(transactions)
-      .where(
-        sql`${transactions.thirdParty} IS NOT NULL AND ${transactions.thirdParty} ILIKE ${`%${search}%`}`
-      )
+      .where(sql`${transactions.thirdParty} IS NOT NULL AND ${transactions.thirdParty} ILIKE ${`%${search}%`}`)
       .groupBy(transactions.thirdParty)
       .orderBy(desc(sql`COUNT(*)`))
       .limit(20);
 
-    return results
-      .map(r => r.thirdParty)
-      .filter((tp): tp is string => tp !== null);
+    return results.map((r) => r.thirdParty).filter((tp): tp is string => tp !== null);
   }
 
   const results = await baseQuery;
-  return results
-    .map(r => r.thirdParty)
-    .filter((tp): tp is string => tp !== null);
+  return results.map((r) => r.thirdParty).filter((tp): tp is string => tp !== null);
 }
 
 // Bulk create transactions
@@ -363,51 +361,54 @@ export async function bulkCreateTransactions(
 
   // Get unclassified item ID for transactions without a category
   let unclassifiedItemId: number | null = null;
-  const needsUnclassified = transactionsData.some(t => !t.itemId);
+  const needsUnclassified = transactionsData.some((t) => !t.itemId);
   if (needsUnclassified) {
     unclassifiedItemId = await getOrCreateUnclassifiedItem(yearId);
   }
 
   // Get all unique payment methods and their settlement days
-  const uniquePaymentMethods = [...new Set(transactionsData.map(t => t.paymentMethod))];
+  const uniquePaymentMethods = [...new Set(transactionsData.map((t) => t.paymentMethod))];
   const paymentMethodSettlements = new Map<string, number | null>();
-  
+
   for (const pmName of uniquePaymentMethods) {
     const pm = await getPaymentMethodByName(pmName);
     paymentMethodSettlements.set(pmName, pm?.settlementDay ?? null);
   }
 
-  const inserted = await db.insert(transactions).values(
-    transactionsData.map(t => {
-      // Use provided accounting period or calculate it
-      let accountingMonth = t.accountingMonth;
-      let accountingYear = t.accountingYear;
-      
-      if (accountingMonth === undefined || accountingYear === undefined) {
-        const settlementDay = paymentMethodSettlements.get(t.paymentMethod) ?? null;
-        const accounting = calculateAccountingPeriod(t.date, settlementDay);
-        accountingMonth = accountingMonth ?? accounting.accountingMonth;
-        accountingYear = accountingYear ?? accounting.accountingYear;
-      }
-      
-      return {
-        yearId,
-        itemId: t.itemId || unclassifiedItemId!,
-        date: t.date,
-        description: t.description || null,
-        comment: t.comment || null,
-        thirdParty: t.thirdParty || null,
-        paymentMethod: t.paymentMethod,
-        amount: t.amount.toString(),
-        accountingMonth,
-        accountingYear,
-      };
-    })
-  ).returning();
+  const inserted = await db
+    .insert(transactions)
+    .values(
+      transactionsData.map((t) => {
+        // Use provided accounting period or calculate it
+        let accountingMonth = t.accountingMonth;
+        let accountingYear = t.accountingYear;
+
+        if (accountingMonth === undefined || accountingYear === undefined) {
+          const settlementDay = paymentMethodSettlements.get(t.paymentMethod) ?? null;
+          const accounting = calculateAccountingPeriod(t.date, settlementDay);
+          accountingMonth = accountingMonth ?? accounting.accountingMonth;
+          accountingYear = accountingYear ?? accounting.accountingYear;
+        }
+
+        return {
+          yearId,
+          itemId: t.itemId || unclassifiedItemId!,
+          date: t.date,
+          description: t.description || null,
+          comment: t.comment || null,
+          thirdParty: t.thirdParty || null,
+          paymentMethod: t.paymentMethod,
+          amount: t.amount.toString(),
+          accountingMonth,
+          accountingYear,
+        };
+      })
+    )
+    .returning();
 
   return {
     created: inserted.length,
-    transactions: inserted.map(t => ({
+    transactions: inserted.map((t) => ({
       id: t.id,
       date: t.date,
       amount: parseFloat(t.amount),

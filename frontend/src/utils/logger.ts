@@ -42,7 +42,7 @@ export const logger = {
       stack: error instanceof Error ? error.stack : undefined,
     };
     console.error(formatMessage('error', message, errorContext));
-    
+
     // In production, you could send this to a monitoring service like Sentry
     // if (!isDev) {
     //   sendToMonitoringService({ message, error, context });

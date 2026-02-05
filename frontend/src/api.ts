@@ -1,4 +1,4 @@
-import type { BudgetData, BudgetSummary, BudgetGroup, BudgetItem } from './types';
+import type { BudgetData, BudgetGroup, BudgetItem, BudgetSummary } from './types';
 
 const API_BASE = '/api';
 
@@ -85,12 +85,15 @@ export async function createGroup(data: {
   return response.json();
 }
 
-export async function updateGroup(id: number, data: {
-  name?: string;
-  slug?: string;
-  type?: 'income' | 'expense' | 'savings';
-  sortOrder?: number;
-}): Promise<BudgetGroup> {
+export async function updateGroup(
+  id: number,
+  data: {
+    name?: string;
+    slug?: string;
+    type?: 'income' | 'expense' | 'savings';
+    sortOrder?: number;
+  }
+): Promise<BudgetGroup> {
   const response = await fetch(`${API_BASE}/budget/groups/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -171,12 +174,15 @@ export async function moveItem(itemId: number, groupId: number | null): Promise<
   }
 }
 
-export async function updateItem(id: number, data: {
-  name?: string;
-  slug?: string;
-  sortOrder?: number;
-  yearlyBudget?: number;
-}): Promise<BudgetItem> {
+export async function updateItem(
+  id: number,
+  data: {
+    name?: string;
+    slug?: string;
+    sortOrder?: number;
+    yearlyBudget?: number;
+  }
+): Promise<BudgetItem> {
   const response = await fetch(`${API_BASE}/budget/items/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -199,7 +205,7 @@ export async function deleteItem(id: number): Promise<void> {
 
 // Third Parties (autocomplete)
 export async function fetchThirdParties(search?: string): Promise<string[]> {
-  const url = search 
+  const url = search
     ? `${API_BASE}/transactions/third-parties?search=${encodeURIComponent(search)}`
     : `${API_BASE}/transactions/third-parties`;
   const response = await fetch(url);
@@ -257,18 +263,21 @@ export async function createTransaction(data: {
   return response.json();
 }
 
-export async function updateTransaction(id: number, data: {
-  itemId?: number | null;
-  date?: string;
-  description?: string;
-  comment?: string;
-  thirdParty?: string;
-  paymentMethod?: string;
-  amount?: number;
-  accountingMonth?: number;
-  accountingYear?: number;
-  recalculateAccounting?: boolean;
-}): Promise<Transaction> {
+export async function updateTransaction(
+  id: number,
+  data: {
+    itemId?: number | null;
+    date?: string;
+    description?: string;
+    comment?: string;
+    thirdParty?: string;
+    paymentMethod?: string;
+    amount?: number;
+    accountingMonth?: number;
+    accountingYear?: number;
+    recalculateAccounting?: boolean;
+  }
+): Promise<Transaction> {
   const response = await fetch(`${API_BASE}/transactions/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -336,10 +345,7 @@ export async function fetchPaymentMethods(): Promise<PaymentMethod[]> {
   return response.json();
 }
 
-export async function createPaymentMethod(data: {
-  name: string;
-  sortOrder?: number;
-}): Promise<PaymentMethod> {
+export async function createPaymentMethod(data: { name: string; sortOrder?: number }): Promise<PaymentMethod> {
   const response = await fetch(`${API_BASE}/payment-methods`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -351,13 +357,16 @@ export async function createPaymentMethod(data: {
   return response.json();
 }
 
-export async function updatePaymentMethod(id: number, data: {
-  name?: string;
-  sortOrder?: number;
-  isAccount?: boolean;
-  settlementDay?: number | null;
-  linkedPaymentMethodId?: number | null;
-}): Promise<PaymentMethod> {
+export async function updatePaymentMethod(
+  id: number,
+  data: {
+    name?: string;
+    sortOrder?: number;
+    isAccount?: boolean;
+    settlementDay?: number | null;
+    linkedPaymentMethodId?: number | null;
+  }
+): Promise<PaymentMethod> {
   const response = await fetch(`${API_BASE}/payment-methods/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -393,9 +402,9 @@ export async function reorderPaymentMethods(methodOrders: { id: number; sortOrde
 export interface ParsedTransaction {
   date: string;
   description: string;
-  amount: number;  // Always positive - sign indicated by isIncome
+  amount: number; // Always positive - sign indicated by isIncome
   thirdParty?: string;
-  isIncome?: boolean;  // Detected from PDF context - user can override in preview
+  isIncome?: boolean; // Detected from PDF context - user can override in preview
   suggestedItemId?: number | null;
   suggestedItemName?: string;
   suggestedGroupName?: string;
@@ -412,9 +421,7 @@ export async function parsePdf(file: File, yearId?: number): Promise<ParsePdfRes
   const formData = new FormData();
   formData.append('file', file);
 
-  const url = yearId 
-    ? `${API_BASE}/import/pdf?yearId=${yearId}` 
-    : `${API_BASE}/import/pdf`;
+  const url = yearId ? `${API_BASE}/import/pdf?yearId=${yearId}` : `${API_BASE}/import/pdf`;
 
   const response = await fetch(url, {
     method: 'POST',
@@ -537,17 +544,20 @@ export async function fetchTransferAccounts(year: number): Promise<AccountIdenti
   return response.json();
 }
 
-export async function createTransfer(year: number, data: {
-  date: string;
-  amount: number;
-  description?: string;
-  sourceAccountType: AccountType;
-  sourceAccountId: number;
-  destinationAccountType: AccountType;
-  destinationAccountId: number;
-  accountingMonth?: number;
-  accountingYear?: number;
-}): Promise<Transfer> {
+export async function createTransfer(
+  year: number,
+  data: {
+    date: string;
+    amount: number;
+    description?: string;
+    sourceAccountType: AccountType;
+    sourceAccountId: number;
+    destinationAccountType: AccountType;
+    destinationAccountId: number;
+    accountingMonth?: number;
+    accountingYear?: number;
+  }
+): Promise<Transfer> {
   const response = await fetch(`${API_BASE}/transfers/${year}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -560,17 +570,20 @@ export async function createTransfer(year: number, data: {
   return response.json();
 }
 
-export async function updateTransfer(id: number, data: {
-  date?: string;
-  amount?: number;
-  description?: string;
-  sourceAccountType?: AccountType;
-  sourceAccountId?: number;
-  destinationAccountType?: AccountType;
-  destinationAccountId?: number;
-  accountingMonth?: number;
-  accountingYear?: number;
-}): Promise<Transfer> {
+export async function updateTransfer(
+  id: number,
+  data: {
+    date?: string;
+    amount?: number;
+    description?: string;
+    sourceAccountType?: AccountType;
+    sourceAccountId?: number;
+    destinationAccountType?: AccountType;
+    destinationAccountId?: number;
+    accountingMonth?: number;
+    accountingYear?: number;
+  }
+): Promise<Transfer> {
   const response = await fetch(`${API_BASE}/transfers/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { updateItem, updateMonthlyValue } from '../api';
 import type { BudgetGroup, GroupType } from '../types';
-import { updateMonthlyValue, updateItem } from '../api';
 import { formatCurrency } from '../utils';
 
 interface BudgetPlanningProps {
@@ -24,14 +24,14 @@ function organizeSections(groups: BudgetGroup[]): Section[] {
     { type: 'savings', name: 'Épargne', groups: [] },
   ];
 
-  groups.forEach(group => {
-    const section = sections.find(s => s.type === group.type);
+  groups.forEach((group) => {
+    const section = sections.find((s) => s.type === group.type);
     if (section) {
       section.groups.push(group);
     }
   });
 
-  return sections.filter(s => s.groups.length > 0);
+  return sections.filter((s) => s.groups.length > 0);
 }
 
 export default function BudgetPlanning({ year, groups, months, onDataChanged }: BudgetPlanningProps) {
@@ -40,24 +40,26 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<GroupType>>(new Set(['income', 'expense', 'savings']));
-  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set(groups.map(g => g.id)));
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set(groups.map((g) => g.id)));
   const [quickFillItemId, setQuickFillItemId] = useState<number | null>(null);
   const [quickFillValue, setQuickFillValue] = useState('');
-  const [quickFillMonths, setQuickFillMonths] = useState<Set<number>>(new Set([1,2,3,4,5,6,7,8,9,10,11,12]));
+  const [quickFillMonths, setQuickFillMonths] = useState<Set<number>>(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
 
   const sections = useMemo(() => organizeSections(groups), [groups]);
 
   // Expand new groups when they're added
   useEffect(() => {
-    setExpandedGroups(prev => {
+    setExpandedGroups((prev) => {
       const newSet = new Set(prev);
-      groups.forEach(g => newSet.add(g.id));
+      for (const g of groups) {
+        newSet.add(g.id);
+      }
       return newSet;
     });
   }, [groups]);
 
   const toggleSection = (type: GroupType) => {
-    setExpandedSections(prev => {
+    setExpandedSections((prev) => {
       const next = new Set(prev);
       if (next.has(type)) {
         next.delete(type);
@@ -69,7 +71,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   };
 
   const toggleGroup = (groupId: number) => {
-    setExpandedGroups(prev => {
+    setExpandedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(groupId)) {
         next.delete(groupId);
@@ -94,9 +96,9 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
 
   const handleSave = useCallback(async () => {
     if (!editingCell && editingYearlyBudget === null) return;
-    
+
     const newValue = editValue === '' ? 0 : parseFloat(editValue);
-    if (isNaN(newValue)) {
+    if (Number.isNaN(newValue)) {
       setEditingCell(null);
       setEditingYearlyBudget(null);
       return;
@@ -134,7 +136,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
         // Find the item to get its current value
         for (const section of sections) {
           for (const group of section.groups) {
-            const item = group.items.find(i => i.id === editingCell.itemId);
+            const item = group.items.find((i) => i.id === editingCell.itemId);
             if (item) {
               const nextValue = item.months[nextMonth - 1]?.budget || 0;
               handleCellClick(editingCell.itemId, nextMonth, nextValue);
@@ -146,30 +148,33 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
     }
   };
 
-  const handleQuickFill = useCallback(async (itemId: number) => {
-    const value = parseFloat(quickFillValue);
-    if (isNaN(value)) return;
+  const handleQuickFill = useCallback(
+    async (itemId: number) => {
+      const value = parseFloat(quickFillValue);
+      if (Number.isNaN(value)) return;
 
-    setSaving(true);
-    try {
-      // Update all selected months
-      const promises = Array.from(quickFillMonths).map(month =>
-        updateMonthlyValue(itemId, month, { budget: value })
-      );
-      await Promise.all(promises);
-      onDataChanged();
-      setQuickFillItemId(null);
-      setQuickFillValue('');
-      setQuickFillMonths(new Set([1,2,3,4,5,6,7,8,9,10,11,12]));
-    } catch (error) {
-      console.error('Failed to quick fill:', error);
-    } finally {
-      setSaving(false);
-    }
-  }, [quickFillValue, quickFillMonths, onDataChanged]);
+      setSaving(true);
+      try {
+        // Update all selected months
+        const promises = Array.from(quickFillMonths).map((month) =>
+          updateMonthlyValue(itemId, month, { budget: value })
+        );
+        await Promise.all(promises);
+        onDataChanged();
+        setQuickFillItemId(null);
+        setQuickFillValue('');
+        setQuickFillMonths(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
+      } catch (error) {
+        console.error('Failed to quick fill:', error);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [quickFillValue, quickFillMonths, onDataChanged]
+  );
 
   const toggleQuickFillMonth = (month: number) => {
-    setQuickFillMonths(prev => {
+    setQuickFillMonths((prev) => {
       const next = new Set(prev);
       if (next.has(month)) {
         next.delete(month);
@@ -182,9 +187,12 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
 
   const getSectionColor = (type: GroupType) => {
     switch (type) {
-      case 'income': return '#10b981';
-      case 'expense': return '#ef4444';
-      case 'savings': return '#3b82f6';
+      case 'income':
+        return '#10b981';
+      case 'expense':
+        return '#ef4444';
+      case 'savings':
+        return '#3b82f6';
     }
   };
 
@@ -192,8 +200,8 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   const calculateSectionTotal = (section: Section): { monthly: number; yearly: number } => {
     let monthly = 0;
     let yearly = 0;
-    section.groups.forEach(group => {
-      group.items.forEach(item => {
+    section.groups.forEach((group) => {
+      group.items.forEach((item) => {
         yearly += item.yearlyBudget || 0;
         monthly += item.months.reduce((sum, m) => sum + m.budget, 0);
       });
@@ -204,33 +212,44 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   // Calculate yearly budget total for a section
   const calculateSectionYearlyBudget = (section: Section): number => {
     return section.groups.reduce((total, group) => {
-      return total + group.items.reduce((itemTotal, item) => {
-        return itemTotal + (item.yearlyBudget || 0);
-      }, 0);
+      return (
+        total +
+        group.items.reduce((itemTotal, item) => {
+          return itemTotal + (item.yearlyBudget || 0);
+        }, 0)
+      );
     }, 0);
   };
 
   // Calculate remaining yearly budget for a section (yearly budget - actual spent)
   const calculateSectionRemainingBudget = (section: Section): number => {
     return section.groups.reduce((total, group) => {
-      return total + group.items.reduce((itemTotal, item) => {
-        const yearlyBudget = item.yearlyBudget || 0;
-        if (yearlyBudget === 0) return itemTotal;
-        const actualSpent = item.months.reduce((sum, m) => sum + m.actual, 0);
-        return itemTotal + (yearlyBudget - actualSpent);
-      }, 0);
+      return (
+        total +
+        group.items.reduce((itemTotal, item) => {
+          const yearlyBudget = item.yearlyBudget || 0;
+          if (yearlyBudget === 0) return itemTotal;
+          const actualSpent = item.months.reduce((sum, m) => sum + m.actual, 0);
+          return itemTotal + (yearlyBudget - actualSpent);
+        }, 0)
+      );
     }, 0);
   };
 
   // Calculate monthly totals for a section
   const calculateSectionMonthlyTotals = (section: Section): number[] => {
-    return Array(12).fill(0).map((_, i) => {
-      return section.groups.reduce((total, group) => {
-        return total + group.items.reduce((itemTotal, item) => {
-          return itemTotal + (item.months[i]?.budget || 0);
+    return Array(12)
+      .fill(0)
+      .map((_, i) => {
+        return section.groups.reduce((total, group) => {
+          return (
+            total +
+            group.items.reduce((itemTotal, item) => {
+              return itemTotal + (item.months[i]?.budget || 0);
+            }, 0)
+          );
         }, 0);
-      }, 0);
-    });
+      });
   };
 
   return (
@@ -252,13 +271,15 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                 <th className="col-yearly">Variable</th>
                 <th className="col-remaining">Restant</th>
                 {months.map((month, i) => (
-                  <th key={i} className="col-month">{month.slice(0, 3)}</th>
+                  <th key={i} className="col-month">
+                    {month.slice(0, 3)}
+                  </th>
                 ))}
                 <th className="col-actions">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {sections.map(section => {
+              {sections.map((section) => {
                 const isExpanded = expandedSections.has(section.type);
                 const sectionTotals = calculateSectionTotal(section);
                 const sectionYearlyBudget = calculateSectionYearlyBudget(section);
@@ -270,14 +291,11 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                 return (
                   <React.Fragment key={section.type}>
                     {/* Section Header */}
-                    <tr 
+                    <tr
                       className={`section-row section-${section.type}`}
                       style={{ '--section-color': sectionColor } as React.CSSProperties}
                     >
-                      <td 
-                        className="category-cell sticky-col section-name"
-                        onClick={() => toggleSection(section.type)}
-                      >
+                      <td className="category-cell sticky-col section-name" onClick={() => toggleSection(section.type)}>
                         <span className={`chevron ${!isExpanded ? 'collapsed' : ''}`}>▼</span>
                         {section.name}
                       </td>
@@ -285,170 +303,186 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                       <td className="yearly-budget-total">{formatCurrency(sectionYearlyBudget)}</td>
                       <td className="remaining-budget-total">{formatCurrency(sectionRemainingBudget)}</td>
                       {sectionMonthlyTotals.map((total, i) => (
-                        <td key={i} className="month-total">{formatCurrency(total)}</td>
+                        <td key={i} className="month-total">
+                          {formatCurrency(total)}
+                        </td>
                       ))}
                       <td className="actions-cell"></td>
                     </tr>
 
                     {/* Groups and Items */}
-                    {isExpanded && section.groups.map(group => {
-                      const isGroupExpanded = expandedGroups.has(group.id);
-                      const groupMonthlyTotal = group.items.reduce((total, item) => 
-                        total + item.months.reduce((m, v) => m + v.budget, 0), 0
-                      );
-                      const groupYearlyBudget = group.items.reduce((total, item) => 
-                        total + (item.yearlyBudget || 0), 0
-                      );
-                      const groupRemainingBudget = group.items.reduce((total, item) => {
-                        const yearlyBudget = item.yearlyBudget || 0;
-                        if (yearlyBudget === 0) return total;
-                        const actualSpent = item.months.reduce((sum, m) => sum + m.actual, 0);
-                        return total + (yearlyBudget - actualSpent);
-                      }, 0);
-                      const groupGrandTotal = groupMonthlyTotal + groupYearlyBudget;
-                      const groupMonthlyTotals = Array(12).fill(0).map((_, i) =>
-                        group.items.reduce((total, item) => total + (item.months[i]?.budget || 0), 0)
-                      );
+                    {isExpanded &&
+                      section.groups.map((group) => {
+                        const isGroupExpanded = expandedGroups.has(group.id);
+                        const groupMonthlyTotal = group.items.reduce(
+                          (total, item) => total + item.months.reduce((m, v) => m + v.budget, 0),
+                          0
+                        );
+                        const groupYearlyBudget = group.items.reduce(
+                          (total, item) => total + (item.yearlyBudget || 0),
+                          0
+                        );
+                        const groupRemainingBudget = group.items.reduce((total, item) => {
+                          const yearlyBudget = item.yearlyBudget || 0;
+                          if (yearlyBudget === 0) return total;
+                          const actualSpent = item.months.reduce((sum, m) => sum + m.actual, 0);
+                          return total + (yearlyBudget - actualSpent);
+                        }, 0);
+                        const groupGrandTotal = groupMonthlyTotal + groupYearlyBudget;
+                        const groupMonthlyTotals = Array(12)
+                          .fill(0)
+                          .map((_, i) => group.items.reduce((total, item) => total + (item.months[i]?.budget || 0), 0));
 
-                      return (
-                        <React.Fragment key={group.id}>
-                          {/* Group Header */}
-                          <tr className="group-row">
-                            <td 
-                              className="category-cell sticky-col group-name"
-                              onClick={() => toggleGroup(group.id)}
-                            >
-                              <span className={`chevron ${!isGroupExpanded ? 'collapsed' : ''}`}>▼</span>
-                              {group.name}
-                            </td>
-                            <td className="annual-total group-total">{formatCurrency(groupGrandTotal, true)}</td>
-                            <td className="yearly-budget-total group-total">{formatCurrency(groupYearlyBudget)}</td>
-                            <td className="remaining-budget-total group-total">{formatCurrency(groupRemainingBudget)}</td>
-                            {groupMonthlyTotals.map((total, i) => (
-                              <td key={i} className="month-total group-total">{formatCurrency(total)}</td>
-                            ))}
-                            <td className="actions-cell"></td>
-                          </tr>
-
-                          {/* Items */}
-                          {isGroupExpanded && group.items.map(item => {
-                            const itemMonthlyTotal = item.months.reduce((m, v) => m + v.budget, 0);
-                            const itemGrandTotal = itemMonthlyTotal + (item.yearlyBudget || 0);
-                            const itemActualSpent = item.months.reduce((sum, m) => sum + m.actual, 0);
-                            const itemYearlyBudget = item.yearlyBudget || 0;
-                            const itemRemainingBudget = itemYearlyBudget > 0 ? itemYearlyBudget - itemActualSpent : 0;
-                            const itemRemainingPercent = itemYearlyBudget > 0 ? Math.round((itemRemainingBudget / itemYearlyBudget) * 100) : 0;
-                            const isQuickFilling = quickFillItemId === item.id;
-                            const isEditingYearly = editingYearlyBudget === item.id;
-
-                            // Color class based on remaining budget percentage
-                            let remainingColorClass = '';
-                            if (itemYearlyBudget > 0) {
-                              if (itemRemainingPercent > 50) {
-                                remainingColorClass = 'healthy';
-                              } else if (itemRemainingPercent >= 20) {
-                                remainingColorClass = 'warning';
-                              } else {
-                                remainingColorClass = 'critical';
-                              }
-                            }
-
-                            return (
-                              <tr key={item.id} className="item-row">
-                                <td className="category-cell sticky-col item-name">
-                                  {item.name}
+                        return (
+                          <React.Fragment key={group.id}>
+                            {/* Group Header */}
+                            <tr className="group-row">
+                              <td className="category-cell sticky-col group-name" onClick={() => toggleGroup(group.id)}>
+                                <span className={`chevron ${!isGroupExpanded ? 'collapsed' : ''}`}>▼</span>
+                                {group.name}
+                              </td>
+                              <td className="annual-total group-total">{formatCurrency(groupGrandTotal, true)}</td>
+                              <td className="yearly-budget-total group-total">{formatCurrency(groupYearlyBudget)}</td>
+                              <td className="remaining-budget-total group-total">
+                                {formatCurrency(groupRemainingBudget)}
+                              </td>
+                              {groupMonthlyTotals.map((total, i) => (
+                                <td key={i} className="month-total group-total">
+                                  {formatCurrency(total)}
                                 </td>
-                                <td className="annual-total item-total">{formatCurrency(itemGrandTotal)}</td>
-                                <td className="yearly-budget-cell">
-                                  {isEditingYearly ? (
-                                    <input
-                                      type="number"
-                                      className="budget-input yearly"
-                                      value={editValue}
-                                      onChange={e => setEditValue(e.target.value)}
-                                      onBlur={handleSave}
-                                      onKeyDown={handleKeyDown}
-                                      autoFocus
-                                      disabled={saving}
-                                    />
-                                  ) : (
-                                    <span
-                                      className={`budget-value yearly ${(item.yearlyBudget || 0) === 0 ? 'zero' : ''}`}
-                                      onClick={() => handleYearlyBudgetClick(item.id, item.yearlyBudget || 0)}
-                                    >
-                                      {formatCurrency(item.yearlyBudget || 0)}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className={`remaining-budget-cell ${remainingColorClass}`}>
-                                  {itemYearlyBudget > 0 ? (
-                                    <div className="remaining-content">
-                                      <span className="remaining-percent-badge">{itemRemainingPercent}%</span>
-                                      <span className="remaining-amount">{formatCurrency(itemRemainingBudget)}</span>
-                                    </div>
-                                  ) : '–'}
-                                </td>
-                                {item.months.map((monthValue, i) => {
-                                  const isEditing = editingCell?.itemId === item.id && editingCell?.month === i + 1;
-                                  
-                                  return (
-                                    <td key={i} className="month-cell">
-                                      {isEditing ? (
+                              ))}
+                              <td className="actions-cell"></td>
+                            </tr>
+
+                            {/* Items */}
+                            {isGroupExpanded &&
+                              group.items.map((item) => {
+                                const itemMonthlyTotal = item.months.reduce((m, v) => m + v.budget, 0);
+                                const itemGrandTotal = itemMonthlyTotal + (item.yearlyBudget || 0);
+                                const itemActualSpent = item.months.reduce((sum, m) => sum + m.actual, 0);
+                                const itemYearlyBudget = item.yearlyBudget || 0;
+                                const itemRemainingBudget =
+                                  itemYearlyBudget > 0 ? itemYearlyBudget - itemActualSpent : 0;
+                                const itemRemainingPercent =
+                                  itemYearlyBudget > 0 ? Math.round((itemRemainingBudget / itemYearlyBudget) * 100) : 0;
+                                const isQuickFilling = quickFillItemId === item.id;
+                                const isEditingYearly = editingYearlyBudget === item.id;
+
+                                // Color class based on remaining budget percentage
+                                let remainingColorClass = '';
+                                if (itemYearlyBudget > 0) {
+                                  if (itemRemainingPercent > 50) {
+                                    remainingColorClass = 'healthy';
+                                  } else if (itemRemainingPercent >= 20) {
+                                    remainingColorClass = 'warning';
+                                  } else {
+                                    remainingColorClass = 'critical';
+                                  }
+                                }
+
+                                return (
+                                  <tr key={item.id} className="item-row">
+                                    <td className="category-cell sticky-col item-name">{item.name}</td>
+                                    <td className="annual-total item-total">{formatCurrency(itemGrandTotal)}</td>
+                                    <td className="yearly-budget-cell">
+                                      {isEditingYearly ? (
                                         <input
                                           type="number"
-                                          className="budget-input"
+                                          className="budget-input yearly"
                                           value={editValue}
-                                          onChange={e => setEditValue(e.target.value)}
+                                          onChange={(e) => setEditValue(e.target.value)}
                                           onBlur={handleSave}
                                           onKeyDown={handleKeyDown}
-                                          autoFocus
                                           disabled={saving}
                                         />
                                       ) : (
                                         <span
-                                          className={`budget-value ${monthValue.budget === 0 ? 'zero' : ''}`}
-                                          onClick={() => handleCellClick(item.id, i + 1, monthValue.budget)}
+                                          className={`budget-value yearly ${(item.yearlyBudget || 0) === 0 ? 'zero' : ''}`}
+                                          onClick={() => handleYearlyBudgetClick(item.id, item.yearlyBudget || 0)}
                                         >
-                                          {formatCurrency(monthValue.budget)}
+                                          {formatCurrency(item.yearlyBudget || 0)}
                                         </span>
                                       )}
                                     </td>
-                                  );
-                                })}
-                                <td className="actions-cell">
-                                  {isQuickFilling ? (
-                                    <div className="quick-fill-inline">
-                                      <button
-                                        className="btn-icon cancel"
-                                        onClick={() => setQuickFillItemId(null)}
-                                        title="Annuler"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      className="btn-icon quick-fill"
-                                      onClick={() => {
-                                        setQuickFillItemId(item.id);
-                                        // Pre-fill with current first non-zero value or empty
-                                        const firstNonZero = item.months.find(m => m.budget > 0);
-                                        setQuickFillValue(firstNonZero ? firstNonZero.budget.toString() : '');
-                                      }}
-                                      title="Remplissage rapide"
-                                    >
-                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M12 5v14M5 12h14" />
-                                      </svg>
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </React.Fragment>
-                      );
-                    })}
+                                    <td className={`remaining-budget-cell ${remainingColorClass}`}>
+                                      {itemYearlyBudget > 0 ? (
+                                        <div className="remaining-content">
+                                          <span className="remaining-percent-badge">{itemRemainingPercent}%</span>
+                                          <span className="remaining-amount">
+                                            {formatCurrency(itemRemainingBudget)}
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        '–'
+                                      )}
+                                    </td>
+                                    {item.months.map((monthValue, i) => {
+                                      const isEditing = editingCell?.itemId === item.id && editingCell?.month === i + 1;
+
+                                      return (
+                                        <td key={i} className="month-cell">
+                                          {isEditing ? (
+                                            <input
+                                              type="number"
+                                              className="budget-input"
+                                              value={editValue}
+                                              onChange={(e) => setEditValue(e.target.value)}
+                                              onBlur={handleSave}
+                                              onKeyDown={handleKeyDown}
+                                              disabled={saving}
+                                            />
+                                          ) : (
+                                            <span
+                                              className={`budget-value ${monthValue.budget === 0 ? 'zero' : ''}`}
+                                              onClick={() => handleCellClick(item.id, i + 1, monthValue.budget)}
+                                            >
+                                              {formatCurrency(monthValue.budget)}
+                                            </span>
+                                          )}
+                                        </td>
+                                      );
+                                    })}
+                                    <td className="actions-cell">
+                                      {isQuickFilling ? (
+                                        <div className="quick-fill-inline">
+                                          <button
+                                            className="btn-icon cancel"
+                                            onClick={() => setQuickFillItemId(null)}
+                                            title="Annuler"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          className="btn-icon quick-fill"
+                                          onClick={() => {
+                                            setQuickFillItemId(item.id);
+                                            // Pre-fill with current first non-zero value or empty
+                                            const firstNonZero = item.months.find((m) => m.budget > 0);
+                                            setQuickFillValue(firstNonZero ? firstNonZero.budget.toString() : '');
+                                          }}
+                                          title="Remplissage rapide"
+                                        >
+                                          <svg
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                          >
+                                            <path d="M12 5v14M5 12h14" />
+                                          </svg>
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                          </React.Fragment>
+                        );
+                      })}
                   </React.Fragment>
                 );
               })}
@@ -460,10 +494,12 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
       {/* Quick Fill Modal */}
       {quickFillItemId && (
         <div className="quick-fill-modal-overlay" onClick={() => setQuickFillItemId(null)}>
-          <div className="quick-fill-modal" onClick={e => e.stopPropagation()}>
+          <div className="quick-fill-modal" onClick={(e) => e.stopPropagation()}>
             <div className="quick-fill-header">
               <h3>Remplissage rapide</h3>
-              <button className="btn-close" onClick={() => setQuickFillItemId(null)}>✕</button>
+              <button className="btn-close" onClick={() => setQuickFillItemId(null)}>
+                ✕
+              </button>
             </div>
             <div className="quick-fill-body">
               <div className="quick-fill-amount">
@@ -471,9 +507,8 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                 <input
                   type="number"
                   value={quickFillValue}
-                  onChange={e => setQuickFillValue(e.target.value)}
+                  onChange={(e) => setQuickFillValue(e.target.value)}
                   placeholder="0.00"
-                  autoFocus
                 />
               </div>
               <div className="quick-fill-months">
@@ -490,47 +525,32 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                   ))}
                 </div>
                 <div className="month-presets">
-                  <button 
+                  <button
                     className="preset-btn"
-                    onClick={() => setQuickFillMonths(new Set([1,2,3,4,5,6,7,8,9,10,11,12]))}
+                    onClick={() => setQuickFillMonths(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]))}
                   >
                     Tous
                   </button>
-                  <button 
-                    className="preset-btn"
-                    onClick={() => setQuickFillMonths(new Set())}
-                  >
+                  <button className="preset-btn" onClick={() => setQuickFillMonths(new Set())}>
                     Aucun
                   </button>
-                  <button 
-                    className="preset-btn"
-                    onClick={() => setQuickFillMonths(new Set([1,2,3,4,5,6]))}
-                  >
+                  <button className="preset-btn" onClick={() => setQuickFillMonths(new Set([1, 2, 3, 4, 5, 6]))}>
                     S1
                   </button>
-                  <button 
-                    className="preset-btn"
-                    onClick={() => setQuickFillMonths(new Set([7,8,9,10,11,12]))}
-                  >
+                  <button className="preset-btn" onClick={() => setQuickFillMonths(new Set([7, 8, 9, 10, 11, 12]))}>
                     S2
                   </button>
-                  <button 
-                    className="preset-btn"
-                    onClick={() => setQuickFillMonths(new Set([1,4,7,10]))}
-                  >
+                  <button className="preset-btn" onClick={() => setQuickFillMonths(new Set([1, 4, 7, 10]))}>
                     Trim.
                   </button>
                 </div>
               </div>
             </div>
             <div className="quick-fill-footer">
-              <button 
-                className="btn-secondary" 
-                onClick={() => setQuickFillItemId(null)}
-              >
+              <button className="btn-secondary" onClick={() => setQuickFillItemId(null)}>
                 Annuler
               </button>
-              <button 
+              <button
                 className="btn-primary"
                 onClick={() => handleQuickFill(quickFillItemId)}
                 disabled={saving || !quickFillValue || quickFillMonths.size === 0}
