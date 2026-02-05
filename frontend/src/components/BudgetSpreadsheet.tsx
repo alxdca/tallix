@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
+import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import type { BudgetSection, MonthlyValue } from '../types';
-import { calculateAnnualTotals, calculateGroupTotals, calculateSectionTotals, formatCurrency } from '../utils';
+import { calculateAnnualTotals, calculateGroupTotals, calculateSectionTotals } from '../utils';
 
 interface BudgetSpreadsheetProps {
   sections: BudgetSection[];
@@ -14,6 +15,7 @@ interface FundsSummary {
 }
 
 export default function BudgetSpreadsheet({ sections, months, paymentAccountsInitialBalance }: BudgetSpreadsheetProps) {
+  const formatCurrency = useFormatCurrency();
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(new Set());
 

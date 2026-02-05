@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { updateItem, updateMonthlyValue } from '../api';
+import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import type { BudgetGroup, GroupType } from '../types';
-import { formatCurrency } from '../utils';
 
 interface BudgetPlanningProps {
   year: number;
@@ -35,6 +35,7 @@ function organizeSections(groups: BudgetGroup[]): Section[] {
 }
 
 export default function BudgetPlanning({ year, groups, months, onDataChanged }: BudgetPlanningProps) {
+  const formatCurrency = useFormatCurrency();
   const [editingCell, setEditingCell] = useState<{ itemId: number; month: number } | null>(null);
   const [editingYearlyBudget, setEditingYearlyBudget] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');

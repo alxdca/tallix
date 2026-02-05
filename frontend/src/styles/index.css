@@ -2,7 +2,7 @@
    CSS Variables & Theme
    ======================================== */
 :root {
-  /* Colors - Deep ocean inspired */
+  /* Colors - Deep ocean inspired (Dark Theme) */
   --bg-primary: #0a0f1a;
   --bg-secondary: #111827;
   --bg-tertiary: #1a2234;
@@ -53,6 +53,43 @@
   /* Transitions */
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
+}
+
+/* Light Theme */
+[data-theme="light"] {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --bg-hover: #e2e8f0;
+  --bg-card: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+
+  --border-color: #e2e8f0;
+  --border-subtle: #f1f5f9;
+
+  /* Accent colors - slightly adjusted for light bg */
+  --accent-budget: #2563eb;
+  --accent-budget-light: #3b82f6;
+  --accent-actual: #059669;
+  --accent-actual-light: #10b981;
+  --accent-negative: #dc2626;
+  --accent-warning: #d97706;
+  --accent-purple: #7c3aed;
+  --accent-savings: #2563eb;
+
+  /* Gradients */
+  --gradient-budget: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  --gradient-actual: linear-gradient(135deg, #059669 0%, #047857 100%);
+  --gradient-header: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+
+  /* Shadows - lighter for light theme */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-glow: 0 0 20px rgba(37, 99, 235, 0.1);
 }
 
 /* ========================================
@@ -962,6 +999,44 @@ td.zero {
   font-size: 0.9375rem;
 }
 
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0;
+  margin-bottom: 8px;
+}
+
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all var(--transition-fast);
+}
+
+.settings-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.settings-tab.active {
+  color: var(--accent-budget);
+  border-bottom-color: var(--accent-budget);
+}
+
+.settings-tab svg {
+  flex-shrink: 0;
+}
+
 .settings-content {
   display: flex;
   flex-direction: column;
@@ -1481,6 +1556,72 @@ td.zero {
   margin: 8px;
 }
 
+/* Appearance Section */
+.appearance-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.section-indicator.appearance {
+  background: var(--accent-purple);
+}
+
+.appearance-options {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setting-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.setting-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.setting-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.setting-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.setting-btn.active {
+  background: var(--accent-budget);
+  border-color: var(--accent-budget);
+  color: white;
+}
+
+.setting-btn svg {
+  flex-shrink: 0;
+}
+
 /* Payment Methods Section */
 .payment-methods-section {
   background: var(--bg-secondary);
@@ -1494,7 +1635,9 @@ td.zero {
 }
 
 .payment-method-form {
-  margin-bottom: 16px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .payment-methods-list {

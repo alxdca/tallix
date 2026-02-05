@@ -1,4 +1,4 @@
-import { formatCurrency } from '../utils';
+import { useFormatCurrency } from '../hooks/useFormatCurrency';
 
 interface HeaderProps {
   year: number;
@@ -7,6 +7,8 @@ interface HeaderProps {
 }
 
 export default function Header({ year, initialBalance, remainingBalance }: HeaderProps) {
+  const formatCurrency = useFormatCurrency();
+
   return (
     <header className="header">
       <div className="header-left">

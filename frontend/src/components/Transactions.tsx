@@ -18,8 +18,9 @@ import {
   updateTransaction,
   updateTransfer,
 } from '../api';
+import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import type { BudgetGroup } from '../types';
-import { formatCurrency, formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
+import { formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import { logger } from '../utils/logger';
 import BulkImportModal from './BulkImportModal';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
@@ -66,6 +67,7 @@ interface Filters {
 }
 
 export default function Transactions({ year, yearId, groups, onTransactionsChanged }: TransactionsProps) {
+  const formatCurrency = useFormatCurrency();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);

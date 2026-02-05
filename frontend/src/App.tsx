@@ -8,11 +8,12 @@ import Header from './components/Header';
 import Settings from './components/Settings';
 import Sidebar from './components/Sidebar';
 import Transactions from './components/Transactions';
+import { SettingsProvider } from './contexts/SettingsContext';
 import type { BudgetData, BudgetSummary } from './types';
 import { organizeBudgetData } from './utils';
 import { logger } from './utils/logger';
 
-function App() {
+function AppContent() {
   const [budgetData, setBudgetData] = useState<BudgetData | null>(null);
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [months, setMonths] = useState<string[]>([]);
@@ -176,11 +177,19 @@ function App() {
   };
 
   return (
+    <div className="app">
+      <Sidebar activeView={activeView} onViewChange={setActiveView} currentYear={currentYear} />
+      <main className="main-content">{renderContent()}</main>
+    </div>
+  );
+}
+
+function App() {
+  return (
     <ErrorBoundary>
-      <div className="app">
-        <Sidebar activeView={activeView} onViewChange={setActiveView} currentYear={currentYear} />
-        <main className="main-content">{renderContent()}</main>
-      </div>
+      <SettingsProvider>
+        <AppContent />
+      </SettingsProvider>
     </ErrorBoundary>
   );
 }

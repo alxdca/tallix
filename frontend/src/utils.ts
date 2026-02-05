@@ -54,11 +54,13 @@ export function calculateSectionTotals(groups: BudgetGroup[]): {
   return totals;
 }
 
-// Format number as Swiss currency
-export function formatCurrency(value: number, showZero = false): string {
+// Format number as currency with configurable decimal separator
+export function formatCurrency(value: number, showZero = false, decimalSeparator: '.' | ',' = '.'): string {
   if (value === 0 && !showZero) return '–';
 
-  const formatted = Math.abs(value).toLocaleString('fr-CH', {
+  // Use en-CH for dot separator, fr-CH for comma separator
+  const locale = decimalSeparator === '.' ? 'en-CH' : 'fr-CH';
+  const formatted = Math.abs(value).toLocaleString(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });

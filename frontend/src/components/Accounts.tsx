@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type Account, fetchAccounts, setAccountBalance } from '../api';
-import { formatCurrency } from '../utils';
+import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import { logger } from '../utils/logger';
 
 interface AccountsProps {
@@ -32,6 +32,7 @@ function calculateTotals(accountList: Account[]): AccountTotals {
 }
 
 export default function Accounts({ year, months, onDataChanged }: AccountsProps) {
+  const formatCurrency = useFormatCurrency();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingBalance, setEditingBalance] = useState<string | null>(null);

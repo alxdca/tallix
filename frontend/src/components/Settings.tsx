@@ -19,6 +19,7 @@ import {
   updateItem,
   updatePaymentMethod,
 } from '../api';
+import { useSettings } from '../contexts/SettingsContext';
 import type { BudgetGroup, BudgetItem } from '../types';
 import { logger } from '../utils/logger';
 
@@ -37,7 +38,11 @@ function slugify(text: string): string {
     .replace(/(^-|-$)/g, '');
 }
 
+type SettingsTab = 'categories' | 'accounts' | 'preferences';
+
 export default function Settings({ yearId, groups, onDataChanged }: SettingsProps) {
+  const { theme, decimalSeparator, toggleTheme, setDecimalSeparator } = useSettings();
+  const [activeTab, setActiveTab] = useState<SettingsTab>('categories');
   const [editingGroup, setEditingGroup] = useState<number | null>(null);
   const [editingItem, setEditingItem] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
@@ -800,261 +805,322 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     </div>
   );
 
+  const renderCategoriesTab = () => (
+    <>
+      {/* Groups and Items List */}
+      <div className="settings-grid">
+        {renderGroupSection('Revenus', incomeGroups, 'income')}
+        {renderGroupSection('Dépenses', expenseGroups, 'expense')}
+        {renderGroupSection('Épargne', savingsGroups, 'savings')}
+      </div>
+
+      {/* Unassigned Items */}
+      {unassignedItems.length > 0 && (
+        <div
+          className={`unassigned-section ${dropTarget === 'unassigned' ? 'drop-target' : ''}`}
+          onDragOver={(e) => handleDragOver(e, 'unassigned')}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => handleDrop(e, null)}
+        >
+          <h3 className="section-title">
+            <span className="section-indicator unassigned"></span>
+            Éléments non assignés
+            <span className="item-count">{unassignedItems.length}</span>
+          </h3>
+          <div className="unassigned-items">
+            {unassignedItems.map((item, itemIndex) => renderItem(item, unassignedItems, itemIndex, null))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const renderAccountsTab = () => (
+    <div className="payment-methods-section">
+      <h3 className="section-title">
+        <span className="section-indicator payment"></span>
+        Moyens de paiement
+      </h3>
+
+      <div className="payment-methods-list">
+        {paymentMethods.length === 0 ? (
+          <p className="empty-message">Aucun moyen de paiement créé</p>
+        ) : (
+          paymentMethods.map((method, index) => (
+            <div key={method.id} className="payment-method-item">
+              {editingPaymentMethod === method.id ? (
+                <div className="edit-form payment-method-edit-form">
+                  <div className="edit-field-group name-field">
+                    <label className="edit-field-label">Nom</label>
+                    <input
+                      type="text"
+                      value={editPaymentMethodName}
+                      onChange={(e) => setEditPaymentMethodName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleUpdatePaymentMethod(method.id);
+                        if (e.key === 'Escape') cancelEditPaymentMethod();
+                      }}
+                      placeholder="Nom"
+                    />
+                  </div>
+                  <div className="edit-field-group">
+                    <label className="edit-field-label">Clôture</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={editSettlementDay}
+                      onChange={(e) => setEditSettlementDay(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleUpdatePaymentMethod(method.id);
+                        if (e.key === 'Escape') cancelEditPaymentMethod();
+                      }}
+                      placeholder="—"
+                      className="settlement-day-input"
+                      title="Jour de clôture du cycle de facturation (1-31). Ex: 18 = les transactions du 18 au 17 sont comptabilisées le mois suivant."
+                    />
+                  </div>
+                  <div className="edit-field-group">
+                    <label className="edit-field-label">Compte lié</label>
+                    <select
+                      value={editLinkedPaymentMethodId || ''}
+                      onChange={(e) => setEditLinkedPaymentMethodId(e.target.value ? Number(e.target.value) : null)}
+                      className="linked-account-select"
+                      title="Compte dont le solde sera affecté par les transactions avec ce mode de paiement"
+                    >
+                      <option value="">Aucun</option>
+                      {accountPaymentMethods
+                        .filter((pm) => pm.id !== method.id)
+                        .map((pm) => (
+                          <option key={pm.id} value={pm.id}>
+                            {pm.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="edit-actions">
+                    <button
+                      className="btn-icon save"
+                      onClick={() => handleUpdatePaymentMethod(method.id)}
+                      title="Sauvegarder"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </button>
+                    <button className="btn-icon cancel" onClick={cancelEditPaymentMethod} title="Annuler">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="payment-method-reorder">
+                    <button
+                      className="btn-icon reorder"
+                      onClick={() => handleMovePaymentMethod(index, 'up')}
+                      disabled={index === 0 || isSubmitting}
+                      title="Monter"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 15l-6-6-6 6" />
+                      </svg>
+                    </button>
+                    <button
+                      className="btn-icon reorder"
+                      onClick={() => handleMovePaymentMethod(index, 'down')}
+                      disabled={index === paymentMethods.length - 1 || isSubmitting}
+                      title="Descendre"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                  </div>
+                  <span className="payment-method-name">
+                    {method.name}
+                    {method.settlementDay && (
+                      <span className="settlement-day-badge" title={`Clôture le ${method.settlementDay} du mois`}>
+                        J{method.settlementDay}
+                      </span>
+                    )}
+                    {method.linkedPaymentMethodId && (
+                      <span
+                        className="linked-account-badge"
+                        title={`Lié à : ${paymentMethods.find((pm) => pm.id === method.linkedPaymentMethodId)?.name || 'Inconnu'}`}
+                      >
+                        → {paymentMethods.find((pm) => pm.id === method.linkedPaymentMethodId)?.name || '?'}
+                      </span>
+                    )}
+                  </span>
+                  <label className="account-toggle" title="Activer comme compte">
+                    <input
+                      type="checkbox"
+                      checked={method.isAccount}
+                      onChange={() => handleTogglePaymentMethodAccount(method.id, method.isAccount)}
+                      disabled={isSubmitting}
+                    />
+                    <span className="toggle-slider"></span>
+                    <span className="toggle-label">Compte</span>
+                  </label>
+                  <div className="payment-method-actions">
+                    <button className="btn-icon edit" onClick={() => startEditPaymentMethod(method)} title="Modifier">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                    <button
+                      className="btn-icon delete"
+                      onClick={() => handleDeletePaymentMethod(method.id)}
+                      title="Supprimer"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      <form onSubmit={handleCreatePaymentMethod} className="create-form payment-method-form">
+        <div className="form-row">
+          <input
+            type="text"
+            placeholder="Ajouter un moyen de paiement..."
+            value={newPaymentMethod}
+            onChange={(e) => setNewPaymentMethod(e.target.value)}
+            className="form-input"
+          />
+          <button type="submit" className="btn-primary" disabled={!newPaymentMethod.trim() || isSubmitting}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Ajouter
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  const renderPreferencesTab = () => (
+    <div className="appearance-section">
+      <h3 className="section-title">
+        <span className="section-indicator appearance"></span>
+        Apparence
+      </h3>
+      <div className="appearance-options">
+        <div className="setting-row">
+          <span className="setting-label">Thème</span>
+          <div className="setting-buttons">
+            <button
+              type="button"
+              className={`setting-btn ${theme === 'dark' ? 'active' : ''}`}
+              onClick={theme === 'light' ? toggleTheme : undefined}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+              Sombre
+            </button>
+            <button
+              type="button"
+              className={`setting-btn ${theme === 'light' ? 'active' : ''}`}
+              onClick={theme === 'dark' ? toggleTheme : undefined}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+              Clair
+            </button>
+          </div>
+        </div>
+        <div className="setting-row">
+          <span className="setting-label">Séparateur décimal</span>
+          <div className="setting-buttons">
+            <button
+              type="button"
+              className={`setting-btn ${decimalSeparator === '.' ? 'active' : ''}`}
+              onClick={() => setDecimalSeparator('.')}
+            >
+              Point (1'234.56)
+            </button>
+            <button
+              type="button"
+              className={`setting-btn ${decimalSeparator === ',' ? 'active' : ''}`}
+              onClick={() => setDecimalSeparator(',')}
+            >
+              Virgule (1'234,56)
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="settings-container">
       <div className="settings-header">
         <h2>Paramètres</h2>
-        <p>Gérez vos catégories et éléments de budget</p>
+        <p>Gérez vos catégories, comptes et préférences</p>
+      </div>
+
+      <div className="settings-tabs">
+        <button
+          type="button"
+          className={`settings-tab ${activeTab === 'categories' ? 'active' : ''}`}
+          onClick={() => setActiveTab('categories')}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          Catégories
+        </button>
+        <button
+          type="button"
+          className={`settings-tab ${activeTab === 'accounts' ? 'active' : ''}`}
+          onClick={() => setActiveTab('accounts')}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+            <line x1="1" y1="10" x2="23" y2="10" />
+          </svg>
+          Comptes
+        </button>
+        <button
+          type="button"
+          className={`settings-tab ${activeTab === 'preferences' ? 'active' : ''}`}
+          onClick={() => setActiveTab('preferences')}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          Préférences
+        </button>
       </div>
 
       <div className="settings-content">
-        {/* Groups and Items List */}
-        <div className="settings-grid">
-          {renderGroupSection('Revenus', incomeGroups, 'income')}
-          {renderGroupSection('Dépenses', expenseGroups, 'expense')}
-          {renderGroupSection('Épargne', savingsGroups, 'savings')}
-        </div>
-
-        {/* Unassigned Items */}
-        {unassignedItems.length > 0 && (
-          <div
-            className={`unassigned-section ${dropTarget === 'unassigned' ? 'drop-target' : ''}`}
-            onDragOver={(e) => handleDragOver(e, 'unassigned')}
-            onDragLeave={handleDragLeave}
-            onDrop={(e) => handleDrop(e, null)}
-          >
-            <h3 className="section-title">
-              <span className="section-indicator unassigned"></span>
-              Éléments non assignés
-              <span className="item-count">{unassignedItems.length}</span>
-            </h3>
-            <div className="unassigned-items">
-              {unassignedItems.map((item, itemIndex) => renderItem(item, unassignedItems, itemIndex, null))}
-            </div>
-          </div>
-        )}
-
-        {/* Payment Methods Section */}
-        <div className="payment-methods-section">
-          <h3 className="section-title">
-            <span className="section-indicator payment"></span>
-            Moyens de paiement
-          </h3>
-
-          <div className="payment-methods-list">
-            {paymentMethods.length === 0 ? (
-              <p className="empty-message">Aucun moyen de paiement créé</p>
-            ) : (
-              paymentMethods.map((method, index) => (
-                <div key={method.id} className="payment-method-item">
-                  {editingPaymentMethod === method.id ? (
-                    <div className="edit-form payment-method-edit-form">
-                      <div className="edit-field-group name-field">
-                        <label className="edit-field-label">Nom</label>
-                        <input
-                          type="text"
-                          value={editPaymentMethodName}
-                          onChange={(e) => setEditPaymentMethodName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleUpdatePaymentMethod(method.id);
-                            if (e.key === 'Escape') cancelEditPaymentMethod();
-                          }}
-                          placeholder="Nom"
-                        />
-                      </div>
-                      <div className="edit-field-group">
-                        <label className="edit-field-label">Clôture</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="31"
-                          value={editSettlementDay}
-                          onChange={(e) => setEditSettlementDay(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleUpdatePaymentMethod(method.id);
-                            if (e.key === 'Escape') cancelEditPaymentMethod();
-                          }}
-                          placeholder="—"
-                          className="settlement-day-input"
-                          title="Jour de clôture du cycle de facturation (1-31). Ex: 18 = les transactions du 18 au 17 sont comptabilisées le mois suivant."
-                        />
-                      </div>
-                      <div className="edit-field-group">
-                        <label className="edit-field-label">Compte lié</label>
-                        <select
-                          value={editLinkedPaymentMethodId || ''}
-                          onChange={(e) => setEditLinkedPaymentMethodId(e.target.value ? Number(e.target.value) : null)}
-                          className="linked-account-select"
-                          title="Compte dont le solde sera affecté par les transactions avec ce mode de paiement"
-                        >
-                          <option value="">Aucun</option>
-                          {accountPaymentMethods
-                            .filter((pm) => pm.id !== method.id) // Can't link to itself
-                            .map((pm) => (
-                              <option key={pm.id} value={pm.id}>
-                                {pm.name}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                      <div className="edit-actions">
-                        <button
-                          className="btn-icon save"
-                          onClick={() => handleUpdatePaymentMethod(method.id)}
-                          title="Sauvegarder"
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <polyline points="20 6 9 17 4 12" />
-                          </svg>
-                        </button>
-                        <button className="btn-icon cancel" onClick={cancelEditPaymentMethod} title="Annuler">
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <line x1="18" y1="6" x2="6" y2="18" />
-                            <line x1="6" y1="6" x2="18" y2="18" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="payment-method-reorder">
-                        <button
-                          className="btn-icon reorder"
-                          onClick={() => handleMovePaymentMethod(index, 'up')}
-                          disabled={index === 0 || isSubmitting}
-                          title="Monter"
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <path d="M18 15l-6-6-6 6" />
-                          </svg>
-                        </button>
-                        <button
-                          className="btn-icon reorder"
-                          onClick={() => handleMovePaymentMethod(index, 'down')}
-                          disabled={index === paymentMethods.length - 1 || isSubmitting}
-                          title="Descendre"
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <path d="M6 9l6 6 6-6" />
-                          </svg>
-                        </button>
-                      </div>
-                      <span className="payment-method-name">
-                        {method.name}
-                        {method.settlementDay && (
-                          <span className="settlement-day-badge" title={`Clôture le ${method.settlementDay} du mois`}>
-                            J{method.settlementDay}
-                          </span>
-                        )}
-                        {method.linkedPaymentMethodId && (
-                          <span
-                            className="linked-account-badge"
-                            title={`Lié à : ${paymentMethods.find((pm) => pm.id === method.linkedPaymentMethodId)?.name || 'Inconnu'}`}
-                          >
-                            → {paymentMethods.find((pm) => pm.id === method.linkedPaymentMethodId)?.name || '?'}
-                          </span>
-                        )}
-                      </span>
-                      <label className="account-toggle" title="Activer comme compte">
-                        <input
-                          type="checkbox"
-                          checked={method.isAccount}
-                          onChange={() => handleTogglePaymentMethodAccount(method.id, method.isAccount)}
-                          disabled={isSubmitting}
-                        />
-                        <span className="toggle-slider"></span>
-                        <span className="toggle-label">Compte</span>
-                      </label>
-                      <div className="payment-method-actions">
-                        <button
-                          className="btn-icon edit"
-                          onClick={() => startEditPaymentMethod(method)}
-                          title="Modifier"
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                          </svg>
-                        </button>
-                        <button
-                          className="btn-icon delete"
-                          onClick={() => handleDeletePaymentMethod(method.id)}
-                          title="Supprimer"
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          </svg>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-
-          <form onSubmit={handleCreatePaymentMethod} className="create-form payment-method-form">
-            <div className="form-row">
-              <input
-                type="text"
-                placeholder="Ajouter un moyen de paiement..."
-                value={newPaymentMethod}
-                onChange={(e) => setNewPaymentMethod(e.target.value)}
-                className="form-input"
-              />
-              <button type="submit" className="btn-primary" disabled={!newPaymentMethod.trim() || isSubmitting}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                Ajouter
-              </button>
-            </div>
-          </form>
-        </div>
+        {activeTab === 'categories' && renderCategoriesTab()}
+        {activeTab === 'accounts' && renderAccountsTab()}
+        {activeTab === 'preferences' && renderPreferencesTab()}
       </div>
     </div>
   );
