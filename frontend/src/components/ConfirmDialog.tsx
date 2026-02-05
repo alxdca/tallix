@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useI18n } from '../contexts/I18nContext';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -15,14 +16,18 @@ export default function ConfirmDialog({
   isOpen,
   title,
   message,
-  confirmLabel = 'Confirmer',
-  cancelLabel = 'Annuler',
+  confirmLabel,
+  cancelLabel,
   variant = 'danger',
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const { t } = useI18n();
+
+  const resolvedConfirmLabel = confirmLabel || t('common.confirm');
+  const resolvedCancelLabel = cancelLabel || t('common.cancel');
 
   // Focus trap and escape key handling
   useEffect(() => {
@@ -86,7 +91,7 @@ export default function ConfirmDialog({
         </p>
         <div className="confirm-dialog-actions">
           <button type="button" className="confirm-dialog-btn cancel" onClick={onCancel}>
-            {cancelLabel}
+            {resolvedCancelLabel}
           </button>
           <button
             type="button"
@@ -94,7 +99,7 @@ export default function ConfirmDialog({
             onClick={onConfirm}
             ref={confirmButtonRef}
           >
-            {confirmLabel}
+            {resolvedConfirmLabel}
           </button>
         </div>
       </div>

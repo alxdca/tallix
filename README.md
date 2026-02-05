@@ -17,16 +17,60 @@ A personal budgeting application for tracking income, expenses, savings, and acc
 - **Transfers** - Record money transfers between accounts
 - **Spreadsheet Import** - Paste data from Excel/Sheets with configurable column mapping
 - **PDF Import** - Import transactions from bank statement PDFs with optional category suggestions
-- **LLM Classification (optional)** - DeepSeek-powered PDF extraction + classification and batch classification for imported transactions, with language and country context
+- **AI-Powered Import (optional)** - DeepSeek LLM integration for intelligent transaction processing:
+  - **PDF Smart Import** - Extracts transactions from raw PDF text with automatic issuer detection (identifies bank/card from document header/footer and applies to all transactions)
+  - **Batch Classification** - Classifies multiple transactions in parallel (categories, descriptions, third parties, and payment methods per transaction)
+  - **Language & Context Aware** - Uses user's language and country for accurate merchant and category detection
+  - **Parallel Processing** - Processes up to 6 batches concurrently for fast classification of large imports
 - **Multi-user Authentication** - Email/password auth, per-user profile (name, language, country), settings, and payment methods (JWT-protected APIs)
 - **Settlement Days** - Configure payment method billing cycles for accurate monthly accounting
 - **Linked Accounts** - Link payment methods to their funding accounts
+
+## AI-Powered Transaction Processing
+
+The application includes optional AI-powered features using DeepSeek's LLM for intelligent transaction processing. Two workflows are available depending on your import source:
+
+### PDF Smart Import
+
+Optimized for bank statement PDFs where all transactions share the same payment method:
+
+1. **Document Analysis** - Extracts raw text from PDF
+2. **Issuer Detection** - Identifies the bank/card issuer from document headers/footers (e.g., "Cembra", "UBS")
+3. **Payment Method Matching** - Matches issuer to your payment methods by name and institution
+4. **Transaction Extraction** - Extracts date, amount, merchant, and description for all transactions
+5. **Category Classification** - Suggests categories based on merchant type and your existing budget structure
+
+**Result**: All transactions automatically get the detected payment method applied. One detection covers the entire document.
+
+### Batch Classification
+
+For spreadsheet imports or reclassifying existing transactions where each transaction may have a different payment method:
+
+- **Processes 25 transactions per batch** with up to 6 batches running in parallel
+- **Classifies per transaction**:
+  - Category (based on merchant and your budget structure)
+  - Payment method (matched from `rawPaymentMethod` column data)
+  - Description (cleaned and formatted in your language)
+  - Third party (merchant name extraction)
+- **Uses context**:
+  - Known third parties for consistency
+  - User's language for description formatting
+  - User's country for merchant identification
+
+**Result**: Each transaction gets individually matched payment method, perfect for mixed spreadsheet data.
+
+### Configuration
+
+Set `DEEPSEEK_API_KEY` in `backend/.env` to enable AI features. Optional settings:
+- `DEEPSEEK_API_URL` - Custom API endpoint (default: https://api.deepseek.com/v1)
+- `LOG_LEVEL` - Set to `debug` for detailed LLM request/response logging
 
 ## Tech Stack
 
 - **Frontend**: React 18, TypeScript, Vite
 - **Backend**: Express.js, TypeScript, Pino (logging)
 - **Database**: PostgreSQL 16, Drizzle ORM
+- **AI**: DeepSeek LLM (optional, for smart import)
 - **Package Manager**: pnpm (workspaces)
 
 ## Prerequisites
@@ -197,11 +241,41 @@ All endpoints below (except `/api/auth/*`) require a `Bearer` token.
 - `DELETE /api/settings/:key` - Delete a setting
 
 ### Import
-- `POST /api/import/pdf` - Parse PDF bank statement
-- `POST /api/import/pdf-llm` - Extract + classify from PDF with LLM
-- `GET /api/import/llm-status` - Check if LLM classification is available
-- `POST /api/import/classify` - Classify transactions with LLM
-- `POST /api/import/bulk` - Bulk create transactions
+- `POST /api/import/pdf` - Parse PDF bank statement (basic text extraction)
+- `POST /api/import/pdf-llm` - Smart PDF import with AI extraction + classification
+  - Detects payment method from document issuer
+  - Extracts and classifies all transactions
+  - Returns transactions with categories, payment methods, and cleaned descriptions
+- `GET /api/import/llm-status` - Check if AI classification is available
+- `POST /api/import/classify` - Batch classify transactions with AI
+  - Processes transactions in parallel batches
+  - Returns categories, descriptions, third parties, payment methods, and confidence scores
+  - Matches payment methods individually per transaction (from rawPaymentMethod field or patterns)
+- `POST /api/import/bulk` - Bulk create transactions from import preview
+
+## Recent Improvements
+
+### AI Classification Enhancements
+
+**Smart Payment Method Detection**
+- PDF imports: Document-level detection (one issuer for all transactions)
+- Spreadsheet imports: Transaction-level matching (from raw payment method column)
+- Full details returned: ID, name, and institution for proper display
+
+**Enhanced Logging & Debugging**
+- Comprehensive logging for payment method detection
+- Track which payment methods the LLM identifies and whether they're accepted
+- Raw LLM response logging (first 1000 chars) for troubleshooting
+
+**Improved UX**
+- Payment methods display correctly in import preview with "Name (Institution)" format
+- Fixed payment method application from PDF extractions
+- Consistent data structure across PDF and spreadsheet workflows
+
+**Token Efficiency**
+- Compact JSON formats for categories and responses
+- PDF extraction: Single issuer detection per document
+- Classification: Direct matching from raw data (no redundant detection)
 
 ## License
 

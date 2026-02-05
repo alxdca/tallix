@@ -31,7 +31,6 @@ export const budgets = pgTable('budgets', {
   userId: uuid('user_id')
     .references(() => users.id, { onDelete: 'cascade' })
     .notNull(),
-  name: varchar('name', { length: 100 }).notNull(),
   description: varchar('description', { length: 500 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -182,9 +181,9 @@ export const paymentMethods = pgTable('payment_methods', {
   sortOrder: integer('sort_order').notNull().default(0),
   // Is this payment method a trackable account (shows in Accounts view)
   isAccount: boolean('is_account').notNull().default(false),
-  // Is this a savings account (Livret A, PEL, etc.)
+  // Is this a savings account (e.g., money market, term deposit)
   isSavingsAccount: boolean('is_savings_account').notNull().default(false),
-  // Savings type: 'epargne' | 'prevoyance' | 'investissements' | null
+  // Savings type stored in the database
   savingsType: varchar('savings_type', { length: 20 }),
   // Settlement day: day of month when billing cycle starts (1-31)
   // null means no threshold - use transaction date's month

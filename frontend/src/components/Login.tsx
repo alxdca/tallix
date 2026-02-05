@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useI18n } from '../contexts/I18nContext';
+import { getErrorMessage } from '../utils/errorMessages';
 
 export default function Login() {
   const { login, register } = useAuth();
+  const { t } = useI18n();
   const [isRegister, setIsRegister] = useState(false);
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [email, setEmail] = useState('');
@@ -42,7 +45,7 @@ export default function Login() {
     try {
       if (isRegister) {
         if (password !== confirmPassword) {
-          setError('Les mots de passe ne correspondent pas');
+          setError(t('login.passwordMismatch'));
           setIsLoading(false);
           return;
         }
@@ -51,7 +54,7 @@ export default function Login() {
         await login(email, password);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(getErrorMessage(err, t));
     } finally {
       setIsLoading(false);
     }
@@ -63,50 +66,46 @@ export default function Login() {
         <div className="login-header">
           <h1 className="login-logo">Tallix</h1>
           <p className="login-subtitle">
-            {needsSetup
-              ? "Création du compte administrateur"
-              : isRegister
-                ? 'Créer un compte'
-                : 'Connexion à votre compte'}
+            {needsSetup ? t('login.adminSetup') : isRegister ? t('login.createAccount') : t('login.signIn')}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
           {isRegister && (
             <div className="form-group">
-              <label htmlFor="name">Nom</label>
+              <label htmlFor="name">{t('login.name')}</label>
               <input
                 type="text"
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Votre nom"
+                placeholder={t('login.yourName')}
                 autoComplete="name"
               />
             </div>
           )}
 
           <div className="form-group">
-            <label htmlFor="email">Email</label>
+            <label htmlFor="email">{t('login.email')}</label>
             <input
               type="email"
               id="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="vous@exemple.com"
+              placeholder={t('login.emailPlaceholder')}
               required
               autoComplete="email"
             />
           </div>
 
           <div className="form-group">
-            <label htmlFor="password">Mot de passe</label>
+            <label htmlFor="password">{t('login.password')}</label>
             <input
               type="password"
               id="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={isRegister ? '8 caractères minimum' : 'Votre mot de passe'}
+              placeholder={isRegister ? t('login.passwordMin') : t('login.passwordPlaceholder')}
               required
               minLength={isRegister ? 8 : undefined}
               autoComplete={isRegister ? 'new-password' : 'current-password'}
@@ -115,13 +114,13 @@ export default function Login() {
 
           {isRegister && (
             <div className="form-group">
-              <label htmlFor="confirmPassword">Confirmer le mot de passe</label>
+              <label htmlFor="confirmPassword">{t('login.confirmPassword')}</label>
               <input
                 type="password"
                 id="confirmPassword"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirmez le mot de passe"
+                placeholder={t('login.confirmPasswordPlaceholder')}
                 required
                 minLength={8}
                 autoComplete="new-password"
@@ -132,7 +131,7 @@ export default function Login() {
           {error && <div className="login-error">{error}</div>}
 
           <button type="submit" className="login-button" disabled={isLoading}>
-            {isLoading ? 'Chargement...' : isRegister ? 'Créer un compte' : 'Se connecter'}
+            {isLoading ? t('login.loading') : isRegister ? t('login.signUp') : t('login.signInAction')}
           </button>
         </form>
 
@@ -146,7 +145,7 @@ export default function Login() {
                 setError('');
               }}
             >
-              {isRegister ? 'Déjà un compte ? Se connecter' : "Pas encore de compte ? S'inscrire"}
+              {isRegister ? t('login.alreadyHaveAccount') : t('login.noAccount')}
             </button>
           </div>
         )}

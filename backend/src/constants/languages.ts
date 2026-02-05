@@ -1,7 +1,7 @@
 // Supported languages configuration
 export const SUPPORTED_LANGUAGES = [
   { code: 'en', label: 'English', llmName: 'English' },
-  { code: 'fr', label: 'Français', llmName: 'French' },
+  { code: 'fr', label: 'French', llmName: 'French' },
 ] as const;
 
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]['code'];

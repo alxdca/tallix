@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useI18n } from '../contexts/I18nContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import type { BudgetSection, MonthlyValue } from '../types';
@@ -36,19 +37,30 @@ function getVarianceClass(budget: number, actual: number, moreIsGood: boolean): 
 }
 
 // Build tooltip content
-function buildTooltip(budget: number, actual: number, formatCurrency: (v: number, s?: boolean) => string): string {
+function buildTooltip(
+  budget: number,
+  actual: number,
+  formatCurrency: (v: number, s?: boolean) => string,
+  t: (key: string, params?: Record<string, any>) => string
+): string {
   if (actual === 0 && budget === 0) return '';
 
   const variance = actual - budget;
   const variancePercent = budget !== 0 ? ((variance / budget) * 100).toFixed(0) : '0';
   const sign = variance > 0 ? '+' : '';
 
-  return `Budget: ${formatCurrency(budget, true)}\nRéel: ${formatCurrency(actual, true)}\nÉcart: ${sign}${formatCurrency(variance, true)} (${sign}${variancePercent}%)`;
+  return t('spreadsheet.tooltip', {
+    budget: formatCurrency(budget, true),
+    actual: formatCurrency(actual, true),
+    variance: `${sign}${formatCurrency(variance, true)}`,
+    percent: `${sign}${variancePercent}%`,
+  });
 }
 
 export default function BudgetSpreadsheet({ sections, months, paymentAccountsInitialBalance }: BudgetSpreadsheetProps) {
   const formatCurrency = useFormatCurrency();
   const { showBudgetBelowActual } = useSettings();
+  const { t } = useI18n();
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(new Set());
 
@@ -82,7 +94,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
 
     // Show tooltip for current/past months with actual or budget data
     const showTooltip = !isFutureMonth && (hasActual || showZeroWithBudgetHint) && budget !== 0;
-    const tooltip = showTooltip ? buildTooltip(budget, actual, formatCurrency) : '';
+    const tooltip = showTooltip ? buildTooltip(budget, actual, formatCurrency, t) : '';
 
     // Show budget hint below when:
     // 1. Setting is enabled and has actual with budget, OR
@@ -256,9 +268,9 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
         <table className="spreadsheet single-column">
           <thead>
             <tr>
-              <th className="col-category">Catégorie</th>
+              <th className="col-category">{t('spreadsheet.category')}</th>
               <th className="col-annual" colSpan={2}>
-                Annuel
+                {t('spreadsheet.annual')}
               </th>
               {months.map((month) => (
                 <th key={month} className="col-month">
@@ -268,11 +280,11 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
             </tr>
             <tr className="sub-header">
               <th></th>
-              <th className="budget">Budget</th>
-              <th className="actual">Réel</th>
+              <th className="budget">{t('spreadsheet.budget')}</th>
+              <th className="actual">{t('spreadsheet.actual')}</th>
               {months.map((month, i) => (
                 <th key={month} className={i <= maxActualMonth ? 'actual' : 'budget'}>
-                  {i <= maxActualMonth ? 'R' : 'B'}
+                  {i <= maxActualMonth ? t('spreadsheet.actualShort') : t('spreadsheet.budgetShort')}
                 </th>
               ))}
             </tr>
@@ -281,17 +293,17 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
             {/* Funds Summary Section */}
             <tr className="funds-summary-header">
               <td className="category-name" colSpan={3 + months.length}>
-                Fonds Disponibles (Comptes de paiement)
+                {t('spreadsheet.fundsAvailable')}
               </td>
             </tr>
             <tr className="funds-summary-row start-of-month">
-              <td className="category-name">Début du mois</td>
+              <td className="category-name">{t('spreadsheet.startOfMonth')}</td>
               <td className="cell budget">–</td>
               <td className="cell actual">–</td>
               {fundsSummary.startOfMonth.map((m, i) => {
                 const isFuture = i > maxActualMonth;
                 const value = isFuture ? m.budget : m.actual;
-                const tooltip = !isFuture ? buildTooltip(m.budget, m.actual, formatCurrency) : '';
+                const tooltip = !isFuture ? buildTooltip(m.budget, m.actual, formatCurrency, t) : '';
                 return (
                   <td
                     key={i}
@@ -304,7 +316,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
               })}
             </tr>
             <tr className="funds-summary-row end-of-month">
-              <td className="category-name">Fin du mois</td>
+              <td className="category-name">{t('spreadsheet.endOfMonth')}</td>
               <td className="cell budget">–</td>
               <td className="cell actual">–</td>
               {fundsSummary.endOfMonth.map((m, i) => {
@@ -323,7 +335,7 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
                     {showExpectedHint ? (
                       <div className="cell-content">
                         <span className="cell-main-value">{formatCurrency(value, true)}</span>
-                        <span className="cell-expected-hint" title="Fin de mois estimée">
+                        <span className="cell-expected-hint" title={t('spreadsheet.estimatedEndOfMonth')}>
                           → {formatCurrency(expectedValue, true)}
                         </span>
                       </div>

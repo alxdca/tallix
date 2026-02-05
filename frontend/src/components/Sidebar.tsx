@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useI18n } from '../contexts/I18nContext';
 
 interface SidebarProps {
   activeView: string;
@@ -9,6 +10,7 @@ interface SidebarProps {
 
 export default function Sidebar({ activeView, onViewChange, currentYear }: SidebarProps) {
   const { user, logout } = useAuth();
+  const { t } = useI18n();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -66,7 +68,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
                 <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
               </svg>
             </span>
-            <span className="nav-label">Transactions</span>
+            <span className="nav-label">{t('nav.transactions')}</span>
           </button>
 
           {/* Sub-item: Accounts */}
@@ -80,7 +82,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
                 <line x1="2" y1="10" x2="22" y2="10" />
               </svg>
             </span>
-            <span className="nav-label">Comptes</span>
+            <span className="nav-label">{t('nav.accounts')}</span>
           </button>
 
           {/* Sub-item: Budget Planning */}
@@ -96,7 +98,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
                 <path d="M9 16h6" />
               </svg>
             </span>
-            <span className="nav-label">Planification</span>
+            <span className="nav-label">{t('nav.planning')}</span>
           </button>
         </div>
 
@@ -112,7 +114,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
               <line x1="10" y1="12" x2="14" y2="12" />
             </svg>
           </span>
-          <span className="nav-label">Archive</span>
+          <span className="nav-label">{t('nav.archive')}</span>
         </button>
 
         {/* Settings */}
@@ -126,7 +128,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </span>
-          <span className="nav-label">Paramètres</span>
+          <span className="nav-label">{t('nav.settings')}</span>
         </button>
       </nav>
 
@@ -161,7 +163,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                     <circle cx="12" cy="7" r="4" />
                   </svg>
-                  Mon compte
+                  {t('nav.myAccount')}
                 </button>
                 <button
                   className="user-menu-item danger"
@@ -175,7 +177,7 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
                     <polyline points="16 17 21 12 16 7" />
                     <line x1="21" y1="12" x2="9" y2="12" />
                   </svg>
-                  Se déconnecter
+                  {t('nav.logout')}
                 </button>
               </div>
             )}

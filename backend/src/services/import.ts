@@ -15,7 +15,7 @@ export interface ParsedTransaction {
 
 // Category keyword mappings
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  // Groceries / Alimentation
+  // Groceries
   alimentation: [
     'migros',
     'coop',
@@ -427,7 +427,7 @@ export function extractThirdParty(description: string): { thirdParty: string; cl
     }
   }
 
-  // Try to extract from patterns like "chez X" or "à X"
+  // Try to extract from patterns like "at X" or "from X"
   if (!thirdParty) {
     const thirdPartyMatch = cleanDescription.match(/(?:chez|à|at|de|from|pour|to)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s&'.-]+)/i);
     if (thirdPartyMatch) {

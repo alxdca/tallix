@@ -19,9 +19,11 @@ import {
   updateItem,
   updatePaymentMethod,
 } from '../api';
+import { useI18n } from '../contexts/I18nContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import type { BudgetGroup, BudgetItem } from '../types';
+import { getErrorMessage } from '../utils/errorMessages';
 import { logger } from '../utils/logger';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -43,6 +45,7 @@ function slugify(text: string): string {
 type SettingsTab = 'categories' | 'accounts' | 'preferences';
 
 export default function Settings({ yearId, groups, onDataChanged }: SettingsProps) {
+  const { t } = useI18n();
   const { theme, decimalSeparator, showBudgetBelowActual, toggleTheme, setDecimalSeparator, setShowBudgetBelowActual } =
     useSettings();
   const { dialogProps, confirm } = useConfirmDialog();
@@ -92,17 +95,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     loadPaymentMethods();
   }, [loadPaymentMethods]);
 
-  // Translate API error messages to French
-  const translateError = (message: string): string => {
-    // Match "Payment method already exists: "Name""
-    const duplicateMatch = message.match(/^Payment method already exists: "(.+)"$/);
-    if (duplicateMatch) {
-      return `Ce compte ou moyen de paiement existe déjà : "${duplicateMatch[1]}"`;
-    }
-    // Default fallback
-    return 'Une erreur est survenue';
-  };
-
   const handleCreatePaymentMethod = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPaymentMethod.trim() || isSubmitting) return;
@@ -120,11 +112,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       await loadPaymentMethods();
     } catch (error) {
       logger.error('Failed to create payment method', error);
-      if (error instanceof Error) {
-        setPaymentMethodError(translateError(error.message));
-      } else {
-        setPaymentMethodError('Erreur lors de la création');
-      }
+      setPaymentMethodError(getErrorMessage(error, t));
     } finally {
       setIsSubmitting(false);
     }
@@ -158,11 +146,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       await loadPaymentMethods();
     } catch (error) {
       logger.error('Failed to update payment method', error);
-      if (error instanceof Error) {
-        setPaymentMethodError(translateError(error.message));
-      } else {
-        setPaymentMethodError('Erreur lors de la mise à jour');
-      }
+      setPaymentMethodError(getErrorMessage(error, t));
     } finally {
       setIsSubmitting(false);
     }
@@ -172,9 +156,9 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     if (isSubmitting) return;
 
     const confirmed = await confirm({
-      title: 'Supprimer le moyen de paiement',
-      message: 'Êtes-vous sûr de vouloir supprimer ce moyen de paiement ?',
-      confirmLabel: 'Supprimer',
+      title: t('settings.deletePaymentMethodTitle'),
+      message: t('settings.confirmDeletePaymentMethod'),
+      confirmLabel: t('common.delete'),
       variant: 'danger',
     });
     if (!confirmed) return;
@@ -355,9 +339,9 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     if (isSubmitting) return;
 
     const confirmed = await confirm({
-      title: 'Supprimer le groupe',
-      message: 'Êtes-vous sûr de vouloir supprimer ce groupe et tous ses éléments ?',
-      confirmLabel: 'Supprimer',
+      title: t('settings.confirmDeleteItemTitle'),
+      message: t('settings.confirmDeleteGroup'),
+      confirmLabel: t('common.delete'),
       variant: 'danger',
     });
     if (!confirmed) return;
@@ -421,9 +405,9 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     if (isSubmitting) return;
 
     const confirmed = await confirm({
-      title: "Supprimer l'élément",
-      message: 'Êtes-vous sûr de vouloir supprimer cet élément ?',
-      confirmLabel: 'Supprimer',
+      title: t('settings.confirmDeleteItemTitle'),
+      message: t('settings.confirmDeleteItem'),
+      confirmLabel: t('common.delete'),
       variant: 'danger',
     });
     if (!confirmed) return;
@@ -632,12 +616,12 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
             // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
             autoFocus
           />
-          <button className="btn-icon save" onClick={() => handleUpdateItem(item.id)} title="Sauvegarder">
+          <button className="btn-icon save" onClick={() => handleUpdateItem(item.id)} title={t('common.save')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="20 6 9 17 4 12" />
             </svg>
           </button>
-          <button className="btn-icon cancel" onClick={cancelEdit} title="Annuler">
+          <button className="btn-icon cancel" onClick={cancelEdit} title={t('common.cancel')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -651,7 +635,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
               className="btn-icon reorder"
               onClick={() => handleMoveItem(groupItems, itemIndex, 'up')}
               disabled={itemIndex === 0 || isSubmitting}
-              title="Monter"
+              title={t('common.moveUp')}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 15l-6-6-6 6" />
@@ -661,7 +645,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
               className="btn-icon reorder"
               onClick={() => handleMoveItem(groupItems, itemIndex, 'down')}
               disabled={itemIndex === groupItems.length - 1 || isSubmitting}
-              title="Descendre"
+              title={t('common.moveDown')}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M6 9l6 6 6-6" />
@@ -680,13 +664,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
           </div>
           <span className="item-name">{item.name}</span>
           <div className="item-actions">
-            <button className="btn-icon edit" onClick={() => startEditItem(item)} title="Modifier">
+            <button className="btn-icon edit" onClick={() => startEditItem(item)} title={t('common.edit')}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
               </svg>
             </button>
-            <button className="btn-icon delete" onClick={() => handleDeleteItem(item.id)} title="Supprimer">
+            <button className="btn-icon delete" onClick={() => handleDeleteItem(item.id)} title={t('common.delete')}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="3 6 5 6 21 6" />
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
@@ -705,7 +689,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
           <span className={`section-indicator ${type}`}></span>
           {title}
         </h3>
-        <button className="btn-icon-add" onClick={() => startAddGroup(type)} title="Ajouter un groupe">
+        <button className="btn-icon-add" onClick={() => startAddGroup(type)} title={t('settings.addGroup')}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
@@ -718,7 +702,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
         <div className="inline-add-form group-add-form">
           <input
             type="text"
-            placeholder="Nom du groupe..."
+            placeholder={t('settings.groupPlaceholder')}
             value={newGroupName}
             onChange={(e) => setNewGroupName(e.target.value)}
             onKeyDown={(e) => {
@@ -730,13 +714,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
             className="btn-icon save"
             onClick={() => handleCreateGroup(type)}
             disabled={!newGroupName.trim() || isSubmitting}
-            title="Ajouter"
+            title={t('common.add')}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="20 6 9 17 4 12" />
             </svg>
           </button>
-          <button className="btn-icon cancel" onClick={cancelAddGroup} title="Annuler">
+          <button className="btn-icon cancel" onClick={cancelAddGroup} title={t('common.cancel')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -746,7 +730,9 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       )}
 
       <div className="groups-list">
-        {sectionGroups.length === 0 && addingGroupTo !== type && <p className="empty-message">Aucun groupe créé</p>}
+        {sectionGroups.length === 0 && addingGroupTo !== type && (
+          <p className="empty-message">{t('settings.emptyGroups')}</p>
+        )}
         {sectionGroups.map((group, index) => (
           <div
             key={group.id}
@@ -769,12 +755,12 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                     // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
                     autoFocus
                   />
-                  <button className="btn-icon save" onClick={() => handleUpdateGroup(group.id)} title="Sauvegarder">
+                  <button className="btn-icon save" onClick={() => handleUpdateGroup(group.id)} title={t('common.save')}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
                   </button>
-                  <button className="btn-icon cancel" onClick={cancelEdit} title="Annuler">
+                  <button className="btn-icon cancel" onClick={cancelEdit} title={t('common.cancel')}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <line x1="18" y1="6" x2="6" y2="18" />
                       <line x1="6" y1="6" x2="18" y2="18" />
@@ -788,7 +774,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       className="btn-icon reorder"
                       onClick={() => handleMoveGroup(sectionGroups, index, 'up')}
                       disabled={index === 0 || isSubmitting}
-                      title="Monter"
+                      title={t('common.moveUp')}
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M18 15l-6-6-6 6" />
@@ -798,7 +784,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       className="btn-icon reorder"
                       onClick={() => handleMoveGroup(sectionGroups, index, 'down')}
                       disabled={index === sectionGroups.length - 1 || isSubmitting}
-                      title="Descendre"
+                      title={t('common.moveDown')}
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M6 9l6 6 6-6" />
@@ -807,19 +793,19 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                   </div>
                   <span className="group-name">{group.name}</span>
                   <div className="group-actions">
-                    <button className="btn-icon add" onClick={() => startAddItem(group.id)} title="Ajouter un élément">
+                    <button className="btn-icon add" onClick={() => startAddItem(group.id)} title={t('settings.addItem')}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <line x1="12" y1="5" x2="12" y2="19" />
                         <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
                     </button>
-                    <button className="btn-icon edit" onClick={() => startEditGroup(group)} title="Modifier">
+                    <button className="btn-icon edit" onClick={() => startEditGroup(group)} title={t('common.edit')}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                       </svg>
                     </button>
-                    <button className="btn-icon delete" onClick={() => handleDeleteGroup(group.id)} title="Supprimer">
+                    <button className="btn-icon delete" onClick={() => handleDeleteGroup(group.id)} title={t('common.delete')}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="3 6 5 6 21 6" />
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
@@ -832,7 +818,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
             <div className="items-list">
               {group.items.length === 0 && addingItemTo !== group.id && (
-                <p className="empty-items drop-hint">Glissez des éléments ici</p>
+                <p className="empty-items drop-hint">{t('settings.dropHere')}</p>
               )}
               {group.items.map((item, itemIndex) => renderItem(item, group.items, itemIndex, group.id))}
 
@@ -841,7 +827,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                 <div className="inline-add-form">
                   <input
                     type="text"
-                    placeholder="Nom de l'élément..."
+                    placeholder={t('settings.itemPlaceholder')}
                     value={newItemName}
                     onChange={(e) => setNewItemName(e.target.value)}
                     onKeyDown={(e) => {
@@ -853,13 +839,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                     className="btn-icon save"
                     onClick={() => handleCreateItem(group.id)}
                     disabled={!newItemName.trim() || isSubmitting}
-                    title="Ajouter"
+                    title={t('common.add')}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
                   </button>
-                  <button className="btn-icon cancel" onClick={cancelAddItem} title="Annuler">
+                  <button className="btn-icon cancel" onClick={cancelAddItem} title={t('common.cancel')}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <line x1="18" y1="6" x2="6" y2="18" />
                       <line x1="6" y1="6" x2="18" y2="18" />
@@ -878,8 +864,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     <>
       {/* Groups and Items List */}
       <div className="settings-grid">
-        {renderGroupSection('Revenus', incomeGroups, 'income')}
-        {renderGroupSection('Dépenses', expenseGroups, 'expense')}
+        {renderGroupSection(t('budget.income'), incomeGroups, 'income')}
+        {renderGroupSection(t('budget.expenses'), expenseGroups, 'expense')}
       </div>
     </>
   );
@@ -888,19 +874,19 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     <div className="payment-methods-section">
       <h3 className="section-title">
         <span className="section-indicator payment"></span>
-        Comptes & Moyens de paiement
+        {t('settings.paymentMethodsTitle')}
       </h3>
 
       <div className="payment-methods-list">
         {paymentMethods.length === 0 ? (
-          <p className="empty-message">Aucun moyen de paiement créé</p>
+          <p className="empty-message">{t('settings.emptyPaymentMethods')}</p>
         ) : (
           paymentMethods.map((method, index) => (
             <div key={method.id} className="payment-method-item">
               {editingPaymentMethod === method.id ? (
                 <div className="edit-form payment-method-edit-form">
                   <div className="edit-field-group name-field">
-                    <label className="edit-field-label">Nom</label>
+                    <label className="edit-field-label">{t('settings.nameLabel')}</label>
                     <input
                       type="text"
                       value={editPaymentMethodName}
@@ -909,13 +895,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                         if (e.key === 'Enter') handleUpdatePaymentMethod(method.id);
                         if (e.key === 'Escape') cancelEditPaymentMethod();
                       }}
-                      placeholder="Nom"
+                      placeholder={t('settings.nameLabel')}
                       // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
                       autoFocus
                     />
                   </div>
                   <div className="edit-field-group institution-field">
-                    <label className="edit-field-label">Institution</label>
+                    <label className="edit-field-label">{t('settings.institutionLabel')}</label>
                     <input
                       type="text"
                       value={editInstitution}
@@ -924,11 +910,11 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                         if (e.key === 'Enter') handleUpdatePaymentMethod(method.id);
                         if (e.key === 'Escape') cancelEditPaymentMethod();
                       }}
-                      placeholder="Banque, émetteur..."
+                      placeholder={t('settings.institutionPlaceholder')}
                     />
                   </div>
                   <div className="edit-field-group">
-                    <label className="edit-field-label">Clôture</label>
+                    <label className="edit-field-label">{t('settings.settlementDay')}</label>
                     <input
                       type="number"
                       min="1"
@@ -941,18 +927,18 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       }}
                       placeholder="—"
                       className="settlement-day-input"
-                      title="Jour de clôture du cycle de facturation (1-31). Ex: 18 = les transactions du 18 au 17 sont comptabilisées le mois suivant."
+                      title={t('settings.settlementDayHelp')}
                     />
                   </div>
                   <div className="edit-field-group">
-                    <label className="edit-field-label">Compte lié</label>
+                    <label className="edit-field-label">{t('settings.linkedAccount')}</label>
                     <select
                       value={editLinkedPaymentMethodId || ''}
                       onChange={(e) => setEditLinkedPaymentMethodId(e.target.value ? Number(e.target.value) : null)}
                       className="linked-account-select"
-                      title="Compte dont le solde sera affecté par les transactions avec ce mode de paiement"
+                      title={t('settings.linkedAccountHelp')}
                     >
-                      <option value="">Aucun</option>
+                      <option value="">{t('settings.linkedAccountNone')}</option>
                       {accountPaymentMethods
                         .filter((pm) => pm.id !== method.id)
                         .map((pm) => (
@@ -966,13 +952,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                     <button
                       className="btn-icon save"
                       onClick={() => handleUpdatePaymentMethod(method.id)}
-                      title="Sauvegarder"
+                      title={t('common.save')}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     </button>
-                    <button className="btn-icon cancel" onClick={cancelEditPaymentMethod} title="Annuler">
+                    <button className="btn-icon cancel" onClick={cancelEditPaymentMethod} title={t('common.cancel')}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <line x1="18" y1="6" x2="6" y2="18" />
                         <line x1="6" y1="6" x2="18" y2="18" />
@@ -987,7 +973,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       className="btn-icon reorder"
                       onClick={() => handleMovePaymentMethod(index, 'up')}
                       disabled={index === 0 || isSubmitting}
-                      title="Monter"
+                      title={t('common.moveUp')}
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M18 15l-6-6-6 6" />
@@ -997,7 +983,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       className="btn-icon reorder"
                       onClick={() => handleMovePaymentMethod(index, 'down')}
                       disabled={index === paymentMethods.length - 1 || isSubmitting}
-                      title="Descendre"
+                      title={t('common.moveDown')}
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M6 9l6 6 6-6" />
@@ -1007,25 +993,32 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                   <span className="payment-method-name">
                     {method.name}
                     {method.institution && (
-                      <span className="institution-badge" title={`Institution: ${method.institution}`}>
+                      <span className="institution-badge" title={`${t('settings.institutionLabel')}: ${method.institution}`}>
                         {method.institution}
                       </span>
                     )}
                     {method.settlementDay && (
-                      <span className="settlement-day-badge" title={`Clôture le ${method.settlementDay} du mois`}>
+                      <span
+                        className="settlement-day-badge"
+                        title={t('settings.settlementBadge', { day: method.settlementDay })}
+                      >
                         J{method.settlementDay}
                       </span>
                     )}
                     {method.linkedPaymentMethodId && (
                       <span
                         className="linked-account-badge"
-                        title={`Lié à : ${paymentMethods.find((pm) => pm.id === method.linkedPaymentMethodId)?.name || 'Inconnu'}`}
+                        title={t('settings.linkedTo', {
+                          name:
+                            paymentMethods.find((pm) => pm.id === method.linkedPaymentMethodId)?.name ||
+                            t('settings.linkedUnknown'),
+                        })}
                       >
                         → {paymentMethods.find((pm) => pm.id === method.linkedPaymentMethodId)?.name || '?'}
                       </span>
                     )}
                   </span>
-                  <label className="account-toggle" title="Activer comme compte">
+                  <label className="account-toggle" title={t('settings.activateAccount')}>
                     <input
                       type="checkbox"
                       checked={method.isAccount}
@@ -1033,9 +1026,9 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       disabled={isSubmitting}
                     />
                     <span className="toggle-slider"></span>
-                    <span className="toggle-label">Compte</span>
+                    <span className="toggle-label">{t('settings.accountLabel')}</span>
                   </label>
-                  <label className="account-toggle" title="Activer comme compte épargne">
+                  <label className="account-toggle" title={t('settings.activateSavings')}>
                     <input
                       type="checkbox"
                       checked={method.isSavingsAccount}
@@ -1043,7 +1036,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       disabled={isSubmitting}
                     />
                     <span className="toggle-slider"></span>
-                    <span className="toggle-label">Épargne</span>
+                    <span className="toggle-label">{t('settings.savingsLabel')}</span>
                   </label>
                   <select
                     className="savings-type-select"
@@ -1051,13 +1044,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                     onChange={(e) => handleChangeSavingsType(method.id, (e.target.value || null) as SavingsType | null)}
                     disabled={isSubmitting || !method.isSavingsAccount}
                   >
-                    <option value="">Type...</option>
-                    <option value="epargne">Épargne</option>
-                    <option value="prevoyance">Prévoyance</option>
-                    <option value="investissements">Investissements</option>
+                    <option value="">{t('settings.savingsTypePlaceholder')}</option>
+                    <option value="epargne">{t('settings.savingsType.epargne')}</option>
+                    <option value="prevoyance">{t('settings.savingsType.prevoyance')}</option>
+                    <option value="investissements">{t('settings.savingsType.investissements')}</option>
                   </select>
                   <div className="payment-method-actions">
-                    <button className="btn-icon edit" onClick={() => startEditPaymentMethod(method)} title="Modifier">
+                    <button className="btn-icon edit" onClick={() => startEditPaymentMethod(method)} title={t('common.edit')}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -1066,7 +1059,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                     <button
                       className="btn-icon delete"
                       onClick={() => handleDeletePaymentMethod(method.id)}
-                      title="Supprimer"
+                      title={t('common.delete')}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="3 6 5 6 21 6" />
@@ -1085,7 +1078,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
         <div className="form-row">
           <input
             type="text"
-            placeholder="Nom du moyen de paiement..."
+            placeholder={t('settings.paymentMethodNamePlaceholder')}
             value={newPaymentMethod}
             onChange={(e) => {
               setNewPaymentMethod(e.target.value);
@@ -1095,7 +1088,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
           />
           <input
             type="text"
-            placeholder="Institution (optionnel)"
+            placeholder={t('settings.institutionOptionalPlaceholder')}
             value={newPaymentMethodInstitution}
             onChange={(e) => {
               setNewPaymentMethodInstitution(e.target.value);
@@ -1108,7 +1101,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            Ajouter
+            {t('common.add')}
           </button>
         </div>
         {paymentMethodError && <div className="form-error">{paymentMethodError}</div>}
@@ -1120,11 +1113,11 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     <div className="appearance-section">
       <h3 className="section-title">
         <span className="section-indicator appearance"></span>
-        Apparence
+        {t('settings.appearance')}
       </h3>
       <div className="appearance-options">
         <div className="setting-row">
-          <span className="setting-label">Thème</span>
+          <span className="setting-label">{t('settings.theme')}</span>
           <div className="setting-buttons">
             <button
               type="button"
@@ -1134,7 +1127,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
               </svg>
-              Sombre
+              {t('settings.themeDark')}
             </button>
             <button
               type="button"
@@ -1152,31 +1145,31 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                 <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
                 <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
               </svg>
-              Clair
+              {t('settings.themeLight')}
             </button>
           </div>
         </div>
         <div className="setting-row">
-          <span className="setting-label">Séparateur décimal</span>
+          <span className="setting-label">{t('settings.decimalSeparator')}</span>
           <div className="setting-buttons">
             <button
               type="button"
               className={`setting-btn ${decimalSeparator === '.' ? 'active' : ''}`}
               onClick={() => setDecimalSeparator('.')}
             >
-              Point (1'234.56)
+              {t('settings.decimalPoint')}
             </button>
             <button
               type="button"
               className={`setting-btn ${decimalSeparator === ',' ? 'active' : ''}`}
               onClick={() => setDecimalSeparator(',')}
             >
-              Virgule (1'234,56)
+              {t('settings.decimalComma')}
             </button>
           </div>
         </div>
         <div className="setting-row">
-          <span className="setting-label">Afficher le budget sous le réel</span>
+          <span className="setting-label">{t('settings.showBudgetBelowActual')}</span>
           <label className="setting-toggle">
             <input
               type="checkbox"
@@ -1193,8 +1186,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   return (
     <div className="settings-container">
       <div className="settings-header">
-        <h2>Paramètres</h2>
-        <p>Gérez vos catégories, comptes et préférences</p>
+        <h2>{t('settings.title')}</h2>
+        <p>{t('settings.subtitle')}</p>
       </div>
 
       <div className="settings-tabs">
@@ -1206,7 +1199,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
-          Catégories
+          {t('settings.categories')}
         </button>
         <button
           type="button"
@@ -1217,7 +1210,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
             <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
             <line x1="1" y1="10" x2="23" y2="10" />
           </svg>
-          Comptes & Moyens de paiement
+          {t('settings.paymentMethodsTitle')}
         </button>
         <button
           type="button"
@@ -1228,7 +1221,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
-          Préférences
+          {t('settings.preferences')}
         </button>
       </div>
 

@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Line } from 'react-chartjs-2';
 import { type Account, fetchAccounts, setAccountBalance } from '../api';
+import { useI18n } from '../contexts/I18nContext';
 import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import { logger } from '../utils/logger';
 
@@ -50,6 +51,7 @@ function calculateTotals(accountList: Account[]): AccountTotals {
 
 export default function Accounts({ year, months, onDataChanged }: AccountsProps) {
   const formatCurrency = useFormatCurrency();
+  const { t } = useI18n();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingBalance, setEditingBalance] = useState<number | null>(null);
@@ -124,7 +126,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
   ];
 
   const chartData = useMemo(() => {
-    const labels = ['Initial', ...months.map((m) => m.substring(0, 3))];
+    const labels = [t('accounts.initial'), ...months.map((m) => m.substring(0, 3))];
 
     const datasets = accounts.map((account, index) => {
       const color = chartColors[index % chartColors.length];
@@ -144,7 +146,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
     if (accounts.length > 1) {
       const totalData = [overallTotals.initialBalance, ...overallTotals.monthlyBalances];
       datasets.push({
-        label: 'Total',
+        label: t('accounts.totalLabel'),
         data: totalData,
         borderColor: 'rgb(255, 255, 255)',
         backgroundColor: 'rgba(255, 255, 255, 0.1)',
@@ -156,7 +158,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
     }
 
     return { labels, datasets };
-  }, [accounts, months, overallTotals]);
+  }, [accounts, months, overallTotals, t]);
 
   const chartOptions = useMemo(
     () => ({
@@ -223,7 +225,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
     return (
       <div className="accounts-loading">
         <div className="loading-spinner" />
-        <p>Chargement des comptes...</p>
+        <p>{t('accounts.loading')}</p>
       </div>
     );
   }
@@ -238,8 +240,8 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
           <table className="accounts-table">
             <thead>
               <tr>
-                <th className="account-name-col">Compte</th>
-                <th className="account-initial-col">Solde initial</th>
+                <th className="account-name-col">{t('accounts.account')}</th>
+                <th className="account-initial-col">{t('accounts.initialBalance')}</th>
                 {months.map((month, i) => (
                   <th key={i} className="account-month-col">
                     {month.substring(0, 3)}
@@ -303,7 +305,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                         <span
                           className="balance-value editable"
                           onClick={() => startEditBalance(account)}
-                          title="Cliquer pour modifier"
+                          title={t('accounts.clickToEdit')}
                         >
                           {formatCurrency(account.initialBalance, true)}
                         </span>
@@ -328,7 +330,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
             </tbody>
             <tfoot>
               <tr className="total-row">
-                <td className="account-name total-label">Total {title.toLowerCase()}</td>
+                <td className="account-name total-label">{t('accounts.total', { title: title.toLowerCase() })}</td>
                 <td className="account-initial total-value">{formatCurrency(totals.initialBalance, true)}</td>
                 {totals.monthlyBalances.map((balance, i) => (
                   <td key={i} className={`account-month-cell total-value`}>
@@ -356,13 +358,13 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
 
     return (
       <div className="accounts-section overall-total">
-        <h3 className="accounts-section-title">Total général</h3>
+        <h3 className="accounts-section-title">{t('accounts.overallTotal')}</h3>
         <div className="accounts-table-container">
           <table className="accounts-table">
             <thead>
               <tr>
-                <th className="account-name-col">Patrimoine</th>
-                <th className="account-initial-col">Solde initial</th>
+                <th className="account-name-col">{t('accounts.netWorth')}</th>
+                <th className="account-initial-col">{t('accounts.initialBalance')}</th>
                 {months.map((month, i) => (
                   <th key={i} className="account-month-col">
                     {month.substring(0, 3)}
@@ -373,7 +375,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
             <tbody>
               {paymentAccounts.length > 0 && (
                 <tr className="subtotal-row">
-                  <td className="account-name">Comptes de paiement</td>
+                  <td className="account-name">{t('accounts.paymentAccounts')}</td>
                   <td className="account-initial">{formatCurrency(paymentTotals.initialBalance, true)}</td>
                   {paymentTotals.monthlyBalances.map((balance, i) => (
                     <td key={i} className="account-month-cell">
@@ -392,7 +394,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
               )}
               {savingsAccounts.length > 0 && (
                 <tr className="subtotal-row">
-                  <td className="account-name">Comptes d'épargne</td>
+                  <td className="account-name">{t('accounts.savingsAccounts')}</td>
                   <td className="account-initial">{formatCurrency(savingsTotals.initialBalance, true)}</td>
                   {savingsTotals.monthlyBalances.map((balance, i) => (
                     <td key={i} className="account-month-cell">
@@ -412,7 +414,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
             </tbody>
             <tfoot>
               <tr className="grand-total-row">
-                <td className="account-name total-label">Total patrimoine</td>
+                <td className="account-name total-label">{t('accounts.totalLabel')}</td>
                 <td className="account-initial total-value grand-total">
                   {formatCurrency(overallTotals.initialBalance, true)}
                 </td>
@@ -447,8 +449,8 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
 
   const renderTableView = () => (
     <>
-      {renderAccountTable(paymentAccounts, 'Comptes de paiement', paymentTotals)}
-      {renderAccountTable(savingsAccounts, "Comptes d'épargne", savingsTotals)}
+      {renderAccountTable(paymentAccounts, t('accounts.paymentAccounts'), paymentTotals)}
+      {renderAccountTable(savingsAccounts, t('accounts.savingsAccounts'), savingsTotals)}
       {renderOverallTotal()}
     </>
   );
@@ -458,8 +460,8 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
       <div className="accounts-header">
         <div className="accounts-header-top">
           <div>
-            <h2>Comptes - {year}</h2>
-            <p className="accounts-subtitle">Solde attendu à la fin de chaque mois</p>
+            <h2>{t('accounts.title', { year })}</h2>
+            <p className="accounts-subtitle">{t('accounts.subtitle')}</p>
           </div>
         </div>
 
@@ -476,7 +478,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                 <line x1="3" y1="15" x2="21" y2="15" />
                 <line x1="9" y1="3" x2="9" y2="21" />
               </svg>
-              Tableau
+              {t('accounts.table')}
             </button>
             <button
               type="button"
@@ -488,7 +490,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                 <line x1="12" y1="20" x2="12" y2="4" />
                 <line x1="6" y1="20" x2="6" y2="14" />
               </svg>
-              Graphique
+              {t('accounts.chart')}
             </button>
           </div>
         )}
@@ -502,14 +504,14 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
               <line x1="2" y1="10" x2="22" y2="10" />
             </svg>
           </div>
-          <h3>Aucun compte configuré</h3>
-          <p>Les comptes sont créés automatiquement à partir de :</p>
+          <h3>{t('accounts.noAccountsTitle')}</h3>
+          <p>{t('accounts.noAccountsSubtitle')}</p>
           <ul>
             <li>
-              Les éléments dans vos groupes <strong>Épargne</strong>
+              {t('accounts.noAccountsBulletSavings')}
             </li>
             <li>
-              Les modes de paiement marqués comme <strong>compte</strong> dans les paramètres
+              {t('accounts.noAccountsBulletMethods')}
             </li>
           </ul>
         </div>

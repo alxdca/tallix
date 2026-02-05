@@ -1,32 +1,30 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { changePassword, updateUserSettings } from '../api';
 import { useAuth } from '../contexts/AuthContext';
+import { useI18n } from '../contexts/I18nContext';
+import { getErrorMessage } from '../utils/errorMessages';
 import { logger } from '../utils/logger';
 
-const LANGUAGES = [
-  { code: 'en', label: 'English' },
-  { code: 'fr', label: 'Français' },
-];
-
-const COUNTRIES = [
-  { code: '', label: '—' },
-  { code: 'CH', label: 'Switzerland' },
-  { code: 'FR', label: 'France' },
-  { code: 'DE', label: 'Germany' },
-  { code: 'IT', label: 'Italy' },
-  { code: 'AT', label: 'Austria' },
-  { code: 'BE', label: 'Belgium' },
-  { code: 'NL', label: 'Netherlands' },
-  { code: 'LU', label: 'Luxembourg' },
-  { code: 'ES', label: 'Spain' },
-  { code: 'PT', label: 'Portugal' },
-  { code: 'GB', label: 'United Kingdom' },
-  { code: 'US', label: 'United States' },
-  { code: 'CA', label: 'Canada' },
+const COUNTRY_LIST = [
+  '',
+  'CH',
+  'FR',
+  'DE',
+  'IT',
+  'AT',
+  'BE',
+  'NL',
+  'LU',
+  'ES',
+  'PT',
+  'GB',
+  'US',
+  'CA',
 ];
 
 export default function UserSettings() {
   const { user, updateUser } = useAuth();
+  const { t, locale, setLocale } = useI18n();
   const [language, setLanguage] = useState(user?.language || 'fr');
   const [country, setCountry] = useState(user?.country || '');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -36,6 +34,26 @@ export default function UserSettings() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const languageOptions = useMemo(
+    () => [
+      { code: 'en', label: t('language.en') },
+      { code: 'fr', label: t('language.fr') },
+    ],
+    [t]
+  );
+
+  const countryLabels = useMemo(() => {
+    try {
+      const displayNames = new Intl.DisplayNames([locale], { type: 'region' });
+      return COUNTRY_LIST.map((code) => ({
+        code,
+        label: code ? displayNames.of(code) || code : t('countries.none'),
+      }));
+    } catch {
+      return COUNTRY_LIST.map((code) => ({ code, label: code || t('countries.none') }));
+    }
+  }, [locale, t]);
 
   // Update local state when user changes
   React.useEffect(() => {
@@ -57,11 +75,14 @@ export default function UserSettings() {
         language: updatedUser.language,
         country: updatedUser.country,
       });
-      setSuccess('Paramètres mis à jour');
+      if (updatedUser.language === 'en' || updatedUser.language === 'fr') {
+        setLocale(updatedUser.language);
+      }
+      setSuccess(t('userSettings.settingsUpdated'));
       setTimeout(() => setSuccess(null), 2000);
     } catch (err) {
       logger.error('Failed to update settings', err);
-      setError('Erreur lors de la mise à jour des paramètres');
+      setError(getErrorMessage(err, t));
     } finally {
       setIsSavingSettings(false);
     }
@@ -73,34 +94,25 @@ export default function UserSettings() {
     setSuccess(null);
 
     if (newPassword !== confirmPassword) {
-      setError('Les mots de passe ne correspondent pas');
+      setError(t('userSettings.passwordMismatch'));
       return;
     }
 
     if (newPassword.length < 6) {
-      setError('Le nouveau mot de passe doit contenir au moins 6 caractères');
+      setError(t('userSettings.passwordMinLength'));
       return;
     }
 
     setIsSubmitting(true);
     try {
       await changePassword(currentPassword, newPassword);
-      setSuccess('Mot de passe modifié avec succès');
+      setSuccess(t('userSettings.passwordChanged'));
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err) {
       logger.error('Failed to change password', err);
-      if (err instanceof Error) {
-        // Translate common errors
-        if (err.message.includes('Invalid current password')) {
-          setError('Mot de passe actuel incorrect');
-        } else {
-          setError(err.message);
-        }
-      } else {
-        setError('Erreur lors du changement de mot de passe');
-      }
+      setError(getErrorMessage(err, t));
     } finally {
       setIsSubmitting(false);
     }
@@ -108,37 +120,37 @@ export default function UserSettings() {
 
   return (
     <div className="user-settings-container">
-      <div className="user-settings-header">
-        <h2>Mon compte</h2>
-        <p className="user-settings-subtitle">Gérez vos informations personnelles</p>
+        <div className="user-settings-header">
+        <h2>{t('userSettings.title')}</h2>
+        <p className="user-settings-subtitle">{t('userSettings.subtitle')}</p>
       </div>
 
       <div className="user-settings-content">
         <div className="user-settings-section">
           <h3 className="section-title">
             <span className="section-indicator"></span>
-            Informations
+            {t('userSettings.info')}
           </h3>
           <div className="user-info-card">
             <div className="user-info-row">
-              <span className="user-info-label">Email</span>
+              <span className="user-info-label">{t('userSettings.email')}</span>
               <span className="user-info-value">{user?.email}</span>
             </div>
             {user?.name && (
               <div className="user-info-row">
-                <span className="user-info-label">Nom</span>
+                <span className="user-info-label">{t('userSettings.name')}</span>
                 <span className="user-info-value">{user.name}</span>
               </div>
             )}
             <div className="user-info-row">
-              <span className="user-info-label">Langue</span>
+              <span className="user-info-label">{t('userSettings.language')}</span>
               <select
                 className="language-select"
                 value={language}
                 onChange={(e) => setLanguage(e.target.value)}
                 disabled={isSavingSettings}
               >
-                {LANGUAGES.map((lang) => (
+                {languageOptions.map((lang) => (
                   <option key={lang.code} value={lang.code}>
                     {lang.label}
                   </option>
@@ -146,14 +158,14 @@ export default function UserSettings() {
               </select>
             </div>
             <div className="user-info-row">
-              <span className="user-info-label">Pays</span>
+              <span className="user-info-label">{t('userSettings.country')}</span>
               <select
                 className="language-select"
                 value={country}
                 onChange={(e) => setCountry(e.target.value)}
                 disabled={isSavingSettings}
               >
-                {COUNTRIES.map((c) => (
+                {countryLabels.map((c) => (
                   <option key={c.code} value={c.code}>
                     {c.label}
                   </option>
@@ -168,20 +180,20 @@ export default function UserSettings() {
             onClick={handleSaveSettings}
             disabled={isSavingSettings}
           >
-            {isSavingSettings ? 'Enregistrement...' : 'Enregistrer les modifications'}
+            {isSavingSettings ? t('userSettings.saving') : t('userSettings.saveChanges')}
           </button>
         </div>
 
         <div className="user-settings-section">
           <h3 className="section-title">
             <span className="section-indicator"></span>
-            Changer le mot de passe
+            {t('userSettings.passwordTitle')}
           </h3>
           <form onSubmit={handleChangePassword} className="password-form">
             {error && <div className="form-error">{error}</div>}
             {success && <div className="form-success">{success}</div>}
             <div className="form-group">
-              <label htmlFor="currentPassword">Mot de passe actuel</label>
+              <label htmlFor="currentPassword">{t('userSettings.currentPassword')}</label>
               <input
                 type="password"
                 id="currentPassword"
@@ -192,7 +204,7 @@ export default function UserSettings() {
               />
             </div>
             <div className="form-group">
-              <label htmlFor="newPassword">Nouveau mot de passe</label>
+              <label htmlFor="newPassword">{t('userSettings.newPassword')}</label>
               <input
                 type="password"
                 id="newPassword"
@@ -204,7 +216,7 @@ export default function UserSettings() {
               />
             </div>
             <div className="form-group">
-              <label htmlFor="confirmPassword">Confirmer le nouveau mot de passe</label>
+              <label htmlFor="confirmPassword">{t('userSettings.confirmNewPassword')}</label>
               <input
                 type="password"
                 id="confirmPassword"
@@ -216,7 +228,7 @@ export default function UserSettings() {
               />
             </div>
             <button type="submit" className="btn-primary" disabled={isSubmitting}>
-              {isSubmitting ? 'Modification...' : 'Modifier le mot de passe'}
+              {isSubmitting ? t('userSettings.changing') : t('userSettings.changePassword')}
             </button>
           </form>
         </div>

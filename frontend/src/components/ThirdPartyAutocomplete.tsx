@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchThirdParties } from '../api';
+import { useI18n } from '../contexts/I18nContext';
 import { logger } from '../utils/logger';
 
 interface ThirdPartyAutocompleteProps {
@@ -13,9 +14,11 @@ interface ThirdPartyAutocompleteProps {
 export default function ThirdPartyAutocomplete({
   value,
   onChange,
-  placeholder = 'Tiers',
+  placeholder,
   className = '',
 }: ThirdPartyAutocompleteProps) {
+  const { t } = useI18n();
+  const resolvedPlaceholder = placeholder ?? t('transactions.thirdParty');
   const [isOpen, setIsOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -129,7 +132,7 @@ export default function ThirdPartyAutocomplete({
         onChange={handleInputChange}
         onFocus={handleInputFocus}
         onKeyDown={handleKeyDown}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         className={`autocomplete-input ${className}`}
         autoComplete="off"
       />
@@ -138,7 +141,7 @@ export default function ThirdPartyAutocomplete({
         <div className="autocomplete-dropdown">
           {isLoading ? (
             <div className="autocomplete-loading">
-              <span>Recherche...</span>
+              <span>{t('common.searching')}</span>
             </div>
           ) : (
             suggestions.map((suggestion, index) => (

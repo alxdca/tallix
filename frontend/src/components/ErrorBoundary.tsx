@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react';
+import { I18nContext } from '../contexts/I18nContext';
 import { logger } from '../utils/logger';
 
 interface Props {
@@ -12,6 +13,9 @@ interface State {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
+  static contextType = I18nContext;
+  declare context: React.ContextType<typeof I18nContext>;
+
   constructor(props: Props) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -33,6 +37,14 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render(): ReactNode {
     if (this.state.hasError) {
+      const t = this.context?.t;
+      const title = t ? t('errors.INTERNAL_SERVER_ERROR') : 'Something went wrong';
+      const description = t
+        ? `${t('app.error')}: ${t('errors.INTERNAL_SERVER_ERROR')}`
+        : 'An unexpected error occurred. Please try again.';
+      const retryLabel = t ? t('common.retry') : 'Try again';
+      const detailsLabel = t ? t('common.details') : 'Error details';
+
       if (this.props.fallback) {
         return this.props.fallback;
       }
@@ -40,16 +52,16 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="error-boundary">
           <div className="error-boundary-content">
-            <h2>Something went wrong</h2>
-            <p>An unexpected error occurred. Please try again.</p>
+            <h2>{title}</h2>
+            <p>{description}</p>
             {this.state.error && (
               <details>
-                <summary>Error details</summary>
+                <summary>{detailsLabel}</summary>
                 <pre>{this.state.error.message}</pre>
               </details>
             )}
             <button onClick={this.handleRetry} className="btn btn-primary">
-              Try again
+              {retryLabel}
             </button>
           </div>
         </div>

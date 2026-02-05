@@ -151,7 +151,11 @@ router.post(
     if (invalidTransactions.length > 0) {
       throw new AppError(
         400,
-        `Transactions ${invalidTransactions.join(', ')} are incomplete. Each transaction must have date, payment method, and amount.`
+        `Transactions ${invalidTransactions.join(', ')} are incomplete. Each transaction must have date, payment method, and amount.`,
+        {
+          code: 'IMPORT_TRANSACTIONS_INCOMPLETE',
+          params: { indexes: invalidTransactions },
+        }
       );
     }
 
@@ -230,7 +234,7 @@ router.post(
       res.json({ classifications });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Classification failed';
-      throw new AppError(500, message);
+      throw new AppError(500, message, { code: 'LLM_CLASSIFICATION_FAILED' });
     }
   })
 );

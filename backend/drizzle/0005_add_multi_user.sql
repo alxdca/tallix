@@ -12,7 +12,6 @@ CREATE TABLE IF NOT EXISTS "users" (
 CREATE TABLE IF NOT EXISTS "budgets" (
   "id" serial PRIMARY KEY NOT NULL,
   "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
-  "name" varchar(100) NOT NULL,
   "description" varchar(500),
   "created_at" timestamp DEFAULT now() NOT NULL,
   "updated_at" timestamp DEFAULT now() NOT NULL
@@ -30,8 +29,8 @@ BEGIN
     VALUES ('00000000-0000-0000-0000-000000000001', 'default@tallix.local', '$2b$10$defaulthashplacaborchangethis000000000000000000000000', 'Default User')
     ON CONFLICT DO NOTHING;
 
-    INSERT INTO "budgets" ("id", "user_id", "name", "description")
-    VALUES (1, '00000000-0000-0000-0000-000000000001', 'Mon Budget', 'Budget par défaut')
+    INSERT INTO "budgets" ("id", "user_id")
+    VALUES (1, '00000000-0000-0000-0000-000000000001')
     ON CONFLICT DO NOTHING;
   END IF;
 END $$;

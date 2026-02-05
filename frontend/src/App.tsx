@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { type Account, fetchAccounts, fetchBudgetData, fetchBudgetSummary, fetchMonths } from './api';
+import { type Account, fetchAccounts, fetchBudgetData, fetchBudgetSummary } from './api';
 import Accounts from './components/Accounts';
 import BudgetPlanning from './components/BudgetPlanning';
 import BudgetSpreadsheet from './components/BudgetSpreadsheet';
@@ -11,8 +11,10 @@ import Sidebar from './components/Sidebar';
 import Transactions from './components/Transactions';
 import UserSettings from './components/UserSettings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { I18nProvider, useI18n } from './contexts/I18nContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import type { BudgetData, BudgetSummary } from './types';
+import { getErrorMessage } from './utils/errorMessages';
 import { organizeBudgetData } from './utils';
 import { logger } from './utils/logger';
 
@@ -24,11 +26,17 @@ function AppContent() {
   const [activeView, setActiveView] = useState('current');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { t, monthNames } = useI18n();
 
   // Organize budget data into 3-layer structure
   const organizedData = useMemo(() => {
-    return budgetData ? organizeBudgetData(budgetData) : null;
-  }, [budgetData]);
+    return budgetData
+      ? organizeBudgetData(budgetData, {
+          income: t('budget.income'),
+          expense: t('budget.expenses'),
+        })
+      : null;
+  }, [budgetData, t]);
 
   // Calculate total initial balance of all accounts
   const paymentAccountsInitialBalance = useMemo(() => {
@@ -38,14 +46,9 @@ function AppContent() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [data, summaryData, monthsData] = await Promise.all([
-        fetchBudgetData(),
-        fetchBudgetSummary(),
-        fetchMonths(),
-      ]);
+      const [data, summaryData] = await Promise.all([fetchBudgetData(), fetchBudgetSummary()]);
       setBudgetData(data);
       setSummary(summaryData);
-      setMonths(monthsData);
 
       // Fetch accounts for the year (needed for funds summary)
       const accountsData = await fetchAccounts(data.year);
@@ -53,23 +56,18 @@ function AppContent() {
 
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      setError(getErrorMessage(err, t));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // Silent refresh that doesn't show loading spinner (for inline updates)
   const refreshData = useCallback(async () => {
     try {
-      const [data, summaryData, monthsData] = await Promise.all([
-        fetchBudgetData(),
-        fetchBudgetSummary(),
-        fetchMonths(),
-      ]);
+      const [data, summaryData] = await Promise.all([fetchBudgetData(), fetchBudgetSummary()]);
       setBudgetData(data);
       setSummary(summaryData);
-      setMonths(monthsData);
 
       // Fetch accounts for the year (needed for funds summary)
       const accountsData = await fetchAccounts(data.year);
@@ -82,6 +80,10 @@ function AppContent() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    setMonths(monthNames);
+  }, [monthNames]);
 
   const currentYear = budgetData?.year || new Date().getFullYear();
   const yearId = budgetData?.yearId || 0;
@@ -110,7 +112,7 @@ function AppContent() {
       return (
         <div className="content-loading">
           <div className="loading-spinner" />
-          <p>Chargement du budget...</p>
+          <p>{t('app.loadingBudget')}</p>
         </div>
       );
     }
@@ -118,8 +120,10 @@ function AppContent() {
     if (error) {
       return (
         <div className="content-error">
-          <p>Erreur: {error}</p>
-          <button onClick={() => window.location.reload()}>Réessayer</button>
+          <p>
+            {t('app.error')}: {error}
+          </p>
+          <button onClick={() => window.location.reload()}>{t('app.retry')}</button>
         </div>
       );
     }
@@ -145,8 +149,8 @@ function AppContent() {
                 <line x1="10" y1="12" x2="14" y2="12" />
               </svg>
             </div>
-            <h2>Archive</h2>
-            <p>Consultez vos budgets des années précédentes</p>
+            <h2>{t('app.archiveTitle')}</h2>
+            <p>{t('app.archiveSubtitle')}</p>
           </div>
         );
       case 'transactions':
@@ -199,13 +203,20 @@ function AppContent() {
 
 function AuthenticatedApp() {
   const { user, isLoading } = useAuth();
+  const { setLocale, t } = useI18n();
+
+  useEffect(() => {
+    if (user?.language === 'en' || user?.language === 'fr') {
+      setLocale(user.language);
+    }
+  }, [user, setLocale]);
 
   if (isLoading) {
     return (
       <div className="login-container">
         <div className="content-loading">
           <div className="loading-spinner" />
-          <p>Chargement...</p>
+          <p>{t('app.loading')}</p>
         </div>
       </div>
     );
@@ -224,11 +235,13 @@ function AuthenticatedApp() {
 
 function App() {
   return (
-    <ErrorBoundary>
-      <AuthProvider>
-        <AuthenticatedApp />
-      </AuthProvider>
-    </ErrorBoundary>
+    <I18nProvider>
+      <ErrorBoundary>
+        <AuthProvider>
+          <AuthenticatedApp />
+        </AuthProvider>
+      </ErrorBoundary>
+    </I18nProvider>
   );
 }
 

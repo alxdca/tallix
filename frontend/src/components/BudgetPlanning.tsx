@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { updateItem, updateMonthlyValue } from '../api';
+import { useI18n } from '../contexts/I18nContext';
 import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import type { BudgetGroup, GroupType } from '../types';
 
@@ -17,10 +18,13 @@ interface Section {
 }
 
 // Organize groups into sections
-function organizeSections(groups: BudgetGroup[]): Section[] {
+function organizeSections(
+  groups: BudgetGroup[],
+  labels: { income: string; expense: string }
+): Section[] {
   const sections: Section[] = [
-    { type: 'income', name: 'Revenus', groups: [] },
-    { type: 'expense', name: 'Dépenses', groups: [] },
+    { type: 'income', name: labels.income, groups: [] },
+    { type: 'expense', name: labels.expense, groups: [] },
   ];
 
   groups.forEach((group) => {
@@ -34,6 +38,7 @@ function organizeSections(groups: BudgetGroup[]): Section[] {
 }
 
 export default function BudgetPlanning({ year, groups, months, onDataChanged }: BudgetPlanningProps) {
+  const { t } = useI18n();
   const formatCurrency = useFormatCurrency();
   const [editingCell, setEditingCell] = useState<{ itemId: number; month: number } | null>(null);
   const [editingYearlyBudget, setEditingYearlyBudget] = useState<number | null>(null);
@@ -45,7 +50,10 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   const [quickFillValue, setQuickFillValue] = useState('');
   const [quickFillMonths, setQuickFillMonths] = useState<Set<number>>(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
 
-  const sections = useMemo(() => organizeSections(groups), [groups]);
+  const sections = useMemo(
+    () => organizeSections(groups, { income: t('budget.income'), expense: t('budget.expenses') }),
+    [groups, t]
+  );
 
   // Expand new groups when they're added
   useEffect(() => {
@@ -255,10 +263,8 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   return (
     <div className="budget-planning-container">
       <div className="budget-planning-header">
-        <h2>Planification du Budget {year}</h2>
-        <p className="budget-planning-subtitle">
-          Configurez vos prévisions de dépenses mensuelles pour chaque catégorie
-        </p>
+        <h2>{t('planning.title', { year })}</h2>
+        <p className="budget-planning-subtitle">{t('planning.subtitle')}</p>
       </div>
 
       <div className="budget-planning-content">
@@ -266,11 +272,11 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
           <table className="budget-planning-table">
             <thead>
               <tr>
-                <th className="col-category sticky-col">Catégorie</th>
-                <th className="col-actions">Actions</th>
-                <th className="col-annual">Total Annuel</th>
-                <th className="col-yearly">Variable</th>
-                <th className="col-remaining">Restant</th>
+                <th className="col-category sticky-col">{t('planning.category')}</th>
+                <th className="col-actions">{t('planning.actions')}</th>
+                <th className="col-annual">{t('planning.annualTotal')}</th>
+                <th className="col-yearly">{t('planning.variable')}</th>
+                <th className="col-remaining">{t('planning.remaining')}</th>
                 {months.map((month, i) => (
                   <th key={i} className="col-month">
                     {month.slice(0, 3)}
@@ -389,7 +395,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                                           <button
                                             className="btn-icon cancel"
                                             onClick={() => setQuickFillItemId(null)}
-                                            title="Annuler"
+                                            title={t('common.cancel')}
                                           >
                                             ✕
                                           </button>
@@ -403,7 +409,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                                             const firstNonZero = item.months.find((m) => m.budget > 0);
                                             setQuickFillValue(firstNonZero ? firstNonZero.budget.toString() : '');
                                           }}
-                                          title="Remplissage rapide"
+                                          title={t('planning.quickFill')}
                                         >
                                           <svg
                                             width="16"
@@ -500,14 +506,14 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
         <div className="quick-fill-modal-overlay" onClick={() => setQuickFillItemId(null)}>
           <div className="quick-fill-modal" onClick={(e) => e.stopPropagation()}>
             <div className="quick-fill-header">
-              <h3>Remplissage rapide</h3>
+              <h3>{t('planning.quickFillTitle')}</h3>
               <button className="btn-close" onClick={() => setQuickFillItemId(null)}>
                 ✕
               </button>
             </div>
             <div className="quick-fill-body">
               <div className="quick-fill-amount">
-                <label>Montant mensuel</label>
+                <label>{t('planning.monthlyAmount')}</label>
                 <input
                   type="number"
                   value={quickFillValue}
@@ -516,7 +522,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                 />
               </div>
               <div className="quick-fill-months">
-                <label>Mois concernés</label>
+                <label>{t('planning.months')}</label>
                 <div className="month-toggles">
                   {months.map((month, i) => (
                     <button
@@ -533,33 +539,33 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                     className="preset-btn"
                     onClick={() => setQuickFillMonths(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]))}
                   >
-                    Tous
+                    {t('planning.all')}
                   </button>
                   <button className="preset-btn" onClick={() => setQuickFillMonths(new Set())}>
-                    Aucun
+                    {t('planning.none')}
                   </button>
                   <button className="preset-btn" onClick={() => setQuickFillMonths(new Set([1, 2, 3, 4, 5, 6]))}>
-                    S1
+                    {t('planning.semester1')}
                   </button>
                   <button className="preset-btn" onClick={() => setQuickFillMonths(new Set([7, 8, 9, 10, 11, 12]))}>
-                    S2
+                    {t('planning.semester2')}
                   </button>
                   <button className="preset-btn" onClick={() => setQuickFillMonths(new Set([1, 4, 7, 10]))}>
-                    Trim.
+                    {t('planning.quarter')}
                   </button>
                 </div>
               </div>
             </div>
             <div className="quick-fill-footer">
               <button className="btn-secondary" onClick={() => setQuickFillItemId(null)}>
-                Annuler
+                {t('planning.cancel')}
               </button>
               <button
                 className="btn-primary"
                 onClick={() => handleQuickFill(quickFillItemId)}
                 disabled={saving || !quickFillValue || quickFillMonths.size === 0}
               >
-                {saving ? 'Application...' : 'Appliquer'}
+                {saving ? t('planning.applying') : t('planning.apply')}
               </button>
             </div>
           </div>

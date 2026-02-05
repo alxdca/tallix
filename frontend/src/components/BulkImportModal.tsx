@@ -1,4 +1,4 @@
-import React, { type DragEvent, useCallback, useEffect, useState } from 'react';
+import React, { type DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   bulkCreateTransactions,
   type CategoryForClassification,
@@ -12,6 +12,8 @@ import {
 } from '../api';
 import type { BudgetGroup } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { useI18n } from '../contexts/I18nContext';
+import { getErrorMessage } from '../utils/errorMessages';
 import { logger } from '../utils/logger';
 import { formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import CategoryCombobox from './CategoryCombobox';
@@ -36,16 +38,6 @@ interface ColumnConfig {
   color: string;
 }
 
-const AVAILABLE_COLUMNS: ColumnConfig[] = [
-  { id: 'date', label: 'Date', color: '#3b82f6' },
-  { id: 'thirdParty', label: 'Tiers', color: '#10b981' },
-  { id: 'description', label: 'Description', color: '#8b5cf6' },
-  { id: 'amount', label: 'Montant', color: '#f59e0b' },
-  { id: 'category', label: 'Catégorie', color: '#ec4899' },
-  { id: 'paymentMethod', label: 'Mode', color: '#06b6d4' },
-  { id: 'comment', label: 'Commentaire', color: '#64748b' },
-];
-
 const DEFAULT_COLUMN_ORDER: ColumnType[] = [
   'date',
   'description',
@@ -55,8 +47,6 @@ const DEFAULT_COLUMN_ORDER: ColumnType[] = [
   'amount',
   'comment',
 ];
-
-const MONTH_NAMES = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 
 // Calculate accounting period based on date and settlement day
 function calculateAccountingPeriod(
@@ -101,6 +91,7 @@ interface EditableTransaction extends ParsedTransaction {
 
 export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImportComplete }: BulkImportModalProps) {
   const { user } = useAuth();
+  const { t, monthNames } = useI18n();
   const [step, setStep] = useState<ImportStep>('select');
   const [importSource, setImportSource] = useState<ImportSource>('pdf');
   const [isDragging, setIsDragging] = useState(false);
@@ -113,6 +104,19 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
   const [columnOrder, setColumnOrder] = useState<ColumnType[]>(DEFAULT_COLUMN_ORDER);
   const [draggedColumn, setDraggedColumn] = useState<number | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+
+  const availableColumns = useMemo<ColumnConfig[]>(
+    () => [
+      { id: 'date', label: t('bulkImport.columns.date'), color: '#3b82f6' },
+      { id: 'thirdParty', label: t('bulkImport.columns.thirdParty'), color: '#10b981' },
+      { id: 'description', label: t('bulkImport.columns.description'), color: '#8b5cf6' },
+      { id: 'amount', label: t('bulkImport.columns.amount'), color: '#f59e0b' },
+      { id: 'category', label: t('bulkImport.columns.category'), color: '#ec4899' },
+      { id: 'paymentMethod', label: t('bulkImport.columns.paymentMethod'), color: '#06b6d4' },
+      { id: 'comment', label: t('bulkImport.columns.comment'), color: '#64748b' },
+    ],
+    [t]
+  );
 
   // LLM Classification state
   const [llmAvailable, setLlmAvailable] = useState(false);
@@ -238,7 +242,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
           setClassifyProgress({ done: 1, total: 1 });
 
           if (result.transactions.length === 0) {
-            setError('No transactions found in the PDF.');
+            setError(t('bulkImport.errors.noPdfTransactions'));
             setIsLoading(false);
             setIsClassifying(false);
             return;
@@ -252,6 +256,12 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
               dateDisplay,
               pm?.settlementDay ?? null
             );
+            // Use full "Name (Institution)" format for payment method to match rest of the app
+            const paymentMethodDisplay = pm
+              ? pm.institution
+                ? `${pm.name} (${pm.institution})`
+                : pm.name
+              : '';
             return {
               id: `import-${index}-${Date.now()}`,
               date: dateDisplay,
@@ -259,11 +269,11 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
               thirdParty: t.thirdParty || '',
               amount: t.amount,
               itemId: t.categoryId,
-              paymentMethod: pm?.name || '',
+              paymentMethod: paymentMethodDisplay,
               rawDescription: t.description,
               rawThirdParty: t.thirdParty || '',
               rawCategory: t.categoryName || '',
-              rawPaymentMethod: '',
+              rawPaymentMethod: t.paymentMethodName || '',
               comment: '',
               selected: true,
               accountingMonth,
@@ -285,7 +295,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
         const result = await parsePdf(file, yearId, skipPreprocessing);
 
         if (result.transactions.length === 0) {
-          setError('No transactions found in the PDF. The format may not be supported.');
+          setError(t('bulkImport.errors.noPdfTransactionsUnsupported'));
           setIsLoading(false);
           return;
         }
@@ -316,13 +326,14 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
         setImportSource('pdf');
         setStep('preview');
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to parse PDF');
+        const message = getErrorMessage(err, t);
+        setError(message === t('errors.UNKNOWN') ? t('bulkImport.errors.parsePdfFailed') : message);
       } finally {
         setIsLoading(false);
         setIsClassifying(false);
       }
     },
-    [yearId, skipPreprocessing, llmAvailable, localGroups, user?.language, user?.country]
+    [yearId, skipPreprocessing, llmAvailable, localGroups, user?.language, user?.country, t]
   );
 
   const handleDrop = useCallback(
@@ -335,21 +346,21 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       const pdfFile = files.find((f) => f.type === 'application/pdf');
 
       if (!pdfFile) {
-        setError('Please drop a PDF file');
+        setError(t('bulkImport.errors.pdfRequired'));
         return;
       }
 
       setError(null);
       setPendingFile(pdfFile);
     },
-    []
+    [t]
   );
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.type !== 'application/pdf') {
-      setError('Please select a PDF file');
+      setError(t('bulkImport.errors.selectPdf'));
       return;
     }
     setError(null);
@@ -649,13 +660,13 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
 
   const processSpreadsheetData = async () => {
     if (!pasteContent.trim()) {
-      setError('Veuillez coller des données');
+      setError(t('bulkImport.errors.pasteData'));
       return;
     }
 
     // Validate column order has required columns
     if (!columnOrder.includes('date') || !columnOrder.includes('amount')) {
-      setError('Les colonnes Date et Montant sont obligatoires');
+      setError(t('bulkImport.errors.columnsRequired'));
       return;
     }
 
@@ -671,9 +682,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       const parsedTransactions = parseSpreadsheetData(pasteContent, columnOrder, methods);
 
       if (parsedTransactions.length === 0) {
-        setError(
-          "Aucune transaction valide trouvée. Vérifiez que vos données correspondent à l'ordre des colonnes configuré."
-        );
+        setError(t('bulkImport.errors.noValidTransactions'));
         setIsLoading(false);
         return;
       }
@@ -682,7 +691,8 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       setImportSource('spreadsheet');
       setStep('preview');
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur lors de l'analyse des données");
+      const message = getErrorMessage(err, t);
+      setError(message === t('errors.UNKNOWN') ? t('bulkImport.errors.parseError') : message);
     } finally {
       setIsLoading(false);
     }
@@ -889,7 +899,8 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       );
     } catch (err) {
       logger.error('LLM classification failed', err);
-      setError(err instanceof Error ? err.message : 'Échec de la classification automatique');
+      const message = getErrorMessage(err, t);
+      setError(message === t('errors.UNKNOWN') ? t('bulkImport.errors.classifyError') : message);
     } finally {
       setIsClassifying(false);
       setClassifyProgress(null);
@@ -909,7 +920,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
     const selectedTransactions = transactions.filter((t) => t.selected);
 
     if (selectedTransactions.length === 0) {
-      setError('Veuillez sélectionner au moins une transaction à importer');
+      setError(t('bulkImport.errors.selectAtLeastOne'));
       return;
     }
 
@@ -920,9 +931,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
 
     if (incompleteTransactions.length > 0) {
       const rows = incompleteTransactions.map((item) => item.rowNum).join(', ');
-      setError(
-        `Les lignes ${rows} sont incomplètes. Chaque transaction doit avoir une date valide, un tiers, un mode de paiement et un montant.`
-      );
+      setError(t('bulkImport.errors.rowsIncomplete', { rows }));
       return;
     }
 
@@ -930,7 +939,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
     const missingCategory = selectedTransactions.filter((t) => !t.itemId);
     if (missingCategory.length > 0) {
       const rows = missingCategory.map((t) => transactions.indexOf(t) + 1).join(', ');
-      setError(`Les lignes ${rows} n'ont pas de catégorie. Veuillez assigner une catégorie à chaque transaction.`);
+      setError(t('bulkImport.errors.rowsNoCategory', { rows }));
       return;
     }
 
@@ -971,7 +980,8 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       setImportedCount(result.created);
       setStep('success');
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Échec de l'importation des transactions");
+      const message = getErrorMessage(err, t);
+      setError(message === t('errors.UNKNOWN') ? t('bulkImport.errors.importFailed') : message);
     } finally {
       setIsLoading(false);
     }
@@ -1024,9 +1034,12 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
     }
   };
 
-  const getColumnConfig = (type: ColumnType): ColumnConfig => {
-    return AVAILABLE_COLUMNS.find((c) => c.id === type) || AVAILABLE_COLUMNS[4];
-  };
+  const getColumnConfig = useCallback(
+    (type: ColumnType): ColumnConfig => {
+      return availableColumns.find((c) => c.id === type) || availableColumns[0];
+    },
+    [availableColumns]
+  );
 
   if (!isOpen) return null;
 
@@ -1035,11 +1048,11 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
       <div className="modal-content import-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>
-            {step === 'select' && 'Import en masse'}
-            {step === 'upload' && 'Importer un PDF'}
-            {step === 'paste' && 'Coller depuis un tableur'}
-            {step === 'preview' && 'Vérifier les transactions'}
-            {step === 'success' && 'Import terminé'}
+            {step === 'select' && t('bulkImport.titleSelect')}
+            {step === 'upload' && t('bulkImport.titleUpload')}
+            {step === 'paste' && t('bulkImport.titlePaste')}
+            {step === 'preview' && t('bulkImport.titlePreview')}
+            {step === 'success' && t('bulkImport.titleSuccess')}
           </h2>
           <button className="modal-close" onClick={handleClose}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1063,7 +1076,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
 
           {step === 'select' && (
             <div className="import-options">
-              <p className="import-description">Sélectionnez la source des données à importer</p>
+              <p className="import-description">{t('bulkImport.subtitle')}</p>
               <div className="import-option-cards">
                 <button className="import-option-card" onClick={() => setStep('upload')}>
                   <div className="option-icon">
@@ -1074,8 +1087,8 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                       <line x1="16" y1="17" x2="8" y2="17" />
                     </svg>
                   </div>
-                  <span className="option-label">PDF</span>
-                  <span className="option-hint">Relevé bancaire PDF</span>
+                  <span className="option-label">{t('bulkImport.optionPdfLabel')}</span>
+                  <span className="option-hint">{t('bulkImport.optionPdf')}</span>
                 </button>
                 <button className="import-option-card" onClick={() => setStep('paste')}>
                   <div className="option-icon">
@@ -1086,8 +1099,8 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                       <rect x="14" y="14" width="7" height="7" />
                     </svg>
                   </div>
-                  <span className="option-label">Tableur</span>
-                  <span className="option-hint">Coller depuis Excel/Sheets</span>
+                  <span className="option-label">{t('bulkImport.optionSpreadsheetLabel')}</span>
+                  <span className="option-hint">{t('bulkImport.optionSpreadsheetHint')}</span>
                 </button>
               </div>
             </div>
@@ -1107,7 +1120,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                         <path d="M9 18h6" />
                       </svg>
                     </div>
-                    <h3>Extraction et classification IA</h3>
+                    <h3>{t('bulkImport.classificationTitle')}</h3>
                     {classifyProgress && (
                       <>
                         <div className="classification-progress-bar">
@@ -1116,10 +1129,10 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                             style={{ width: `${(classifyProgress.done / classifyProgress.total) * 100}%` }}
                           />
                         </div>
-                        <p className="classification-progress-text">Traitement en cours...</p>
+                        <p className="classification-progress-text">{t('bulkImport.classificationProgress')}</p>
                       </>
                     )}
-                    <p className="classification-hint">Analyse du PDF avec l'IA...</p>
+                    <p className="classification-hint">{t('bulkImport.classificationHint')}</p>
                   </div>
                 </div>
               )}
@@ -1133,7 +1146,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                 {isLoading && !isClassifying ? (
                   <div className="loading-state">
                     <div className="loading-spinner" />
-                    <p>Analyse du fichier en cours...</p>
+                    <p>{t('bulkImport.analyzingFile')}</p>
                   </div>
                 ) : !isLoading ? (
                   <>
@@ -1151,21 +1164,23 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                         <line x1="12" y1="3" x2="12" y2="15" />
                       </svg>
                     </div>
-                    <p className="drop-text">Glissez-déposez votre fichier PDF ici</p>
-                    <p className="drop-hint">ou</p>
+                    <p className="drop-text">{t('bulkImport.dropPdf')}</p>
+                    <p className="drop-hint">{t('common.or')}</p>
                     <label className="file-select-btn">
                       <input type="file" accept=".pdf,application/pdf" onChange={handleFileSelect} hidden />
-                      Parcourir les fichiers
+                      {t('common.browseFiles')}
                     </label>
                     {pendingFile && (
                       <div className="selected-file">
-                        <p className="selected-file-name">Fichier sélectionné : {pendingFile.name}</p>
+                        <p className="selected-file-name">
+                          {t('bulkImport.selectedFile', { name: pendingFile.name })}
+                        </p>
                         <div className="selected-file-actions">
                           <button className="btn-primary" onClick={handleStartImport} disabled={isLoading || isClassifying}>
-                            Démarrer l'import
+                            {t('bulkImport.startImport')}
                           </button>
                           <button className="btn-back" onClick={() => setPendingFile(null)} disabled={isLoading || isClassifying}>
-                            Retirer
+                            {t('common.remove')}
                           </button>
                         </div>
                       </div>
@@ -1185,9 +1200,9 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
                     </svg>
-                    Classification IA uniquement
+                    {t('bulkImport.aiOnlyLabel')}
                   </span>
-                  <span className="checkbox-hint">Envoyer le PDF directement à l'IA sans pré-traitement</span>
+                  <span className="checkbox-hint">{t('bulkImport.sendDirectToAi')}</span>
                 </label>
               )}
 
@@ -1198,7 +1213,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                   setStep('select');
                 }}
               >
-                ← Retour
+                ← {t('common.back')}
               </button>
             </div>
           )}
@@ -1214,13 +1229,13 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                 </div>
                 <div className="paste-instruction-text">
                   <p>
-                    <strong>Instructions :</strong>
+                    <strong>{t('bulkImport.instructionsTitle')} :</strong>
                   </p>
                   <ol>
-                    <li>Configurez l'ordre des colonnes ci-dessous (glisser-déposer)</li>
-                    <li>Ouvrez votre fichier Excel ou Google Sheets</li>
-                    <li>Sélectionnez et copiez les cellules (Ctrl+C / Cmd+C)</li>
-                    <li>Collez dans la zone ci-dessous (Ctrl+V / Cmd+V)</li>
+                    <li>{t('bulkImport.instructionOrder')}</li>
+                    <li>{t('bulkImport.instructionOpenFile')}</li>
+                    <li>{t('bulkImport.instructionCopy')}</li>
+                    <li>{t('bulkImport.instructionPaste')}</li>
                   </ol>
                 </div>
               </div>
@@ -1228,17 +1243,17 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
               {/* Column Order Configurator */}
               <div className="column-configurator">
                 <div className="column-config-header">
-                  <span className="column-config-label">Ordre des colonnes :</span>
+                  <span className="column-config-label">{t('bulkImport.columnOrderLabel')}</span>
                   <button
                     className="column-reset-btn"
                     onClick={() => setColumnOrder(DEFAULT_COLUMN_ORDER)}
-                    title="Réinitialiser"
+                    title={t('bulkImport.reset')}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                       <path d="M3 3v5h5" />
                     </svg>
-                    Réinitialiser
+                    {t('bulkImport.reset')}
                   </button>
                 </div>
                 <div className="column-order-list">
@@ -1265,7 +1280,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                           </svg>
                         </span>
                         <span className="column-chip-label">{config.label}</span>
-                        <button className="column-chip-remove" onClick={() => removeColumn(index)} title="Supprimer">
+                        <button className="column-chip-remove" onClick={() => removeColumn(index)} title={t('common.remove')}>
                           <svg
                             width="12"
                             height="12"
@@ -1281,7 +1296,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                       </div>
                     );
                   })}
-                  {AVAILABLE_COLUMNS.filter((col) => !columnOrder.includes(col.id)).length > 0 && (
+                  {availableColumns.filter((col) => !columnOrder.includes(col.id)).length > 0 && (
                     <div className="column-add-dropdown">
                       <select
                         onChange={(e) => {
@@ -1292,8 +1307,8 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                         }}
                         className="column-add-select"
                       >
-                        <option value="">+ Ajouter</option>
-                        {AVAILABLE_COLUMNS.filter((col) => !columnOrder.includes(col.id)).map((col) => (
+                        <option value="">{t('bulkImport.addColumn')}</option>
+                        {availableColumns.filter((col) => !columnOrder.includes(col.id)).map((col) => (
                           <option key={col.id} value={col.id}>
                             {col.label}
                           </option>
@@ -1303,14 +1318,14 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                   )}
                 </div>
                 <p className="column-config-hint">
-                  <strong>Requis :</strong> Date, Tiers, Mode, Montant · <strong>Optionnel :</strong> Description,
-                  Catégorie, Commentaire
+                  <strong>{t('bulkImport.requiredLabel')}</strong> {t('bulkImport.requiredFields')} ·{' '}
+                  <strong>{t('bulkImport.optionalLabel')}</strong> {t('bulkImport.optionalFields')}
                 </p>
               </div>
 
               <textarea
                 className="paste-textarea"
-                placeholder="Collez vos données ici...&#10;&#10;Exemple :&#10;15/01/2026    Migros    Courses alimentaires    -125.50&#10;16/01/2026    Employeur    Salaire janvier    4500.00"
+                placeholder={t('bulkImport.pastePlaceholder')}
                 value={pasteContent}
                 onChange={(e) => setPasteContent(e.target.value)}
                 rows={12}
@@ -1323,7 +1338,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                     setPasteContent('');
                   }}
                 >
-                  ← Retour
+                  ← {t('common.back')}
                 </button>
                 <button
                   className="btn-primary"
@@ -1333,14 +1348,14 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                   {isLoading ? (
                     <>
                       <div className="loading-spinner small" />
-                      Analyse en cours...
+                      {t('bulkImport.analyzing')}
                     </>
                   ) : (
                     <>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="9 18 15 12 9 6" />
                       </svg>
-                      Analyser les données
+                      {t('bulkImport.analyzeData')}
                     </>
                   )}
                 </button>
@@ -1362,7 +1377,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                         <path d="M9 18h6" />
                       </svg>
                     </div>
-                    <h3>Classification IA en cours</h3>
+                    <h3>{t('bulkImport.classificationInProgress')}</h3>
                     {classifyProgress && (
                       <>
                         <div className="classification-progress-bar">
@@ -1372,11 +1387,16 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                           />
                         </div>
                         <p className="classification-progress-text">
-                          Traitement du lot {classifyProgress.done} sur {classifyProgress.total}
+                          {t('bulkImport.classificationBatchProgress', {
+                            done: classifyProgress.done,
+                            total: classifyProgress.total,
+                          })}
                         </p>
                       </>
                     )}
-                    <p className="classification-hint">Analyse de {transactions.length} transactions...</p>
+                    <p className="classification-hint">
+                      {t('bulkImport.classificationTransactions', { count: transactions.length })}
+                    </p>
                   </div>
                 </div>
               )}
@@ -1418,15 +1438,15 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                 return (
                   <div className="preview-summary">
                     <div className="summary-item income">
-                      <span className="summary-label">Total revenus</span>
+                      <span className="summary-label">{t('bulkImport.totalIncome')}</span>
                       <span className="summary-value">+{totalIncome.toFixed(2)}</span>
                     </div>
                     <div className="summary-item expense">
-                      <span className="summary-label">Total dépenses</span>
+                      <span className="summary-label">{t('bulkImport.totalExpenses')}</span>
                       <span className="summary-value">-{totalExpenses.toFixed(2)}</span>
                     </div>
                     <div className={`summary-item net ${netBalance >= 0 ? 'positive' : 'negative'}`}>
-                      <span className="summary-label">Solde net</span>
+                      <span className="summary-label">{t('bulkImport.netBalance')}</span>
                       <span className="summary-value">
                         {netBalance >= 0 ? '+' : ''}
                         {netBalance.toFixed(2)}
@@ -1439,19 +1459,22 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
               <div className="preview-header">
                 <div className="preview-stats">
                   <span>
-                    {transactions.filter((t) => t.selected).length} / {transactions.length} transactions sélectionnées
+                    {t('bulkImport.transactionsSelected', {
+                      selected: transactions.filter((t) => t.selected).length,
+                      total: transactions.length,
+                    })}
                   </span>
                 </div>
                 <div className="preview-actions">
                   <button className="btn-text" onClick={toggleSelectAll}>
-                    {transactions.every((t) => t.selected) ? 'Tout désélectionner' : 'Tout sélectionner'}
+                    {transactions.every((t) => t.selected) ? t('bulkImport.toggleNone') : t('bulkImport.toggleAll')}
                   </button>
                   {llmAvailable && (
                     <button
                       className="btn-llm-classify"
                       onClick={handleLLMClassification}
                       disabled={isClassifying || transactions.length === 0}
-                      title="Classifier automatiquement avec l'IA"
+                      title={t('bulkImport.classifyWithAiTitle')}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
@@ -1461,9 +1484,12 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                       </svg>
                       {isClassifying
                         ? classifyProgress
-                          ? `Classification ${classifyProgress.done}/${classifyProgress.total}...`
-                          : 'Classification...'
-                        : 'Classifier avec IA'}
+                          ? t('bulkImport.classificationBatchProgress', {
+                              done: classifyProgress.done,
+                              total: classifyProgress.total,
+                            })
+                          : t('bulkImport.classificationRunning')
+                        : t('bulkImport.classifyWithAi')}
                     </button>
                   )}
                   <button className="btn-add-row" onClick={addTransaction}>
@@ -1471,17 +1497,17 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                       <line x1="12" y1="5" x2="12" y2="19" />
                       <line x1="5" y1="12" x2="19" y2="12" />
                     </svg>
-                    Ajouter une ligne
+                    {t('bulkImport.addRow')}
                   </button>
                 </div>
               </div>
 
               {/* Bulk apply controls */}
               <div className="bulk-apply-row">
-                <span className="bulk-apply-label">Appliquer à toutes les sélectionnées :</span>
+                <span className="bulk-apply-label">{t('bulkImport.applyAll')}</span>
                 <div className="bulk-apply-controls">
                   <div className="bulk-apply-field">
-                    <label>Catégorie</label>
+                    <label>{t('bulkImport.category')}</label>
                     <select
                       onChange={(e) => {
                         if (e.target.value) {
@@ -1492,14 +1518,14 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                       className="preview-select"
                     >
                       <option value="">—</option>
-                      <optgroup label="Revenus">
+                      <optgroup label={t('budget.income')}>
                         {incomeItems.map((item) => (
                           <option key={item.id} value={item.id}>
                             {item.groupName} → {item.name}
                           </option>
                         ))}
                       </optgroup>
-                      <optgroup label="Dépenses">
+                      <optgroup label={t('budget.expenses')}>
                         {expenseItems.map((item) => (
                           <option key={item.id} value={item.id}>
                             {item.groupName} → {item.name}
@@ -1507,7 +1533,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                         ))}
                       </optgroup>
                       {savingsCategoryItems.length > 0 && (
-                        <optgroup label="Épargne">
+                        <optgroup label={t('budget.savings')}>
                           {savingsCategoryItems.map((item) => (
                             <option key={item.id} value={item.id}>
                               {item.name}
@@ -1518,7 +1544,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                     </select>
                   </div>
                   <div className="bulk-apply-field">
-                    <label>Mode</label>
+                    <label>{t('bulkImport.paymentMethod')}</label>
                     <select
                       onChange={(e) => {
                         applyPaymentMethodToAll(e.target.value);
@@ -1538,7 +1564,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                           );
                         })}
                       {paymentMethods.some((m) => m.isSavingsAccount) && (
-                        <optgroup label="Comptes d'épargne">
+                        <optgroup label={t('bulkImport.savingsAccounts')}>
                           {paymentMethods
                             .filter((m) => m.isSavingsAccount)
                             .map((m) => {
@@ -1567,65 +1593,65 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                           onChange={toggleSelectAll}
                         />
                       </th>
-                      <th className="col-date">Date *</th>
-                      <th className="col-accounting">Comptabilisé</th>
-                      <th className="col-description">Description</th>
-                      <th className="col-third-party">Tiers *</th>
-                      <th className="col-amount">Montant *</th>
-                      <th className="col-type" title="Type: Dépense ou Revenu">
-                        Type
+                      <th className="col-date">{t('bulkImport.columns.date')} *</th>
+                      <th className="col-accounting">{t('bulkImport.accounted')}</th>
+                      <th className="col-description">{t('bulkImport.columns.description')}</th>
+                      <th className="col-third-party">{t('bulkImport.columns.thirdParty')} *</th>
+                      <th className="col-amount">{t('bulkImport.columns.amount')} *</th>
+                      <th className="col-type" title={t('bulkImport.typeHint')}>
+                        {t('bulkImport.type')}
                       </th>
-                      <th className="col-category">Catégorie *</th>
-                      <th className="col-payment">Mode *</th>
-                      <th className="col-comment">Commentaire</th>
+                      <th className="col-category">{t('bulkImport.categoryRequired')}</th>
+                      <th className="col-payment">{t('bulkImport.paymentMethod')} *</th>
+                      <th className="col-comment">{t('bulkImport.columns.comment')}</th>
                       <th className="col-actions"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {transactions.map((t) => {
-                      const missing = t.selected ? getMissingFields(t) : [];
+                    {transactions.map((tx) => {
+                      const missing = tx.selected ? getMissingFields(tx) : [];
                       const hasErrors = missing.length > 0;
-                      const missingCategory = t.selected && !t.itemId;
+                      const missingCategory = tx.selected && !tx.itemId;
 
                       return (
                         <tr
-                          key={t.id}
-                          className={`${!t.selected ? 'deselected' : ''} ${hasErrors || missingCategory ? 'has-errors' : ''}`}
+                          key={tx.id}
+                          className={`${!tx.selected ? 'deselected' : ''} ${hasErrors || missingCategory ? 'has-errors' : ''}`}
                         >
                           <td>
-                            <input type="checkbox" checked={t.selected} onChange={() => toggleSelect(t.id)} />
+                            <input type="checkbox" checked={tx.selected} onChange={() => toggleSelect(tx.id)} />
                           </td>
                           <td>
                             <input
                               type="text"
-                              value={t.date}
+                              value={tx.date}
                               onChange={(e) => {
                                 const newDate = e.target.value;
                                 if (isValidDateFormat(newDate)) {
-                                  const pm = findPaymentMethod(t.paymentMethod);
+                                  const pm = findPaymentMethod(tx.paymentMethod);
                                   const newAccounting = calculateAccountingPeriod(newDate, pm?.settlementDay ?? null);
-                                  updateTransaction(t.id, {
+                                  updateTransaction(tx.id, {
                                     date: newDate,
                                     accountingMonth: newAccounting.accountingMonth,
                                     accountingYear: newAccounting.accountingYear,
                                   });
                                 } else {
-                                  updateTransaction(t.id, { date: newDate });
+                                  updateTransaction(tx.id, { date: newDate });
                                 }
                               }}
-                              placeholder="JJ/MM/AAAA"
-                              className={`preview-input date ${missing.includes('date') ? 'missing-field' : ''} ${!isValidDateFormat(t.date) && t.date ? 'invalid' : ''}`}
+                              placeholder={t('transactions.datePlaceholder')}
+                              className={`preview-input date ${missing.includes('date') ? 'missing-field' : ''} ${!isValidDateFormat(tx.date) && tx.date ? 'invalid' : ''}`}
                             />
                           </td>
                           <td className="accounting-cell">
                             <select
-                              value={t.accountingMonth}
+                              value={tx.accountingMonth}
                               onChange={(e) =>
-                                updateTransaction(t.id, { accountingMonth: parseInt(e.target.value, 10) })
+                                updateTransaction(tx.id, { accountingMonth: parseInt(e.target.value, 10) })
                               }
                               className="preview-select accounting-month"
                             >
-                              {MONTH_NAMES.map((name, i) => (
+                              {monthNames.map((name, i) => (
                                 <option key={i + 1} value={i + 1}>
                                   {name}
                                 </option>
@@ -1633,10 +1659,10 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                             </select>
                             <input
                               type="number"
-                              value={t.accountingYear}
+                              value={tx.accountingYear}
                               onChange={(e) =>
-                                updateTransaction(t.id, {
-                                  accountingYear: parseInt(e.target.value, 10) || t.accountingYear,
+                                updateTransaction(tx.id, {
+                                  accountingYear: parseInt(e.target.value, 10) || tx.accountingYear,
                                 })
                               }
                               className="preview-input accounting-year"
@@ -1647,25 +1673,25 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                           <td>
                             <input
                               type="text"
-                              value={t.description}
-                              onChange={(e) => updateTransaction(t.id, { description: e.target.value })}
+                              value={tx.description}
+                              onChange={(e) => updateTransaction(tx.id, { description: e.target.value })}
                               className="preview-input description"
-                              placeholder="Description"
+                              placeholder={t('bulkImport.columns.description')}
                             />
                           </td>
                           <td>
                             <ThirdPartyAutocomplete
-                              value={t.thirdParty || ''}
-                              onChange={(value) => updateTransaction(t.id, { thirdParty: value })}
-                              placeholder="Tiers *"
+                              value={tx.thirdParty || ''}
+                              onChange={(value) => updateTransaction(tx.id, { thirdParty: value })}
+                              placeholder={t('bulkImport.thirdPartyPlaceholder')}
                               className={`preview-input third-party ${missing.includes('tiers') ? 'missing-field' : ''}`}
                             />
                           </td>
                           <td>
                             <input
                               type="number"
-                              value={t.amount}
-                              onChange={(e) => updateTransaction(t.id, { amount: parseFloat(e.target.value) || 0 })}
+                              value={tx.amount}
+                              onChange={(e) => updateTransaction(tx.id, { amount: parseFloat(e.target.value) || 0 })}
                               className={`preview-input amount ${missing.includes('montant') ? 'missing-field' : ''}`}
                               step="0.01"
                             />
@@ -1673,15 +1699,15 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                           <td className="type-cell">
                             <button
                               type="button"
-                              className={`type-toggle ${t.isIncome ? 'income' : 'expense'}`}
-                              onClick={() => updateTransaction(t.id, { isIncome: !t.isIncome })}
+                              className={`type-toggle ${tx.isIncome ? 'income' : 'expense'}`}
+                              onClick={() => updateTransaction(tx.id, { isIncome: !tx.isIncome })}
                               title={
-                                t.isIncome
-                                  ? 'Revenu (cliquer pour changer en Dépense)'
-                                  : 'Dépense (cliquer pour changer en Revenu)'
+                                tx.isIncome
+                                  ? t('bulkImport.incomeToggle')
+                                  : t('bulkImport.expenseToggle')
                               }
                             >
-                              {t.isIncome ? (
+                              {tx.isIncome ? (
                                 <>
                                   <svg
                                     width="12"
@@ -1694,7 +1720,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                                     <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
                                     <polyline points="17 6 23 6 23 12" />
                                   </svg>
-                                  <span>Revenu</span>
+                                  <span>{t('bulkImport.income')}</span>
                                 </>
                               ) : (
                                 <>
@@ -1709,28 +1735,28 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                                     <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" />
                                     <polyline points="17 18 23 18 23 12" />
                                   </svg>
-                                  <span>Dépense</span>
+                                  <span>{t('bulkImport.expense')}</span>
                                 </>
                               )}
                             </button>
                           </td>
                           <td>
                             <CategoryCombobox
-                              value={t.itemId}
-                              onChange={(itemId) => updateTransaction(t.id, { itemId })}
+                              value={tx.itemId}
+                              onChange={(itemId) => updateTransaction(tx.id, { itemId })}
                               groups={localGroups}
                               yearId={yearId}
-                              isRequired={t.selected && !t.itemId}
+                              isRequired={tx.selected && !tx.itemId}
                               onItemCreated={handleItemCreated}
                             />
                           </td>
                           <td>
                             <select
-                              value={t.paymentMethod}
+                              value={tx.paymentMethod}
                               onChange={(e) => {
                                 const pm = findPaymentMethod(e.target.value);
-                                const newAccounting = calculateAccountingPeriod(t.date, pm?.settlementDay ?? null);
-                                updateTransaction(t.id, {
+                                const newAccounting = calculateAccountingPeriod(tx.date, pm?.settlementDay ?? null);
+                                updateTransaction(tx.id, {
                                   paymentMethod: e.target.value,
                                   accountingMonth: newAccounting.accountingMonth,
                                   accountingYear: newAccounting.accountingYear,
@@ -1738,7 +1764,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                               }}
                               className={`preview-select ${missing.includes('mode') ? 'missing-field' : ''}`}
                             >
-                              <option value="">- Mode * -</option>
+                              <option value="">{t('bulkImport.paymentMethodPlaceholder')}</option>
                               {paymentMethods
                                 .filter((m) => !m.isSavingsAccount)
                                 .map((m) => {
@@ -1750,7 +1776,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                                   );
                                 })}
                               {paymentMethods.some((m) => m.isSavingsAccount) && (
-                                <optgroup label="Comptes d'épargne">
+                                <optgroup label={t('bulkImport.savingsAccounts')}>
                                   {paymentMethods
                                     .filter((m) => m.isSavingsAccount)
                                     .map((m) => {
@@ -1768,17 +1794,17 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                           <td>
                             <input
                               type="text"
-                              value={t.comment || ''}
-                              onChange={(e) => updateTransaction(t.id, { comment: e.target.value })}
+                              value={tx.comment || ''}
+                              onChange={(e) => updateTransaction(tx.id, { comment: e.target.value })}
                               className="preview-input comment"
-                              placeholder="Commentaire"
+                              placeholder={t('bulkImport.commentPlaceholder')}
                             />
                           </td>
                           <td>
                             <button
                               className="btn-icon delete"
-                              onClick={() => removeTransaction(t.id)}
-                              title="Supprimer"
+                              onClick={() => removeTransaction(tx.id)}
+                              title={t('common.delete')}
                             >
                               <svg
                                 width="16"
@@ -1805,7 +1831,7 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                   className="btn-back"
                   onClick={() => setStep(importSource === 'spreadsheet' ? 'paste' : 'upload')}
                 >
-                  ← Retour
+                  ← {t('common.back')}
                 </button>
                 <button
                   className="btn-primary"
@@ -1815,14 +1841,16 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                   {isLoading ? (
                     <>
                       <div className="loading-spinner small" />
-                      Import en cours...
+                      {t('bulkImport.importing')}
                     </>
                   ) : (
                     <>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
-                      Importer {transactions.filter((t) => t.selected && t.itemId).length} transactions
+                      {t('bulkImport.importButton', {
+                        count: transactions.filter((t) => t.selected && t.itemId).length,
+                      })}
                     </>
                   )}
                 </button>
@@ -1838,10 +1866,10 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
                   <polyline points="16 10 11 15 8 12" />
                 </svg>
               </div>
-              <h3>{importedCount} transactions importées avec succès</h3>
-              <p>Les transactions ont été ajoutées à votre budget.</p>
+              <h3>{t('bulkImport.importedSuccessTitle', { count: importedCount })}</h3>
+              <p>{t('bulkImport.importedSuccessSubtitle')}</p>
               <button className="btn-primary" onClick={handleClose}>
-                Fermer
+                {t('common.close')}
               </button>
             </div>
           )}

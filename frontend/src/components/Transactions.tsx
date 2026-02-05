@@ -18,6 +18,7 @@ import {
   updateTransaction,
   updateTransfer,
 } from '../api';
+import { useI18n } from '../contexts/I18nContext';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import type { BudgetGroup } from '../types';
@@ -26,8 +27,6 @@ import { logger } from '../utils/logger';
 import BulkImportModal from './BulkImportModal';
 import ConfirmDialog from './ConfirmDialog';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
-
-const MONTH_NAMES = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 
 // Helper to format name with institution
 const formatWithInstitution = (name: string, institution: string | null): string => {
@@ -50,8 +49,8 @@ interface UnifiedEntry {
   transfer?: Transfer;
 }
 
-function formatAccountingPeriod(month: number, year: number): string {
-  return `${MONTH_NAMES[month - 1]} ${year}`;
+function formatAccountingPeriod(month: number, year: number, monthNames: string[]): string {
+  return `${monthNames[month - 1]} ${year}`;
 }
 
 interface TransactionsProps {
@@ -76,6 +75,7 @@ interface Filters {
 export default function Transactions({ year, yearId, groups, onTransactionsChanged }: TransactionsProps) {
   const formatCurrency = useFormatCurrency();
   const { dialogProps, confirm } = useConfirmDialog();
+  const { t, monthNames } = useI18n();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -352,17 +352,18 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
           break;
         }
         case 'category': {
+          const transferLabel = t('transactions.typeTransfer');
           const catA =
             a.type === 'transaction' && a.transaction?.groupName && a.transaction?.itemName
               ? `${a.transaction.groupName} → ${a.transaction.itemName}`
               : a.type === 'transfer'
-                ? 'Transfert'
+                ? transferLabel
                 : '';
           const catB =
             b.type === 'transaction' && b.transaction?.groupName && b.transaction?.itemName
               ? `${b.transaction.groupName} → ${b.transaction.itemName}`
               : b.type === 'transfer'
-                ? 'Transfert'
+                ? transferLabel
                 : '';
           comparison = catA.localeCompare(catB);
           break;
@@ -376,7 +377,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     });
 
     return result;
-  }, [unifiedEntries, filters, sortField, sortDirection]);
+  }, [unifiedEntries, filters, sortField, sortDirection, t]);
 
   // Selection handlers
   const toggleSelect = useCallback((id: string) => {
@@ -421,9 +422,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
     const count = selectedIds.size;
     const confirmed = await confirm({
-      title: 'Supprimer la sélection',
-      message: `Êtes-vous sûr de vouloir supprimer ${count} élément${count > 1 ? 's' : ''} ?`,
-      confirmLabel: 'Supprimer',
+      title: t('transactions.deleteSelectionTitle'),
+      message: t('transactions.deleteSelectionMessage', { count, suffix: count > 1 ? 's' : '' }),
+      confirmLabel: t('common.delete'),
       variant: 'danger',
     });
     if (!confirmed) return;
@@ -710,11 +711,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     const isTransfer = entryId.startsWith('x_');
 
     const confirmed = await confirm({
-      title: isTransfer ? 'Supprimer le transfert' : 'Supprimer la transaction',
-      message: isTransfer
-        ? 'Êtes-vous sûr de vouloir supprimer ce transfert ?'
-        : 'Êtes-vous sûr de vouloir supprimer cette transaction ?',
-      confirmLabel: 'Supprimer',
+      title: isTransfer ? t('transactions.deleteTransferTitle') : t('transactions.deleteTransactionTitle'),
+      message: isTransfer ? t('transactions.deleteTransferConfirm') : t('transactions.deleteTransactionConfirm'),
+      confirmLabel: t('common.delete'),
       variant: 'danger',
     });
     if (!confirmed) return;
@@ -759,7 +758,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       <div className="transactions-container">
         <div className="content-loading">
           <div className="loading-spinner" />
-          <p>Chargement des transactions...</p>
+          <p>{t('transactions.loading')}</p>
         </div>
       </div>
     );
@@ -769,7 +768,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     <div className="transactions-container">
       <div className="transactions-header">
         <div className="transactions-title-row">
-          <h2>Transactions</h2>
+          <h2>{t('transactions.title')}</h2>
           <div className="transactions-actions">
             {selectedIds.size > 0 && (
               <button className="btn-danger" onClick={handleBulkDelete} disabled={isSubmitting}>
@@ -777,7 +776,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                 </svg>
-                Supprimer ({selectedIds.size})
+                {t('transactions.deleteSelected', { count: selectedIds.size })}
               </button>
             )}
             {hasActiveFilters && (
@@ -786,7 +785,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
-                Effacer les filtres
+                {t('transactions.clearFilters')}
               </button>
             )}
             <button className="btn-import" onClick={() => setShowImportModal(true)}>
@@ -795,34 +794,34 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 <polyline points="17 8 12 3 7 8" />
                 <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
-              Import en masse
+              {t('transactions.bulkImport')}
             </button>
           </div>
         </div>
 
         <div className="transactions-summary">
           <div className="summary-item count">
-            <span className="summary-label">Affichées</span>
+            <span className="summary-label">{t('transactions.summaryShown')}</span>
             <span className="summary-value">
               {filteredEntries.length} / {unifiedEntries.length}
             </span>
           </div>
           <div className="summary-item income">
-            <span className="summary-label">Revenus</span>
+            <span className="summary-label">{t('budget.income')}</span>
             <span className="summary-value">{formatCurrency(totalIncome, true)}</span>
           </div>
           <div className="summary-item expense">
-            <span className="summary-label">Dépenses</span>
+            <span className="summary-label">{t('budget.expenses')}</span>
             <span className="summary-value">{formatCurrency(totalExpenses, true)}</span>
           </div>
           {netSavings !== 0 && (
             <div className={`summary-item savings ${netSavings >= 0 ? 'positive' : 'negative'}`}>
-              <span className="summary-label">Épargne</span>
+              <span className="summary-label">{t('transactions.summarySavings')}</span>
               <span className="summary-value">{formatCurrency(netSavings, true)}</span>
             </div>
           )}
           <div className={`summary-item balance ${totalIncome - totalExpenses >= 0 ? 'positive' : 'negative'}`}>
-            <span className="summary-label">Solde</span>
+            <span className="summary-label">{t('transactions.summaryBalance')}</span>
             <span className="summary-value">{formatCurrency(totalIncome - totalExpenses, true)}</span>
           </div>
         </div>
@@ -852,7 +851,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               <line x1="12" y1="1" x2="12" y2="23" />
               <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
             </svg>
-            Transaction
+            {t('transactions.typeTransaction')}
           </button>
           <button
             type="button"
@@ -865,7 +864,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               <polyline points="7 23 3 19 7 15" />
               <path d="M21 13v2a4 4 0 0 1-4 4H3" />
             </svg>
-            Transfert
+            {t('transactions.typeTransfer')}
           </button>
         </div>
 
@@ -876,7 +875,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 type="text"
                 value={newDate}
                 onChange={(e) => setNewDate(e.target.value)}
-                placeholder="JJ/MM/AAAA"
+                placeholder={t('transactions.datePlaceholder')}
                 pattern="\d{2}/\d{2}/\d{4}"
                 className={`form-input date-input ${!isValidDateFormat(newDate) && newDate ? 'invalid' : ''}`}
               />
@@ -898,7 +897,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                   const hiddenInput = e.currentTarget.previousElementSibling as HTMLInputElement;
                   hiddenInput?.showPicker?.();
                 }}
-                title="Ouvrir le calendrier"
+                title={t('transactions.openCalendar')}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -913,7 +912,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               <ThirdPartyAutocomplete
                 value={newThirdParty}
                 onChange={setNewThirdParty}
-                placeholder="Tiers (destinataire/émetteur)"
+                placeholder={t('transactions.thirdPartyPlaceholder')}
                 className="form-input third-party-input"
               />
             ) : (
@@ -924,8 +923,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                   className="form-select account-select"
                   required
                 >
-                  <option value="">Compte source</option>
-                  <optgroup label="Comptes de paiement">
+                  <option value="">{t('transactions.sourceAccount')}</option>
+                  <optgroup label={t('accounts.paymentAccounts')}>
                     {transferAccounts
                       .filter((a) => !a.isSavingsAccount)
                       .map((a) => (
@@ -934,7 +933,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                         </option>
                       ))}
                   </optgroup>
-                  <optgroup label="Comptes d'épargne">
+                  <optgroup label={t('accounts.savingsAccounts')}>
                     {transferAccounts
                       .filter((a) => a.isSavingsAccount)
                       .map((a) => (
@@ -951,8 +950,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                   className="form-select account-select"
                   required
                 >
-                  <option value="">Compte destination</option>
-                  <optgroup label="Comptes de paiement">
+                  <option value="">{t('transactions.destinationAccount')}</option>
+                  <optgroup label={t('accounts.paymentAccounts')}>
                     {transferAccounts
                       .filter((a) => !a.isSavingsAccount)
                       .map((a) => (
@@ -961,7 +960,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                         </option>
                       ))}
                   </optgroup>
-                  <optgroup label="Comptes d'épargne">
+                  <optgroup label={t('accounts.savingsAccounts')}>
                     {transferAccounts
                       .filter((a) => a.isSavingsAccount)
                       .map((a) => (
@@ -976,7 +975,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
             <input
               type="text"
-              placeholder="Description (optionnel)"
+              placeholder={t('transactions.descriptionPlaceholder')}
               value={newDescription}
               onChange={(e) => setNewDescription(e.target.value)}
               className="form-input description-input"
@@ -990,7 +989,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 onChange={(e) => setNewPaymentMethod(e.target.value)}
                 className="form-select payment-method-select"
               >
-                <option value="">Moyen de paiement</option>
+                <option value="">{t('transactions.paymentMethod')}</option>
                 {paymentMethods
                   .filter((m) => !m.isSavingsAccount)
                   .map((method) => (
@@ -999,7 +998,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                     </option>
                   ))}
                 {paymentMethods.some((m) => m.isSavingsAccount) && (
-                  <optgroup label="Comptes d'épargne">
+                  <optgroup label={t('accounts.savingsAccounts')}>
                     {paymentMethods
                       .filter((m) => m.isSavingsAccount)
                       .map((method) => (
@@ -1012,7 +1011,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               </select>
               <input
                 type="number"
-                placeholder="Montant"
+                placeholder={t('transactions.amountPlaceholder')}
                 value={newAmount}
                 onChange={(e) => setNewAmount(e.target.value)}
                 step="0.01"
@@ -1029,15 +1028,15 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 className="form-select category-select"
                 required
               >
-                <option value="">Sélectionner une catégorie</option>
-                <optgroup label="Revenus">
+                <option value="">{t('transactions.selectCategory')}</option>
+                <optgroup label={t('budget.income')}>
                   {incomeItems.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.groupName} → {item.name}
                     </option>
                   ))}
                 </optgroup>
-                <optgroup label="Dépenses">
+                <optgroup label={t('budget.expenses')}>
                   {expenseItems.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.groupName} → {item.name}
@@ -1045,7 +1044,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                   ))}
                 </optgroup>
                 {savingsCategoryItems.length > 0 && (
-                  <optgroup label="Épargne">
+                  <optgroup label={t('budget.savings')}>
                     {savingsCategoryItems.map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.name}
@@ -1057,7 +1056,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
             ) : (
               <input
                 type="number"
-                placeholder="Montant"
+                placeholder={t('transactions.amountPlaceholder')}
                 value={newAmount}
                 onChange={(e) => setNewAmount(e.target.value)}
                 step="0.01"
@@ -1078,10 +1077,10 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
-              Ajouter
+              {t('common.add')}
             </button>
-          </div>
-        </form>
+        </div>
+      </form>
       </div>
 
       {/* Transactions List */}
@@ -1092,7 +1091,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               <line x1="12" y1="1" x2="12" y2="23" />
               <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
             </svg>
-            <p>Aucune transaction enregistrée</p>
+            <p>{t('transactions.empty')}</p>
           </div>
         ) : filteredEntries.length === 0 ? (
           <div className="empty-transactions">
@@ -1100,9 +1099,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
-            <p>Aucune transaction ne correspond aux filtres</p>
+            <p>{t('transactions.emptyFiltered')}</p>
             <button className="btn-link" onClick={clearFilters}>
-              Effacer les filtres
+              {t('transactions.clearFilters')}
             </button>
           </div>
         ) : (
@@ -1117,32 +1116,32 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                       if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
                     }}
                     onChange={toggleSelectAll}
-                    title="Tout sélectionner"
+                    title={t('transactions.selectAll')}
                   />
                 </th>
                 <th className="sortable" onClick={() => handleSort('date')}>
-                  Date <SortIcon field="date" />
+                  {t('transactions.date')} <SortIcon field="date" />
                 </th>
-                <th className="col-accounting" title="Mois comptable">
-                  Comptabilisé
+                <th className="col-accounting" title={t('transactions.accountingMonth')}>
+                  {t('transactions.accounting')}
                 </th>
                 <th className="sortable" onClick={() => handleSort('thirdParty')}>
-                  Tiers <SortIcon field="thirdParty" />
+                  {t('transactions.thirdParty')} <SortIcon field="thirdParty" />
                 </th>
                 <th className="sortable" onClick={() => handleSort('description')}>
-                  Description <SortIcon field="description" />
+                  {t('transactions.description')} <SortIcon field="description" />
                 </th>
-                <th>Commentaire</th>
+                <th>{t('transactions.comment')}</th>
                 <th className="sortable" onClick={() => handleSort('paymentMethod')}>
-                  Mode <SortIcon field="paymentMethod" />
+                  {t('transactions.paymentMethod')} <SortIcon field="paymentMethod" />
                 </th>
                 <th className="sortable" onClick={() => handleSort('category')}>
-                  Catégorie <SortIcon field="category" />
+                  {t('transactions.category')} <SortIcon field="category" />
                 </th>
                 <th className="sortable" onClick={() => handleSort('amount')}>
-                  Montant <SortIcon field="amount" />
+                  {t('transactions.amount')} <SortIcon field="amount" />
                 </th>
-                <th>Actions</th>
+                <th>{t('transactions.actions')}</th>
               </tr>
               <tr className="filter-row">
                 <th></th>
@@ -1156,7 +1155,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                         const [start, end] = dates as [Date | null, Date | null];
                         setFilters((f) => ({ ...f, dateFrom: start, dateTo: end }));
                       }}
-                      placeholderText="Sélectionner..."
+                      placeholderText={t('common.selectPlaceholder')}
                       className="column-filter date-range-input"
                       dateFormat="dd/MM/yyyy"
                       isClearable
@@ -1167,7 +1166,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 <th>
                   <input
                     type="text"
-                    placeholder="Filtrer..."
+                    placeholder={t('transactions.filterPlaceholder')}
                     value={filters.thirdParty}
                     onChange={(e) => setFilters((f) => ({ ...f, thirdParty: e.target.value }))}
                     className="column-filter"
@@ -1176,7 +1175,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 <th>
                   <input
                     type="text"
-                    placeholder="Filtrer..."
+                    placeholder={t('transactions.filterPlaceholder')}
                     value={filters.description}
                     onChange={(e) => setFilters((f) => ({ ...f, description: e.target.value }))}
                     className="column-filter"
@@ -1193,10 +1192,10 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                       }}
                     >
                       {filters.paymentMethods.length === 0
-                        ? 'Tous'
+                        ? t('transactions.all')
                         : filters.paymentMethods.length === 1
                           ? filters.paymentMethods[0]
-                          : `${filters.paymentMethods.length} sélectionnés`}
+                          : t('transactions.paymentMethodsSelected', { count: filters.paymentMethods.length })}
                     </button>
                     <div className="multi-select-dropdown">
                       <label className="multi-select-option select-all">
@@ -1205,7 +1204,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                           checked={filters.paymentMethods.length === 0}
                           onChange={() => setFilters((f) => ({ ...f, paymentMethods: [] }))}
                         />
-                        <span>Tous</span>
+                        <span>{t('transactions.all')}</span>
                       </label>
                       {uniquePaymentMethods.map((m) => (
                         <label key={m} className="multi-select-option">
@@ -1235,11 +1234,11 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                     onChange={(e) => setFilters((f) => ({ ...f, categoryFilter: e.target.value }))}
                     className="column-filter category-filter-hierarchical"
                   >
-                    <option value="">Toutes</option>
-                    <option value="section:transfer">↔ TRANSFERTS</option>
+                    <option value="">{t('transactions.all')}</option>
+                    <option value="section:transfer">{t('transactions.transfersSection')}</option>
                     {groups.filter((g) => g.type === 'income').length > 0 && (
                       <>
-                        <option value="section:income">▸ REVENUS</option>
+                        <option value="section:income">{t('transactions.sectionIncome')}</option>
                         {groups
                           .filter((g) => g.type === 'income')
                           .map((group) => (
@@ -1259,7 +1258,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                     )}
                     {groups.filter((g) => g.type === 'expense').length > 0 && (
                       <>
-                        <option value="section:expense">▸ DÉPENSES</option>
+                        <option value="section:expense">{t('transactions.sectionExpenses')}</option>
                         {groups
                           .filter((g) => g.type === 'expense')
                           .map((group) => (
@@ -1307,7 +1306,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 type="text"
                                 value={editDate}
                                 onChange={(e) => setEditDate(e.target.value)}
-                                placeholder="JJ/MM/AAAA"
+                                placeholder={t('transactions.datePlaceholder')}
                                 className={`edit-input ${!isValidDateFormat(editDate) && editDate ? 'invalid' : ''}`}
                                 // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
                                 autoFocus
@@ -1330,6 +1329,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                   const hiddenInput = e.currentTarget.previousElementSibling as HTMLInputElement;
                                   hiddenInput?.showPicker?.();
                                 }}
+                                title={t('transactions.openCalendar')}
                               >
                                 <svg
                                   width="14"
@@ -1353,7 +1353,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               onChange={(e) => setEditAccountingMonth(Number(e.target.value))}
                               className="edit-select accounting-month-select"
                             >
-                              {MONTH_NAMES.map((name, i) => (
+                              {monthNames.map((name, i) => (
                                 <option key={i + 1} value={i + 1}>
                                   {name}
                                 </option>
@@ -1375,8 +1375,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 onChange={(e) => setEditSourceAccount(e.target.value)}
                                 className="edit-select"
                               >
-                                <option value="">Source</option>
-                                <optgroup label="Comptes de paiement">
+                                <option value="">{t('transactions.sourceAccount')}</option>
+                                <optgroup label={t('accounts.paymentAccounts')}>
                                   {transferAccounts
                                     .filter((a) => !a.isSavingsAccount)
                                     .map((a) => (
@@ -1385,7 +1385,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                       </option>
                                     ))}
                                 </optgroup>
-                                <optgroup label="Comptes d'épargne">
+                                <optgroup label={t('accounts.savingsAccounts')}>
                                   {transferAccounts
                                     .filter((a) => a.isSavingsAccount)
                                     .map((a) => (
@@ -1401,8 +1401,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 onChange={(e) => setEditDestAccount(e.target.value)}
                                 className="edit-select"
                               >
-                                <option value="">Destination</option>
-                                <optgroup label="Comptes de paiement">
+                                <option value="">{t('transactions.destinationAccount')}</option>
+                                <optgroup label={t('accounts.paymentAccounts')}>
                                   {transferAccounts
                                     .filter((a) => !a.isSavingsAccount)
                                     .map((a) => (
@@ -1411,7 +1411,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                       </option>
                                     ))}
                                 </optgroup>
-                                <optgroup label="Comptes d'épargne">
+                                <optgroup label={t('accounts.savingsAccounts')}>
                                   {transferAccounts
                                     .filter((a) => a.isSavingsAccount)
                                     .map((a) => (
@@ -1424,18 +1424,18 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             </div>
                           </td>
                           <td>
-                            <input
-                              type="text"
-                              value={editDescription}
-                              onChange={(e) => setEditDescription(e.target.value)}
-                              className="edit-input"
-                              placeholder="Description"
-                            />
+                              <input
+                                type="text"
+                                value={editDescription}
+                                onChange={(e) => setEditDescription(e.target.value)}
+                                className="edit-input"
+                                placeholder={t('transactions.description')}
+                              />
                           </td>
                           <td>-</td>
                           <td>-</td>
                           <td>
-                            <span className="transfer-badge">Transfert</span>
+                            <span className="transfer-badge">{t('transactions.typeTransfer')}</span>
                           </td>
                           <td>
                             <input
@@ -1447,7 +1447,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             />
                           </td>
                           <td className="actions-cell">
-                            <button className="btn-icon save" onClick={handleUpdate} title="Sauvegarder">
+                            <button className="btn-icon save" onClick={handleUpdate} title={t('common.save')}>
                               <svg
                                 width="16"
                                 height="16"
@@ -1459,7 +1459,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 <polyline points="20 6 9 17 4 12" />
                               </svg>
                             </button>
-                            <button className="btn-icon cancel" onClick={cancelEdit} title="Annuler">
+                            <button className="btn-icon cancel" onClick={cancelEdit} title={t('common.cancel')}>
                               <svg
                                 width="16"
                                 height="16"
@@ -1491,7 +1491,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 type="text"
                                 value={editDate}
                                 onChange={(e) => setEditDate(e.target.value)}
-                                placeholder="JJ/MM/AAAA"
+                                placeholder={t('transactions.datePlaceholder')}
                                 pattern="\d{2}/\d{2}/\d{4}"
                                 className={`edit-input ${!isValidDateFormat(editDate) && editDate ? 'invalid' : ''}`}
                                 // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
@@ -1515,7 +1515,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                   const hiddenInput = e.currentTarget.previousElementSibling as HTMLInputElement;
                                   hiddenInput?.showPicker?.();
                                 }}
-                                title="Ouvrir le calendrier"
+                                title={t('transactions.openCalendar')}
                               >
                                 <svg
                                   width="14"
@@ -1539,7 +1539,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               onChange={(e) => setEditAccountingMonth(Number(e.target.value))}
                               className="edit-select accounting-month-select"
                             >
-                              {MONTH_NAMES.map((name, i) => (
+                              {monthNames.map((name, i) => (
                                 <option key={i + 1} value={i + 1}>
                                   {name}
                                 </option>
@@ -1558,7 +1558,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             <ThirdPartyAutocomplete
                               value={editThirdParty}
                               onChange={setEditThirdParty}
-                              placeholder="Tiers"
+                              placeholder={t('transactions.thirdParty')}
                               className="edit-input"
                             />
                           </td>
@@ -1568,7 +1568,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               value={editDescription}
                               onChange={(e) => setEditDescription(e.target.value)}
                               className="edit-input"
-                              placeholder="Description"
+                              placeholder={t('transactions.description')}
                             />
                           </td>
                           <td>
@@ -1577,7 +1577,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               value={editComment}
                               onChange={(e) => setEditComment(e.target.value)}
                               className="edit-input"
-                              placeholder="Commentaire"
+                              placeholder={t('transactions.comment')}
                             />
                           </td>
                           <td>
@@ -1586,7 +1586,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               onChange={(e) => setEditPaymentMethod(e.target.value)}
                               className="edit-select"
                             >
-                              <option value="">-</option>
+                              <option value="">{t('common.none')}</option>
                               {paymentMethods
                                 .filter((m) => !m.isSavingsAccount)
                                 .map((method) => (
@@ -1595,7 +1595,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                   </option>
                                 ))}
                               {paymentMethods.some((m) => m.isSavingsAccount) && (
-                                <optgroup label="Comptes d'épargne">
+                                <optgroup label={t('accounts.savingsAccounts')}>
                                   {paymentMethods
                                     .filter((m) => m.isSavingsAccount)
                                     .map((method) => (
@@ -1613,15 +1613,15 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               onChange={(e) => setEditItemId(e.target.value ? Number(e.target.value) : null)}
                               className="edit-select"
                             >
-                              <option value="">Non catégorisé</option>
-                              <optgroup label="Revenus">
+                              <option value="">{t('transactions.uncategorized')}</option>
+                              <optgroup label={t('budget.income')}>
                                 {incomeItems.map((item) => (
                                   <option key={item.id} value={item.id}>
                                     {item.groupName} → {item.name}
                                   </option>
                                 ))}
                               </optgroup>
-                              <optgroup label="Dépenses">
+                              <optgroup label={t('budget.expenses')}>
                                 {expenseItems.map((item) => (
                                   <option key={item.id} value={item.id}>
                                     {item.groupName} → {item.name}
@@ -1629,7 +1629,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 ))}
                               </optgroup>
                               {savingsCategoryItems.length > 0 && (
-                                <optgroup label="Épargne">
+                                <optgroup label={t('budget.savings')}>
                                   {savingsCategoryItems.map((item) => (
                                     <option key={item.id} value={item.id}>
                                       {item.name}
@@ -1649,7 +1649,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             />
                           </td>
                           <td className="actions-cell">
-                            <button className="btn-icon save" onClick={handleUpdate} title="Sauvegarder">
+                            <button className="btn-icon save" onClick={handleUpdate} title={t('common.save')}>
                               <svg
                                 width="16"
                                 height="16"
@@ -1661,7 +1661,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 <polyline points="20 6 9 17 4 12" />
                               </svg>
                             </button>
-                            <button className="btn-icon cancel" onClick={cancelEdit} title="Annuler">
+                            <button className="btn-icon cancel" onClick={cancelEdit} title={t('common.cancel')}>
                               <svg
                                 width="16"
                                 height="16"
@@ -1688,7 +1688,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                         </td>
                         <td className="date-cell">{formatDateDisplay(entry.date)}</td>
                         <td className="accounting-cell">
-                          {formatAccountingPeriod(entry.accountingMonth, entry.accountingYear)}
+                          {formatAccountingPeriod(entry.accountingMonth, entry.accountingYear, monthNames)}
                         </td>
                         <td className="third-party-cell">
                           {isTransfer ? (
@@ -1734,12 +1734,12 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 <polyline points="7 23 3 19 7 15" />
                                 <path d="M21 13v2a4 4 0 0 1-4 4H3" />
                               </svg>
-                              Transfert
+                              {t('transactions.typeTransfer')}
                             </span>
                           ) : transaction?.groupName && transaction?.itemName ? (
                             `${transaction.groupName} → ${transaction.itemName}`
                           ) : (
-                            <span className="uncategorized">Non catégorisé</span>
+                            <span className="uncategorized">{t('transactions.uncategorized')}</span>
                           )}
                         </td>
                         <td
@@ -1753,7 +1753,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             onClick={() =>
                               isTransfer ? startEditTransfer(transfer!) : startEditTransaction(transaction!)
                             }
-                            title="Modifier"
+                            title={t('common.edit')}
                           >
                             <svg
                               width="16"
@@ -1767,7 +1767,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
                           </button>
-                          <button className="btn-icon delete" onClick={() => handleDelete(entry.id)} title="Supprimer">
+                          <button className="btn-icon delete" onClick={() => handleDelete(entry.id)} title={t('common.delete')}>
                             <svg
                               width="16"
                               height="16"

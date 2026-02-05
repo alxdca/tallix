@@ -19,29 +19,29 @@ Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 const DEFAULT_BUDGET_ID = 1;
 
 export const MONTHS = [
-  'Janvier',
-  'Février',
-  'Mars',
-  'Avril',
-  'Mai',
-  'Juin',
-  'Juillet',
-  'Août',
-  'Septembre',
-  'Octobre',
-  'Novembre',
-  'Décembre',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ] as const;
 
 // Default unclassified category constants
-export const UNCLASSIFIED_GROUP_NAME = 'Non classé';
+export const UNCLASSIFIED_GROUP_NAME = 'Unclassified';
 export const UNCLASSIFIED_GROUP_SLUG = 'non-classe';
-export const UNCLASSIFIED_ITEM_NAME = 'Non classé';
+export const UNCLASSIFIED_ITEM_NAME = 'Unclassified';
 export const UNCLASSIFIED_ITEM_SLUG = 'non-classe';
 export const UNCLASSIFIED_SORT_ORDER = 9999; // High number to appear at the end
 
 // Savings category constants
-export const SAVINGS_GROUP_NAME = 'Épargne';
+export const SAVINGS_GROUP_NAME = 'Savings';
 export const SAVINGS_GROUP_SLUG = 'epargne';
 export const SAVINGS_GROUP_TYPE = 'savings';
 export const SAVINGS_SORT_ORDER = 998; // High but before unclassified
@@ -682,7 +682,7 @@ export async function updateMonthlyValue(
 // ============ SAVINGS CATEGORY MANAGEMENT ============
 
 /**
- * Get or create the "Épargne" savings group for a budget
+ * Get or create the "Savings" group for a budget
  */
 export async function getOrCreateSavingsGroup(budgetId: number = DEFAULT_BUDGET_ID): Promise<number> {
   // Check if savings group already exists

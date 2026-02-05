@@ -42,8 +42,6 @@ async function ensureDefaultBudget(userId: string): Promise<void> {
 
   await db.insert(budgets).values({
     userId,
-    name: 'Mon Budget',
-    description: 'Budget par défaut',
   });
 }
 

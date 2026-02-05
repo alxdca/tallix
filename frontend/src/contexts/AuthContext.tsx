@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { buildApiError } from '../api';
 
 interface User {
   id: string;
@@ -70,8 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Login failed');
+      throw await buildApiError(response, 'Login failed');
     }
 
     const data = await response.json();
@@ -90,8 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Registration failed');
+      throw await buildApiError(response, 'Registration failed');
     }
 
     const data = await response.json();

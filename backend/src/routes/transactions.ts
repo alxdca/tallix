@@ -17,7 +17,7 @@ router.get(
 // GET /api/transactions - Get all transactions for current year
 router.get(
   '/',
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (_req, res) => {
     const currentYear = new Date().getFullYear();
     const transactions = await transactionsSvc.getTransactionsForYear(currentYear);
     res.json(transactions);

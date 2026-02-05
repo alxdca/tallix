@@ -1,7 +1,15 @@
 import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, MonthlyValue, OrganizedBudgetData } from './types';
 
+interface SectionLabels {
+  income: string;
+  expense: string;
+}
+
 // Organize flat budget data into 2-layer hierarchy (income and expenses)
-export function organizeBudgetData(data: BudgetData): OrganizedBudgetData {
+export function organizeBudgetData(
+  data: BudgetData,
+  labels: SectionLabels = { income: 'Income', expense: 'Expenses' }
+): OrganizedBudgetData {
   const incomeGroups = data.groups.filter((g) => g.type === 'income');
   const expenseGroups = data.groups.filter((g) => g.type === 'expense');
 
@@ -11,12 +19,12 @@ export function organizeBudgetData(data: BudgetData): OrganizedBudgetData {
     sections: [
       {
         type: 'income',
-        name: 'Revenus',
+        name: labels.income,
         groups: incomeGroups,
       },
       {
         type: 'expense',
-        name: 'Dépenses',
+        name: labels.expense,
         groups: expenseGroups,
       },
     ],

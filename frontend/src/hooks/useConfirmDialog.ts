@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useI18n } from '../contexts/I18nContext';
 
 interface ConfirmDialogState {
   isOpen: boolean;
@@ -19,12 +20,15 @@ interface ConfirmOptions {
 }
 
 export function useConfirmDialog() {
+  const { t } = useI18n();
+  const defaultConfirmLabel = t('common.confirm');
+  const defaultCancelLabel = t('common.cancel');
   const [state, setState] = useState<ConfirmDialogState>({
     isOpen: false,
     title: '',
     message: '',
-    confirmLabel: 'Confirmer',
-    cancelLabel: 'Annuler',
+    confirmLabel: defaultConfirmLabel,
+    cancelLabel: defaultCancelLabel,
     variant: 'danger',
     onConfirm: () => {},
   });
@@ -35,8 +39,8 @@ export function useConfirmDialog() {
         isOpen: true,
         title: options.title,
         message: options.message,
-        confirmLabel: options.confirmLabel || 'Confirmer',
-        cancelLabel: options.cancelLabel || 'Annuler',
+        confirmLabel: options.confirmLabel || defaultConfirmLabel,
+        cancelLabel: options.cancelLabel || defaultCancelLabel,
         variant: options.variant || 'danger',
         onConfirm: () => {
           setState((prev) => ({ ...prev, isOpen: false }));
@@ -44,7 +48,7 @@ export function useConfirmDialog() {
         },
       });
     });
-  }, []);
+  }, [defaultConfirmLabel, defaultCancelLabel]);
 
   const cancel = useCallback(() => {
     setState((prev) => ({ ...prev, isOpen: false }));

@@ -234,7 +234,7 @@ export async function setPaymentMethodAsAccount(id: number, isAccount: boolean):
 }
 
 // Update payment method isSavingsAccount flag
-// Also creates/deletes corresponding budget items in the "Épargne" category
+// Also creates/deletes corresponding budget items in the "Savings" category
 export async function setPaymentMethodAsSavingsAccount(id: number, isSavingsAccount: boolean): Promise<void> {
   // Import here to avoid circular dependency
   const budgetSvc = await import('./budget.js');

@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { createItem } from '../api';
+import { useI18n } from '../contexts/I18nContext';
 import type { BudgetGroup, GroupType } from '../types';
 import { logger } from '../utils/logger';
 
@@ -35,6 +36,7 @@ export default function CategoryCombobox({
   isRequired = false,
   onItemCreated,
 }: CategoryComboboxProps) {
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -159,11 +161,11 @@ export default function CategoryCombobox({
   const getGroupTypeLabel = (type: GroupType) => {
     switch (type) {
       case 'income':
-        return 'Revenu';
+        return t('categoryCombobox.income');
       case 'expense':
-        return 'Dépense';
+        return t('categoryCombobox.expense');
       case 'savings':
-        return 'Épargne';
+        return t('categoryCombobox.savings');
       default:
         return '';
     }
@@ -181,11 +183,11 @@ export default function CategoryCombobox({
           value={isOpen ? search : selectedItem ? `${selectedItem.groupName} → ${selectedItem.name}` : ''}
           onChange={handleInputChange}
           onFocus={handleInputFocus}
-          placeholder="Sélectionner ou créer..."
+          placeholder={t('categoryCombobox.placeholder')}
           className="combobox-input"
         />
         {value && !isOpen && (
-          <button type="button" className="combobox-clear" onClick={handleClear} title="Effacer">
+          <button type="button" className="combobox-clear" onClick={handleClear} title={t('common.clear')}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -204,10 +206,10 @@ export default function CategoryCombobox({
           {isCreating ? (
             <div className="combobox-create-form">
               <div className="create-form-header">
-                <span>Créer "{search}"</span>
+                <span>{t('categoryCombobox.create', { name: search })}</span>
               </div>
               <div className="create-form-body">
-                <label>Assigner au groupe :</label>
+                <label>{t('categoryCombobox.assignGroup')}</label>
                 <div className="group-options">
                   {creatableGroups.map((group) => (
                     <button
@@ -224,7 +226,7 @@ export default function CategoryCombobox({
               </div>
               <div className="create-form-actions">
                 <button type="button" className="btn-cancel" onClick={() => setIsCreating(false)}>
-                  Annuler
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="button"
@@ -232,7 +234,7 @@ export default function CategoryCombobox({
                   onClick={handleCreateItem}
                   disabled={!selectedGroupId || isSubmitting}
                 >
-                  {isSubmitting ? 'Création...' : 'Créer'}
+                  {isSubmitting ? t('categoryCombobox.creating') : t('categoryCombobox.createAction')}
                 </button>
               </div>
             </div>
@@ -245,22 +247,24 @@ export default function CategoryCombobox({
                     <line x1="12" y1="5" x2="12" y2="19" />
                     <line x1="5" y1="12" x2="19" y2="12" />
                   </svg>
-                  Créer "{search}"
+                  {t('categoryCombobox.create', { name: search })}
                 </div>
               )}
 
               {/* Empty state */}
-              {!search && allItems.length === 0 && <div className="combobox-empty">Aucune catégorie disponible</div>}
+              {!search && allItems.length === 0 && (
+                <div className="combobox-empty">{t('categoryCombobox.empty')}</div>
+              )}
 
               {/* No results */}
               {search && filteredItems.length === 0 && (
-                <div className="combobox-no-results">Aucun résultat pour "{search}"</div>
+                <div className="combobox-no-results">{t('categoryCombobox.noResults', { search })}</div>
               )}
 
               {/* Income items */}
               {incomeItems.length > 0 && (
                 <div className="combobox-group">
-                  <div className="combobox-group-label">Revenus</div>
+                  <div className="combobox-group-label">{t('categoryCombobox.income')}</div>
                   {incomeItems.map((item) => (
                     <div
                       key={item.id}
@@ -278,7 +282,7 @@ export default function CategoryCombobox({
               {/* Expense items */}
               {expenseItems.length > 0 && (
                 <div className="combobox-group">
-                  <div className="combobox-group-label">Dépenses</div>
+                  <div className="combobox-group-label">{t('categoryCombobox.expenses')}</div>
                   {expenseItems.map((item) => (
                     <div
                       key={item.id}
@@ -296,7 +300,7 @@ export default function CategoryCombobox({
               {/* Savings items */}
               {savingsItems.length > 0 && (
                 <div className="combobox-group">
-                  <div className="combobox-group-label">Épargne</div>
+                  <div className="combobox-group-label">{t('categoryCombobox.savingsGroup')}</div>
                   {savingsItems.map((item) => (
                     <div
                       key={item.id}

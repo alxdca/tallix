@@ -40,6 +40,8 @@ export interface ClassificationResult {
   description: string | null;
   thirdParty: string | null;
   paymentMethodId: number | null;
+  paymentMethodName: string | null;
+  paymentMethodInstitution: string | null;
   confidence: 'high' | 'medium' | 'low';
 }
 
@@ -115,6 +117,7 @@ ${pmLine}${thirdPartiesLine}${countryLine}
 
 Return: catId,pmId (from lists),desc,tp,conf(h/m/l). Omit null fields. Use s(savings) categories for transfers to savings accounts.
 desc: Keep original if clean, else simplify to 3-8 words, Title Case, in ${langName}. Remove dates/refs/codes/country codes. Don't repeat merchant (tp is separate).
+pmId: Match from rawPaymentMethod if provided, else infer from transaction pattern if obvious (e.g., ATM withdrawal, card payment patterns).
 
 JSON:[{index,catId?,pmId?,desc,tp?,conf},...]`;
 }
@@ -200,7 +203,7 @@ function parseClassificationResponse(
   content: string,
   categories: CategoryInfo[],
   paymentMethods: PaymentMethodInfo[],
-  transactionCount: number
+  _transactionCount: number
 ): ClassificationResult[] {
   let parsed: unknown;
 
@@ -230,7 +233,11 @@ function parseClassificationResponse(
     categoryByName.set(cat.name.toLowerCase(), cat);
   }
 
-  // Create set of valid payment method IDs
+  // Create map for payment methods
+  const paymentMethodById = new Map<number, PaymentMethodInfo>();
+  for (const pm of paymentMethods) {
+    paymentMethodById.set(pm.id, pm);
+  }
   const validPmIds = new Set(paymentMethods.map((pm) => pm.id));
 
   // Confidence mapping from short to full
@@ -278,8 +285,12 @@ function parseClassificationResponse(
 
     // Get payment method by ID (only accept valid IDs from our list)
     let paymentMethodId: number | null = null;
-    if (typeof raw.pmId === 'number' && validPmIds.has(raw.pmId)) {
-      paymentMethodId = raw.pmId;
+    const rawPmId = typeof raw.pmId === 'number' ? raw.pmId : null;
+    if (rawPmId !== null && validPmIds.has(rawPmId)) {
+      paymentMethodId = rawPmId;
+      logger.info({ index, rawPmId, accepted: true }, 'LLM payment method classification');
+    } else if (rawPmId !== null) {
+      logger.warn({ index, rawPmId, accepted: false, validPmIds: Array.from(validPmIds) }, 'LLM returned invalid payment method ID for classification');
     }
 
     // Derive isIncome from the matched category's groupType
@@ -291,6 +302,9 @@ function parseClassificationResponse(
     const thirdParty = (raw.tp ?? raw.thirdParty) as string | undefined;
     const confidence = confMap[(raw.conf ?? raw.confidence) as string] || 'low';
 
+    // Get payment method details
+    const paymentMethod = paymentMethodId !== null ? paymentMethodById.get(paymentMethodId) : null;
+
     classifications.push({
       index,
       categoryId,
@@ -300,6 +314,8 @@ function parseClassificationResponse(
       description: typeof description === 'string' ? description : null,
       thirdParty: typeof thirdParty === 'string' ? thirdParty : null,
       paymentMethodId,
+      paymentMethodName: paymentMethod ? paymentMethod.name : null,
+      paymentMethodInstitution: paymentMethod ? paymentMethod.institution : null,
       confidence,
     });
   }
@@ -340,8 +356,11 @@ function buildExtractPrompt(
 
 Cat(id,n,g,t=i/e/s):${JSON.stringify(categoryCatalog)}${pmLine}${countryLine}
 
-Return:[{d,a,catId?,pmId?,desc,tp?,conf},...]
-d=YYYY-MM-DD, a=amount(+expense/-income), catId/pmId from lists.
+Identify the PDF issuer (bank/card company) from header/logo/footer. Match issuer to a payment method from PM list by name or institution. Return issuerPmId at top level for ALL transactions from this document.
+
+Return:{issuerPmId?:number,txs:[{d,a,catId?,desc,tp?,conf},...]}
+issuerPmId=detected document issuer's payment method ID (applies to all txs).
+d=YYYY-MM-DD, a=amount(+expense/-income), catId from list.
 tp=merchant/store name (NO location/city/address/country codes). Remove trailing city+country tokens. Remove abbreviations/codes/prefixes unless part of brand. Reconstruct truncated names if possible using common completions of the remaining tokens.
 desc=what was bought, Title Case in ${langName}, DON'T repeat tp. Infer desc from merchant type.
 conf=h/m/l. Use s(savings) for transfers. Omit null fields.`;
@@ -357,11 +376,14 @@ export interface ExtractedTransaction {
   description: string;
   thirdParty: string | null;
   paymentMethodId: number | null;
+  paymentMethodName: string | null;
+  paymentMethodInstitution: string | null;
   confidence: 'high' | 'medium' | 'low';
 }
 
 /**
  * Parse LLM response for extracted transactions
+ * Supports both new format {issuerPmId, txs:[...]} and legacy array format [...]
  */
 function parseExtractResponse(
   content: string,
@@ -369,38 +391,104 @@ function parseExtractResponse(
   paymentMethods: PaymentMethodInfo[]
 ): ExtractedTransaction[] {
   let parsed: unknown;
+  let issuerPmId: number | null = null;
+  let txsArray: unknown[];
 
-  const jsonMatch = content.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    logger.error({ content: content.slice(0, 500) }, 'No JSON array found in extract response');
-    throw new Error('Failed to parse extract response: no JSON array found');
-  }
+  // Try to extract JSON object first (new format with issuerPmId)
+  const jsonObjMatch = content.match(/\{[\s\S]*\}/);
+  const jsonArrMatch = content.match(/\[[\s\S]*\]/);
 
-  try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    logger.error({ content: content.slice(0, 500), error: e }, 'Failed to parse extract response as JSON');
-    throw new Error('Failed to parse extract response as JSON');
-  }
-
-  if (!Array.isArray(parsed)) {
-    throw new Error('Extract response is not an array');
+  if (jsonObjMatch) {
+    try {
+      const obj = JSON.parse(jsonObjMatch[0]);
+      if (typeof obj === 'object' && obj !== null) {
+        // Extract issuerPmId if present
+        if (typeof obj.issuerPmId === 'number') {
+          issuerPmId = obj.issuerPmId;
+          logger.info({ issuerPmId }, 'Detected PDF issuer payment method');
+        }
+        // Get transactions array from txs field or fallback to finding array
+        if (Array.isArray(obj.txs)) {
+          txsArray = obj.txs;
+        } else if (Array.isArray(obj.transactions)) {
+          txsArray = obj.transactions;
+        } else {
+          // Object doesn't have txs, try array match
+          throw new Error('No txs array in object');
+        }
+      } else {
+        throw new Error('Parsed value is not an object');
+      }
+    } catch {
+      // Fall back to array format
+      if (!jsonArrMatch) {
+        logger.error({ content: content.slice(0, 500) }, 'No JSON found in extract response');
+        throw new Error('Failed to parse extract response: no JSON found');
+      }
+      try {
+        parsed = JSON.parse(jsonArrMatch[0]);
+        if (!Array.isArray(parsed)) {
+          throw new Error('Extract response is not an array');
+        }
+        txsArray = parsed;
+      } catch (e) {
+        logger.error({ content: content.slice(0, 500), error: e }, 'Failed to parse extract response as JSON');
+        throw new Error('Failed to parse extract response as JSON');
+      }
+    }
+  } else if (jsonArrMatch) {
+    // Legacy array format
+    try {
+      parsed = JSON.parse(jsonArrMatch[0]);
+      if (!Array.isArray(parsed)) {
+        throw new Error('Extract response is not an array');
+      }
+      txsArray = parsed;
+    } catch (e) {
+      logger.error({ content: content.slice(0, 500), error: e }, 'Failed to parse extract response as JSON');
+      throw new Error('Failed to parse extract response as JSON');
+    }
+  } else {
+    logger.error({ content: content.slice(0, 500) }, 'No JSON found in extract response');
+    throw new Error('Failed to parse extract response: no JSON found');
   }
 
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
   const pmMap = new Map(paymentMethods.map((pm) => [pm.id, pm]));
 
+  // Validate issuerPmId exists in payment methods
+  const validIssuerPmId = issuerPmId !== null && pmMap.has(issuerPmId) ? issuerPmId : null;
+  if (issuerPmId !== null && validIssuerPmId === null) {
+    logger.warn({ issuerPmId, validPmIds: Array.from(pmMap.keys()) }, 'LLM returned invalid issuerPmId - not found in payment methods list');
+  } else if (validIssuerPmId !== null) {
+    const pm = pmMap.get(validIssuerPmId);
+    logger.info({ issuerPmId: validIssuerPmId, pmName: pm?.name, pmInstitution: pm?.institution }, 'LLM detected valid PDF issuer payment method');
+  } else {
+    logger.info({ issuerPmId: null }, 'LLM did not detect PDF issuer payment method');
+  }
+
   const transactions: ExtractedTransaction[] = [];
 
-  for (const item of parsed) {
+  for (const item of txsArray) {
     if (typeof item !== 'object' || item === null) continue;
 
     const raw = item as Record<string, unknown>;
     // Support both compact (catId) and any variations LLM might use
     const catId = typeof raw.catId === 'number' ? raw.catId : null;
-    const pmId = typeof raw.pmId === 'number' ? raw.pmId : null;
+    // Per-transaction pmId (rare in new format, but support for flexibility)
+    const txPmId = typeof raw.pmId === 'number' ? raw.pmId : null;
     const category = catId !== null ? categoryMap.get(catId) : null;
-    const pm = pmId !== null ? pmMap.get(pmId) : null;
+    // Use transaction-level pmId if present, otherwise use document-level issuerPmId
+    const effectivePmId = txPmId !== null ? txPmId : validIssuerPmId;
+    const pm = effectivePmId !== null ? pmMap.get(effectivePmId) : null;
+    
+    if (txPmId !== null) {
+      if (pm) {
+        logger.info({ txPmId, pmName: pm.name, pmInstitution: pm.institution }, 'Per-transaction payment method detected');
+      } else {
+        logger.warn({ txPmId, validPmIds: Array.from(pmMap.keys()) }, 'Per-transaction payment method ID invalid');
+      }
+    }
 
     // Parse date - support both compact 'd' and full 'date'
     let date = typeof raw.d === 'string' ? raw.d : typeof raw.date === 'string' ? raw.date : '';
@@ -420,6 +508,23 @@ function parseExtractResponse(
     const rawAmount = raw.a !== undefined ? raw.a : raw.amount;
     const amount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount)) || 0;
 
+    const finalPaymentMethodId = pm ? pm.id : null;
+    
+    // Log payment method application for each transaction
+    logger.info(
+      {
+        desc: typeof raw.desc === 'string' ? raw.desc.slice(0, 50) : null,
+        txPmId,
+        validIssuerPmId,
+        effectivePmId,
+        pmFound: pm !== null,
+        pmName: pm?.name,
+        pmInstitution: pm?.institution,
+        finalPaymentMethodId,
+      },
+      'Applying payment method to extracted transaction'
+    );
+
     transactions.push({
       date,
       amount: Math.abs(amount),
@@ -429,7 +534,9 @@ function parseExtractResponse(
       isIncome: category?.groupType === 'income' || amount < 0,
       description: typeof raw.desc === 'string' ? raw.desc : '',
       thirdParty: typeof raw.tp === 'string' ? raw.tp : null,
-      paymentMethodId: pm ? pm.id : null,
+      paymentMethodId: finalPaymentMethodId,
+      paymentMethodName: pm ? pm.name : null,
+      paymentMethodInstitution: pm ? pm.institution : null,
       confidence: raw.conf === 'h' ? 'high' : raw.conf === 'm' ? 'medium' : 'low',
     });
   }
@@ -471,7 +578,7 @@ export async function extractAndClassifyFromPdf(
   const systemPrompt = buildExtractPrompt(categories, paymentMethods, language, country);
 
   // Limit text to avoid excessive tokens (keep first ~20K chars which should be plenty)
-  const truncatedText = rawPdfText.length > 20000 ? rawPdfText.slice(0, 20000) + '\n...[truncated]' : rawPdfText;
+  const truncatedText = rawPdfText.length > 20000 ? `${rawPdfText.slice(0, 20000)}\n...[truncated]` : rawPdfText;
 
   const messages: DeepSeekMessage[] = [
     { role: 'system', content: systemPrompt },
@@ -500,6 +607,8 @@ export async function extractAndClassifyFromPdf(
       logger.error({ response: JSON.stringify(response).slice(0, 500) }, 'Empty response from LLM');
       throw new Error('Empty response from LLM');
     }
+
+    logger.info({ contentLength: content.length, content: content.slice(0, 1000) }, 'LLM PDF extraction response');
 
     const transactions = parseExtractResponse(content, categories, paymentMethods);
     logger.info({ extractedCount: transactions.length }, 'Parsed extracted transactions');
@@ -607,7 +716,7 @@ export async function classifyTransactions(
       throw new Error('Empty response from LLM');
     }
 
-    logger.info({ contentLength: content.length }, 'Parsing LLM response');
+    logger.info({ contentLength: content.length, content: content.slice(0, 1000) }, 'Parsing LLM response');
 
     const classifications = parseClassificationResponse(content, categories, paymentMethods, transactions.length);
 

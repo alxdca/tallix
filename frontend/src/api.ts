@@ -3,6 +3,64 @@ import type { BudgetData, BudgetGroup, BudgetItem, BudgetSummary } from './types
 const API_BASE = '/api';
 const TOKEN_KEY = 'tallix_token';
 
+const ERROR_MESSAGE_TO_CODE: Record<string, string> = {
+  'Invalid email or password': 'AUTH_INVALID_CREDENTIALS',
+  'Initial setup required': 'AUTH_INITIAL_SETUP_REQUIRED',
+  'Email and password are required': 'AUTH_EMAIL_REQUIRED',
+  'Password must be at least 8 characters': 'AUTH_PASSWORD_MIN',
+  'No token provided': 'AUTH_NO_TOKEN',
+  'Invalid token': 'AUTH_INVALID_TOKEN',
+  'User not found': 'AUTH_USER_NOT_FOUND',
+  'Invalid language. Supported: en, fr': 'AUTH_INVALID_LANGUAGE',
+  'Invalid country code. Use ISO 3166-1 alpha-2 format (e.g., FR, CH).': 'AUTH_INVALID_COUNTRY',
+  'Current password and new password are required': 'AUTH_CURRENT_PASSWORD_REQUIRED',
+  'New password must be at least 6 characters': 'AUTH_PASSWORD_SHORT',
+  'Invalid current password': 'AUTH_INVALID_CURRENT_PASSWORD',
+};
+
+export class ApiError extends Error {
+  public readonly code?: string;
+  public readonly params?: Record<string, any>;
+  public readonly status?: number;
+
+  constructor(message: string, code?: string, params?: Record<string, any>, status?: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.params = params;
+    this.status = status;
+  }
+}
+
+export async function buildApiError(response: Response, fallbackMessage: string): Promise<ApiError> {
+  let message = fallbackMessage;
+  let code: string | undefined;
+  let params: Record<string, any> | undefined;
+
+  try {
+    const data = (await response.json()) as { error?: string; code?: string; params?: Record<string, any> };
+    if (data?.error) {
+      message = data.error;
+    }
+    if (data?.code) {
+      code = data.code;
+      params = data.params;
+    } else if (data?.error && ERROR_MESSAGE_TO_CODE[data.error]) {
+      code = ERROR_MESSAGE_TO_CODE[data.error];
+    }
+  } catch {
+    // ignore JSON parsing errors
+  }
+
+  return new ApiError(message, code, params, response.status);
+}
+
+export async function ensureOk(response: Response, fallbackMessage: string): Promise<void> {
+  if (!response.ok) {
+    throw await buildApiError(response, fallbackMessage);
+  }
+}
+
 // Helper to get auth headers
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem(TOKEN_KEY);
@@ -10,7 +68,7 @@ function getAuthHeaders(): HeadersInit {
     'Content-Type': 'application/json',
   };
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 }
@@ -27,25 +85,19 @@ async function authFetch(url: string, options: RequestInit = {}): Promise<Respon
 // Budget Data
 export async function fetchBudgetData(): Promise<BudgetData> {
   const response = await authFetch(`${API_BASE}/budget`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch budget data');
-  }
+  await ensureOk(response, 'Failed to fetch budget data');
   return response.json();
 }
 
 export async function fetchBudgetSummary(): Promise<BudgetSummary> {
   const response = await authFetch(`${API_BASE}/budget/summary`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch budget summary');
-  }
+  await ensureOk(response, 'Failed to fetch budget summary');
   return response.json();
 }
 
 export async function fetchMonths(): Promise<string[]> {
   const response = await authFetch(`${API_BASE}/budget/months`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch months');
-  }
+  await ensureOk(response, 'Failed to fetch months');
   return response.json();
 }
 
@@ -58,9 +110,7 @@ export interface BudgetYear {
 
 export async function fetchYears(): Promise<BudgetYear[]> {
   const response = await authFetch(`${API_BASE}/budget/years`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch years');
-  }
+  await ensureOk(response, 'Failed to fetch years');
   return response.json();
 }
 
@@ -69,9 +119,7 @@ export async function createYear(year: number, initialBalance: number = 0): Prom
     method: 'POST',
     body: JSON.stringify({ year, initialBalance }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to create year');
-  }
+  await ensureOk(response, 'Failed to create year');
   return response.json();
 }
 
@@ -80,9 +128,7 @@ export async function updateYear(id: number, initialBalance: number): Promise<Bu
     method: 'PUT',
     body: JSON.stringify({ initialBalance }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to update year');
-  }
+  await ensureOk(response, 'Failed to update year');
   return response.json();
 }
 
@@ -98,9 +144,7 @@ export async function createGroup(data: {
     method: 'POST',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    throw new Error('Failed to create group');
-  }
+  await ensureOk(response, 'Failed to create group');
   return response.json();
 }
 
@@ -117,9 +161,7 @@ export async function updateGroup(
     method: 'PUT',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    throw new Error('Failed to update group');
-  }
+  await ensureOk(response, 'Failed to update group');
   return response.json();
 }
 
@@ -127,9 +169,7 @@ export async function deleteGroup(id: number): Promise<void> {
   const response = await authFetch(`${API_BASE}/budget/groups/${id}`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    throw new Error('Failed to delete group');
-  }
+  await ensureOk(response, 'Failed to delete group');
 }
 
 export async function reorderGroups(groupOrders: { id: number; sortOrder: number }[]): Promise<void> {
@@ -137,9 +177,7 @@ export async function reorderGroups(groupOrders: { id: number; sortOrder: number
     method: 'PUT',
     body: JSON.stringify({ groups: groupOrders }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to reorder groups');
-  }
+  await ensureOk(response, 'Failed to reorder groups');
 }
 
 export async function reorderItems(itemOrders: { id: number; sortOrder: number }[]): Promise<void> {
@@ -147,9 +185,7 @@ export async function reorderItems(itemOrders: { id: number; sortOrder: number }
     method: 'PUT',
     body: JSON.stringify({ items: itemOrders }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to reorder items');
-  }
+  await ensureOk(response, 'Failed to reorder items');
 }
 
 // Items
@@ -164,9 +200,7 @@ export async function createItem(data: {
     method: 'POST',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    throw new Error('Failed to create item');
-  }
+  await ensureOk(response, 'Failed to create item');
   return response.json();
 }
 
@@ -175,9 +209,7 @@ export async function moveItem(itemId: number, groupId: number | null): Promise<
     method: 'PUT',
     body: JSON.stringify({ itemId, groupId }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to move item');
-  }
+  await ensureOk(response, 'Failed to move item');
 }
 
 export async function updateItem(
@@ -193,9 +225,7 @@ export async function updateItem(
     method: 'PUT',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    throw new Error('Failed to update item');
-  }
+  await ensureOk(response, 'Failed to update item');
   return response.json();
 }
 
@@ -203,9 +233,7 @@ export async function deleteItem(id: number): Promise<void> {
   const response = await authFetch(`${API_BASE}/budget/items/${id}`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    throw new Error('Failed to delete item');
-  }
+  await ensureOk(response, 'Failed to delete item');
 }
 
 // Third Parties (autocomplete)
@@ -214,9 +242,7 @@ export async function fetchThirdParties(search?: string): Promise<string[]> {
     ? `${API_BASE}/transactions/third-parties?search=${encodeURIComponent(search)}`
     : `${API_BASE}/transactions/third-parties`;
   const response = await authFetch(url);
-  if (!response.ok) {
-    throw new Error('Failed to fetch third parties');
-  }
+  await ensureOk(response, 'Failed to fetch third parties');
   return response.json();
 }
 
@@ -239,9 +265,7 @@ export interface Transaction {
 
 export async function fetchTransactions(): Promise<Transaction[]> {
   const response = await authFetch(`${API_BASE}/transactions`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch transactions');
-  }
+  await ensureOk(response, 'Failed to fetch transactions');
   return response.json();
 }
 
@@ -261,9 +285,7 @@ export async function createTransaction(data: {
     method: 'POST',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    throw new Error('Failed to create transaction');
-  }
+  await ensureOk(response, 'Failed to create transaction');
   return response.json();
 }
 
@@ -286,9 +308,7 @@ export async function updateTransaction(
     method: 'PUT',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    throw new Error('Failed to update transaction');
-  }
+  await ensureOk(response, 'Failed to update transaction');
   return response.json();
 }
 
@@ -296,9 +316,7 @@ export async function deleteTransaction(id: number): Promise<void> {
   const response = await authFetch(`${API_BASE}/transactions/${id}`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    throw new Error('Failed to delete transaction');
-  }
+  await ensureOk(response, 'Failed to delete transaction');
 }
 
 export async function bulkDeleteTransactions(ids: number[]): Promise<{ deleted: number }> {
@@ -306,9 +324,7 @@ export async function bulkDeleteTransactions(ids: number[]): Promise<{ deleted: 
     method: 'DELETE',
     body: JSON.stringify({ ids }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to delete transactions');
-  }
+  await ensureOk(response, 'Failed to delete transactions');
   return response.json();
 }
 
@@ -322,9 +338,7 @@ export async function updateMonthlyValue(
     method: 'PUT',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    throw new Error('Failed to update monthly value');
-  }
+  await ensureOk(response, 'Failed to update monthly value');
   return response.json();
 }
 
@@ -345,9 +359,7 @@ export interface PaymentMethod {
 
 export async function fetchPaymentMethods(): Promise<PaymentMethod[]> {
   const response = await authFetch(`${API_BASE}/payment-methods`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch payment methods');
-  }
+  await ensureOk(response, 'Failed to fetch payment methods');
   return response.json();
 }
 
@@ -360,10 +372,7 @@ export async function createPaymentMethod(data: {
     method: 'POST',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to create payment method');
-  }
+  await ensureOk(response, 'Failed to create payment method');
   return response.json();
 }
 
@@ -384,10 +393,7 @@ export async function updatePaymentMethod(
     method: 'PUT',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to update payment method');
-  }
+  await ensureOk(response, 'Failed to update payment method');
   return response.json();
 }
 
@@ -395,9 +401,7 @@ export async function deletePaymentMethod(id: number): Promise<void> {
   const response = await authFetch(`${API_BASE}/payment-methods/${id}`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    throw new Error('Failed to delete payment method');
-  }
+  await ensureOk(response, 'Failed to delete payment method');
 }
 
 export async function reorderPaymentMethods(methodOrders: { id: number; sortOrder: number }[]): Promise<void> {
@@ -405,9 +409,7 @@ export async function reorderPaymentMethods(methodOrders: { id: number; sortOrde
     method: 'PUT',
     body: JSON.stringify({ methods: methodOrders }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to reorder payment methods');
-  }
+  await ensureOk(response, 'Failed to reorder payment methods');
 }
 
 // Import
@@ -447,7 +449,7 @@ export async function parsePdf(
   const token = localStorage.getItem(TOKEN_KEY);
   const headers: HeadersInit = {};
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   const response = await fetch(url, {
@@ -455,10 +457,7 @@ export async function parsePdf(
     headers,
     body: formData,
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to parse PDF');
-  }
+  await ensureOk(response, 'Failed to parse PDF');
   return response.json();
 }
 
@@ -472,6 +471,8 @@ export interface LlmExtractedTransaction {
   description: string;
   thirdParty: string | null;
   paymentMethodId: number | null;
+  paymentMethodName: string | null;
+  paymentMethodInstitution: string | null;
   confidence: 'high' | 'medium' | 'low';
 }
 
@@ -492,7 +493,7 @@ export async function parsePdfWithLlm(
   const token = localStorage.getItem(TOKEN_KEY);
   const headers: HeadersInit = {};
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   const response = await fetch(`${API_BASE}/import/pdf-llm`, {
@@ -500,10 +501,7 @@ export async function parsePdfWithLlm(
     headers,
     body: formData,
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to extract transactions from PDF');
-  }
+  await ensureOk(response, 'Failed to extract transactions from PDF');
   return response.json();
 }
 
@@ -525,10 +523,7 @@ export async function bulkCreateTransactions(
     method: 'POST',
     body: JSON.stringify({ yearId, transactions }),
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to create transactions');
-  }
+  await ensureOk(response, 'Failed to create transactions');
   return response.json();
 }
 
@@ -546,9 +541,7 @@ export interface Account {
 
 export async function fetchAccounts(year: number): Promise<Account[]> {
   const response = await authFetch(`${API_BASE}/accounts/${year}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch accounts');
-  }
+  await ensureOk(response, 'Failed to fetch accounts');
   return response.json();
 }
 
@@ -557,9 +550,7 @@ export async function setAccountBalance(year: number, paymentMethodId: number, i
     method: 'PUT',
     body: JSON.stringify({ paymentMethodId, initialBalance }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to set account balance');
-  }
+  await ensureOk(response, 'Failed to set account balance');
 }
 
 export async function togglePaymentMethodAccount(id: number, isAccount: boolean): Promise<void> {
@@ -567,9 +558,7 @@ export async function togglePaymentMethodAccount(id: number, isAccount: boolean)
     method: 'PUT',
     body: JSON.stringify({ isAccount }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to toggle payment method account');
-  }
+  await ensureOk(response, 'Failed to toggle payment method account');
 }
 
 export async function togglePaymentMethodSavings(id: number, isSavingsAccount: boolean): Promise<void> {
@@ -577,9 +566,7 @@ export async function togglePaymentMethodSavings(id: number, isSavingsAccount: b
     method: 'PUT',
     body: JSON.stringify({ isSavingsAccount }),
   });
-  if (!response.ok) {
-    throw new Error('Failed to toggle savings account');
-  }
+  await ensureOk(response, 'Failed to toggle savings account');
 }
 
 // Transfers
@@ -603,17 +590,13 @@ export interface Transfer {
 
 export async function fetchTransfers(year: number): Promise<Transfer[]> {
   const response = await authFetch(`${API_BASE}/transfers/${year}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch transfers');
-  }
+  await ensureOk(response, 'Failed to fetch transfers');
   return response.json();
 }
 
 export async function fetchTransferAccounts(year: number): Promise<AccountIdentifier[]> {
   const response = await authFetch(`${API_BASE}/transfers/${year}/accounts`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch transfer accounts');
-  }
+  await ensureOk(response, 'Failed to fetch transfer accounts');
   return response.json();
 }
 
@@ -633,10 +616,7 @@ export async function createTransfer(
     method: 'POST',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to create transfer');
-  }
+  await ensureOk(response, 'Failed to create transfer');
   return response.json();
 }
 
@@ -656,10 +636,7 @@ export async function updateTransfer(
     method: 'PUT',
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to update transfer');
-  }
+  await ensureOk(response, 'Failed to update transfer');
   return response.json();
 }
 
@@ -667,9 +644,7 @@ export async function deleteTransfer(id: number): Promise<void> {
   const response = await authFetch(`${API_BASE}/transfers/${id}`, {
     method: 'DELETE',
   });
-  if (!response.ok) {
-    throw new Error('Failed to delete transfer');
-  }
+  await ensureOk(response, 'Failed to delete transfer');
 }
 
 // Change user password
@@ -678,10 +653,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
     method: 'POST',
     body: JSON.stringify({ currentPassword, newPassword }),
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to change password');
-  }
+  await ensureOk(response, 'Failed to change password');
 }
 
 // Update user settings
@@ -694,10 +666,7 @@ export async function updateUserSettings(updates: {
     method: 'PATCH',
     body: JSON.stringify(updates),
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to update user settings');
-  }
+  await ensureOk(response, 'Failed to update user settings');
   const data = await response.json();
   return data.user;
 }
@@ -738,6 +707,8 @@ export interface ClassificationResult {
   description: string | null;
   thirdParty: string | null;
   paymentMethodId: number | null;
+  paymentMethodName: string | null;
+  paymentMethodInstitution: string | null;
   confidence: 'high' | 'medium' | 'low';
 }
 
@@ -760,10 +731,7 @@ export async function classifyTransactionsWithLLM(
     method: 'POST',
     body: JSON.stringify({ transactions, categories, paymentMethods }),
   });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to classify transactions');
-  }
+  await ensureOk(response, 'Failed to classify transactions');
   const data = await response.json();
   return data.classifications;
 }

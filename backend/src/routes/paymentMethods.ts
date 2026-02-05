@@ -29,7 +29,10 @@ router.post(
       res.status(201).json(newMethod);
     } catch (error) {
       if (error instanceof DuplicatePaymentMethodError) {
-        throw new AppError(409, error.message);
+        throw new AppError(409, error.message, {
+          code: 'PAYMENT_METHOD_DUPLICATE',
+          params: { displayName: error.displayName },
+        });
       }
       throw error;
     }
@@ -88,7 +91,10 @@ router.put(
       res.json(updated);
     } catch (error) {
       if (error instanceof DuplicatePaymentMethodError) {
-        throw new AppError(409, error.message);
+        throw new AppError(409, error.message, {
+          code: 'PAYMENT_METHOD_DUPLICATE',
+          params: { displayName: error.displayName },
+        });
       }
       throw error;
     }
