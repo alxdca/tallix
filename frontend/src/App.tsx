@@ -98,6 +98,10 @@ function AppContent() {
     }
   }, []);
 
+  // Views that should show the budget header with balance boxes
+  const budgetViews = ['current', 'budget-planning', 'transactions', 'accounts'];
+  const showBudgetHeader = budgetViews.includes(activeView) && !loading && !error;
+
   const renderContent = () => {
     if (loading) {
       return (
@@ -120,23 +124,13 @@ function AppContent() {
     switch (activeView) {
       case 'current':
         return (
-          <>
-            <Header
-              year={currentYear}
-              initialBalance={summary?.initialBalance || 0}
-              totalIncome={summary?.totalIncome || { budget: 0, actual: 0 }}
-              totalExpenses={summary?.totalExpenses || { budget: 0, actual: 0 }}
-              totalSavings={summary?.totalSavings || { budget: 0, actual: 0 }}
-              remainingBalance={summary?.remainingBalance || 0}
+          <div className="content-body">
+            <BudgetSpreadsheet
+              sections={organizedData?.sections || []}
+              months={months}
+              paymentAccountsInitialBalance={paymentAccountsInitialBalance}
             />
-            <div className="content-body">
-              <BudgetSpreadsheet
-                sections={organizedData?.sections || []}
-                months={months}
-                paymentAccountsInitialBalance={paymentAccountsInitialBalance}
-              />
-            </div>
-          </>
+          </div>
         );
       case 'archive':
         return (
@@ -182,7 +176,19 @@ function AppContent() {
   return (
     <div className="app">
       <Sidebar activeView={activeView} onViewChange={setActiveView} currentYear={currentYear} />
-      <main className="main-content">{renderContent()}</main>
+      <main className="main-content">
+        {showBudgetHeader && (
+          <Header
+            year={currentYear}
+            initialBalance={summary?.initialBalance || 0}
+            totalIncome={summary?.totalIncome || { budget: 0, actual: 0 }}
+            totalExpenses={summary?.totalExpenses || { budget: 0, actual: 0 }}
+            totalSavings={summary?.totalSavings || { budget: 0, actual: 0 }}
+            remainingBalance={summary?.remainingBalance || 0}
+          />
+        )}
+        {renderContent()}
+      </main>
     </div>
   );
 }

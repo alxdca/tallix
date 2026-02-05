@@ -176,4 +176,6 @@ tallix/
 
 ## License
 
-Private
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+You are free to use, modify, and share this software for **noncommercial purposes** only. Commercial use requires explicit permission from the author.
