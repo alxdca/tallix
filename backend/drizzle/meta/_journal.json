@@ -64,6 +64,69 @@
       "when": 1738792800000,
       "tag": "0008_add_savings_type",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1738879200000,
+      "tag": "0009_add_user_language",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1738965600000,
+      "tag": "0010_savings_budget_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1739052000000,
+      "tag": "0011_add_user_country",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1739138400000,
+      "tag": "0012_remove_budget_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1739224800000,
+      "tag": "0013_enable_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1739311200000,
+      "tag": "0014_harden_rls_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1739397600000,
+      "tag": "0015_narrow_auth_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1739484000000,
+      "tag": "0016_create_safe_app_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1739570400000,
+      "tag": "0017_restrict_shared_writes",
+      "breakpoints": true
     }
   ]
 }

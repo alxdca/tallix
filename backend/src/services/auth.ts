@@ -1,7 +1,8 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
-import { db } from '../db';
+import { rawDb as db } from '../db';
+import { withUserContext } from '../db/context.js';
 import { budgets, users } from '../db/schema';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
@@ -37,11 +38,17 @@ export async function getSetupStatus(): Promise<{ needsSetup: boolean }> {
 }
 
 async function ensureDefaultBudget(userId: string): Promise<void> {
-  const existingBudget = await db.query.budgets.findFirst();
-  if (existingBudget) return;
+  await withUserContext(userId, async (tx) => {
+    // Check if budget already exists (RLS automatically filters to user's budgets)
+    const existingBudget = await tx.query.budgets.findFirst({
+      where: eq(budgets.userId, userId),
+    });
+    if (existingBudget) return;
 
-  await db.insert(budgets).values({
-    userId,
+    // Create budget with RLS protection
+    await tx.insert(budgets).values({
+      userId,
+    });
   });
 }
 
@@ -103,19 +110,22 @@ export async function register(email: string, password: string, name?: string): 
 
   if (hasOnlyDefaultUser) {
     // Claim the placeholder user instead of creating a new row
-    const [updatedUser] = await db
-      .update(users)
-      .set({
-        email: normalizedEmail,
-        passwordHash,
-        name: name || null,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, DEFAULT_USER_ID))
-      .returning();
-    newUser = updatedUser;
+    // Use withUserContext since we know the userId (DEFAULT_USER_ID)
+    newUser = await withUserContext(DEFAULT_USER_ID, async (tx) => {
+      const [updatedUser] = await tx
+        .update(users)
+        .set({
+          email: normalizedEmail,
+          passwordHash,
+          name: name || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, DEFAULT_USER_ID))
+        .returning();
+      return updatedUser;
+    });
   } else {
-    // Create user
+    // Create new user (uses rawDb because no userId exists yet)
     const [createdUser] = await db
       .insert(users)
       .values({
@@ -172,49 +182,57 @@ export async function updateUser(
   userId: string,
   updates: { name?: string; language?: string; country?: string }
 ): Promise<AuthUser> {
-  const user = await db.query.users.findFirst({
-    where: eq(users.id, userId),
+  return await withUserContext(userId, async (tx) => {
+    // Verify user exists and belongs to the context (RLS automatically filters)
+    const user = await tx.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Update with RLS protection
+    const [updatedUser] = await tx
+      .update(users)
+      .set({
+        ...(updates.name !== undefined && { name: updates.name || null }),
+        ...(updates.language !== undefined && { language: updates.language }),
+        ...(updates.country !== undefined && { country: updates.country || null }),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+
+    return {
+      id: updatedUser.id,
+      email: updatedUser.email,
+      name: updatedUser.name,
+      language: updatedUser.language,
+      country: updatedUser.country,
+    };
   });
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  const [updatedUser] = await db
-    .update(users)
-    .set({
-      ...(updates.name !== undefined && { name: updates.name || null }),
-      ...(updates.language !== undefined && { language: updates.language }),
-      ...(updates.country !== undefined && { country: updates.country || null }),
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId))
-    .returning();
-
-  return {
-    id: updatedUser.id,
-    email: updatedUser.email,
-    name: updatedUser.name,
-    language: updatedUser.language,
-    country: updatedUser.country,
-  };
 }
 
 export async function changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
-  const user = await db.query.users.findFirst({
-    where: eq(users.id, userId),
+  await withUserContext(userId, async (tx) => {
+    // Verify user exists and belongs to the context (RLS automatically filters)
+    const user = await tx.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const validPassword = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!validPassword) {
+      throw new Error('Invalid current password');
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+
+    // Update with RLS protection
+    await tx.update(users).set({ passwordHash: newPasswordHash, updatedAt: new Date() }).where(eq(users.id, userId));
   });
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  const validPassword = await bcrypt.compare(currentPassword, user.passwordHash);
-  if (!validPassword) {
-    throw new Error('Invalid current password');
-  }
-
-  const newPasswordHash = await bcrypt.hash(newPassword, 10);
-
-  await db.update(users).set({ passwordHash: newPasswordHash, updatedAt: new Date() }).where(eq(users.id, userId));
 }

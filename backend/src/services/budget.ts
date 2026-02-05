@@ -5,18 +5,15 @@ import {
   budgetGroups,
   budgetItems,
   budgetYears,
-  db,
   monthlyValues,
   paymentMethods,
   transactions,
-} from '../db/index.js';
+} from '../db/schema.js';
+import type { DbClient } from '../db/index.js';
 import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, BudgetSummary, MonthlyValue } from '../types.js';
 
 // Configure Decimal.js for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
-
-// TODO: Remove this when proper user/budget context is implemented
-const DEFAULT_BUDGET_ID = 1;
 
 export const MONTHS = [
   'January',
@@ -38,19 +35,17 @@ export const UNCLASSIFIED_GROUP_NAME = 'Unclassified';
 export const UNCLASSIFIED_GROUP_SLUG = 'non-classe';
 export const UNCLASSIFIED_ITEM_NAME = 'Unclassified';
 export const UNCLASSIFIED_ITEM_SLUG = 'non-classe';
-export const UNCLASSIFIED_SORT_ORDER = 9999; // High number to appear at the end
+export const UNCLASSIFIED_SORT_ORDER = 9999;
 
 // Savings category constants
 export const SAVINGS_GROUP_NAME = 'Savings';
 export const SAVINGS_GROUP_SLUG = 'epargne';
 export const SAVINGS_GROUP_TYPE = 'savings';
-export const SAVINGS_SORT_ORDER = 998; // High but before unclassified
+export const SAVINGS_SORT_ORDER = 998;
 
 // Get or create a budget year
-// Uses upsert pattern to avoid race conditions under concurrent requests
-export async function getOrCreateYear(year: number, budgetId: number = DEFAULT_BUDGET_ID) {
-  // First check if the year already exists for this budget
-  const existing = await db.query.budgetYears.findFirst({
+export async function getOrCreateYear(tx: DbClient, year: number, budgetId: number) {
+  const existing = await tx.query.budgetYears.findFirst({
     where: and(eq(budgetYears.budgetId, budgetId), eq(budgetYears.year, year)),
   });
 
@@ -58,8 +53,7 @@ export async function getOrCreateYear(year: number, budgetId: number = DEFAULT_B
     return existing;
   }
 
-  // Create new year for this budget
-  const [budgetYear] = await db
+  const [budgetYear] = await tx
     .insert(budgetYears)
     .values({
       budgetId,
@@ -72,13 +66,8 @@ export async function getOrCreateYear(year: number, budgetId: number = DEFAULT_B
 }
 
 // Get transaction totals per item per month for a year
-// Uses accountingMonth AND accountingYear for consistency - this ensures that
-// late-December transactions with settlement days that push them to January
-// are correctly attributed to the next year's budget, not the current year.
-async function getTransactionTotals(yearId: number, budgetYear: number): Promise<Map<string, number>> {
-  // Get regular transaction totals grouped by accounting month
-  // Filter by accountingYear to handle year boundaries correctly
-  const result = await db
+async function getTransactionTotals(tx: DbClient, yearId: number, budgetYear: number): Promise<Map<string, number>> {
+  const result = await tx
     .select({
       itemId: transactions.itemId,
       month: transactions.accountingMonth,
@@ -140,8 +129,6 @@ function formatItem(item: ItemWithMonthlyValues, transactionTotals: Map<string, 
 }
 
 // Calculate totals for groups
-// Uses Decimal.js to avoid floating-point rounding errors over many additions
-// Includes both monthly budgets and yearly budgets
 function calculateTotals(groups: BudgetGroup[]): {
   income: AnnualTotals;
   expenses: AnnualTotals;
@@ -153,7 +140,6 @@ function calculateTotals(groups: BudgetGroup[]): {
 
   groups.forEach((group) => {
     group.items.forEach((item) => {
-      // Add yearly budget to the total (once per item, not per month)
       const yearlyBudget = new Decimal(item.yearlyBudget || 0);
 
       if (group.type === 'income') {
@@ -162,7 +148,6 @@ function calculateTotals(groups: BudgetGroup[]): {
         expensesBudget = expensesBudget.plus(yearlyBudget);
       }
 
-      // Add monthly budgets and actuals
       item.months.forEach((month) => {
         if (group.type === 'income') {
           incomeBudget = incomeBudget.plus(month.budget);
@@ -182,12 +167,11 @@ function calculateTotals(groups: BudgetGroup[]): {
 }
 
 // Get full budget data for a year
-export async function getBudgetDataForYear(year: number): Promise<BudgetData> {
-  const budgetYear = await getOrCreateYear(year);
-  const budgetId = budgetYear.budgetId;
-  const transactionTotals = await getTransactionTotals(budgetYear.id, year);
+export async function getBudgetDataForYear(tx: DbClient, year: number, budgetId: number): Promise<BudgetData> {
+  const budgetYear = await getOrCreateYear(tx, year, budgetId);
+  const transactionTotals = await getTransactionTotals(tx, budgetYear.id, year);
 
-  const groups = await db.query.budgetGroups.findMany({
+  const groups = await tx.query.budgetGroups.findMany({
     where: eq(budgetGroups.budgetId, budgetId),
     orderBy: [asc(budgetGroups.sortOrder)],
     with: {
@@ -220,22 +204,18 @@ export async function getBudgetDataForYear(year: number): Promise<BudgetData> {
   };
 }
 
-// Calculate projected end of year balance matching frontend's December budget calculation
-// This uses: cumulative actual up to current month + budget for remaining months + remaining yearly budgets
+// Calculate projected end of year balance
 function calculateProjectedEndOfYear(groups: BudgetGroup[], initialBalance: number): number {
-  const currentMonth = new Date().getMonth(); // 0-indexed (0 = January)
-  const maxActualMonth = currentMonth + 1; // Frontend shows actual up to currentMonth + 1
+  const currentMonth = new Date().getMonth();
+  const maxActualMonth = currentMonth + 1;
 
-  // Calculate cumulative actual balance (matches frontend's cumulativeActual)
   let cumulativeActual = initialBalance;
 
-  // Calculate section totals
   const sectionTotals = {
     income: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
     expense: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
   };
 
-  // Track remaining yearly budget per section (only for items WITH yearly budgets)
   let incomeRemainingYearly = 0;
   let expenseRemainingYearly = 0;
 
@@ -250,8 +230,6 @@ function calculateProjectedEndOfYear(groups: BudgetGroup[], initialBalance: numb
         section.monthlyActuals[i] += monthData?.actual || 0;
       }
 
-      // Only calculate remaining yearly for items that HAVE a yearly budget
-      // (matches frontend logic which skips items with yearlyBudget === 0)
       const yearlyBudget = item.yearlyBudget || 0;
       if (yearlyBudget > 0) {
         const actualSpent = item.months.reduce((sum, m) => sum + (m?.actual || 0), 0);
@@ -266,48 +244,39 @@ function calculateProjectedEndOfYear(groups: BudgetGroup[], initialBalance: numb
     }
   }
 
-  // Calculate cumulative actual through maxActualMonth
   for (let i = 0; i <= Math.min(maxActualMonth, 11); i++) {
     cumulativeActual += sectionTotals.income.monthlyActuals[i] - sectionTotals.expense.monthlyActuals[i];
   }
 
-  // Use cumulative actual as starting point, then add budget for remaining months
   let projectedEnd = cumulativeActual;
 
-  // Add budget cash flow for months after maxActualMonth
   for (let i = maxActualMonth + 1; i < 12; i++) {
     projectedEnd += sectionTotals.income.monthlyBudgets[i] - sectionTotals.expense.monthlyBudgets[i];
   }
 
-  // Add remaining yearly budgets (matches frontend's December calculation)
   projectedEnd += incomeRemainingYearly - expenseRemainingYearly;
 
   return projectedEnd;
 }
 
 // Get budget summary for a year
-export async function getBudgetSummary(year: number): Promise<BudgetSummary> {
-  const data = await getBudgetDataForYear(year);
+export async function getBudgetSummary(tx: DbClient, year: number, budgetId: number, userId: string): Promise<BudgetSummary> {
+  const data = await getBudgetDataForYear(tx, year, budgetId);
   const { income, expenses } = calculateTotals(data.groups);
 
-  // Calculate initial balance from payment method accounts
-  // Get all payment methods that are marked as accounts
-  const paymentMethodAccounts = await db
+  const paymentMethodAccounts = await tx
     .select({ id: paymentMethods.id })
     .from(paymentMethods)
-    .where(eq(paymentMethods.isAccount, true));
+    .where(and(eq(paymentMethods.isAccount, true), eq(paymentMethods.userId, userId)));
 
   const paymentMethodIds = new Set(paymentMethodAccounts.map((pm) => pm.id));
 
-  // Get all initial balances for this year
-  const allBalances = await db.select().from(accountBalances).where(eq(accountBalances.yearId, data.yearId));
+  const allBalances = await tx.select().from(accountBalances).where(eq(accountBalances.yearId, data.yearId));
 
-  // Sum up balances for payment method accounts only
   const initialBalance = allBalances
     .filter((b) => paymentMethodIds.has(b.paymentMethodId))
     .reduce((sum, b) => sum + parseFloat(b.initialBalance), 0);
 
-  // Calculate projected end of year (matches frontend's December budget calculation)
   const remainingBalance = calculateProjectedEndOfYear(data.groups, initialBalance);
 
   return {
@@ -319,8 +288,9 @@ export async function getBudgetSummary(year: number): Promise<BudgetSummary> {
 }
 
 // Get all years
-export async function getAllYears() {
-  const years = await db.query.budgetYears.findMany({
+export async function getAllYears(tx: DbClient, budgetId: number) {
+  const years = await tx.query.budgetYears.findMany({
+    where: eq(budgetYears.budgetId, budgetId),
     orderBy: [asc(budgetYears.year)],
   });
   return years.map((y) => ({
@@ -331,12 +301,9 @@ export async function getAllYears() {
 }
 
 // Create a new year
-// Throws if year already exists - use getOrCreateYear for upsert behavior
-// Uses try-catch on unique constraint to handle race conditions
-// Also creates budget items for existing savings accounts
-export async function createYear(year: number, initialBalance: number = 0, budgetId: number = DEFAULT_BUDGET_ID) {
+export async function createYear(tx: DbClient, year: number, initialBalance: number = 0, budgetId: number, userId: string) {
   try {
-    const [newYear] = await db
+    const [newYear] = await tx
       .insert(budgetYears)
       .values({
         budgetId,
@@ -346,12 +313,12 @@ export async function createYear(year: number, initialBalance: number = 0, budge
       .returning();
 
     // Create budget items for existing savings accounts
-    const savingsAccounts = await db.query.paymentMethods.findMany({
-      where: eq(paymentMethods.isSavingsAccount, true),
+    const savingsAccounts = await tx.query.paymentMethods.findMany({
+      where: and(eq(paymentMethods.isSavingsAccount, true), eq(paymentMethods.userId, userId)),
     });
 
     for (const sa of savingsAccounts) {
-      await createSavingsItemForYear(newYear.id, sa.id, sa.name, sa.institution, budgetId);
+      await createSavingsItemForYear(tx, newYear.id, sa.id, sa.name, sa.institution, budgetId);
     }
 
     return {
@@ -360,7 +327,6 @@ export async function createYear(year: number, initialBalance: number = 0, budge
       initialBalance: parseFloat(newYear.initialBalance),
     };
   } catch (err: unknown) {
-    // Check for unique constraint violation (PostgreSQL error code 23505)
     if (err && typeof err === 'object' && 'code' in err && err.code === '23505') {
       throw new Error(`Year ${year} already exists`);
     }
@@ -369,8 +335,14 @@ export async function createYear(year: number, initialBalance: number = 0, budge
 }
 
 // Update a year
-export async function updateYear(id: number, initialBalance: number) {
-  const [updated] = await db
+export async function updateYear(tx: DbClient, id: number, initialBalance: number, budgetId: number) {
+  const existing = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.id, id), eq(budgetYears.budgetId, budgetId)),
+  });
+
+  if (!existing) return null;
+
+  const [updated] = await tx
     .update(budgetYears)
     .set({ initialBalance: initialBalance.toString(), updatedAt: new Date() })
     .where(eq(budgetYears.id, id))
@@ -386,14 +358,14 @@ export async function updateYear(id: number, initialBalance: number) {
 }
 
 // Create a new group
-export async function createGroup(data: {
+export async function createGroup(tx: DbClient, data: {
   budgetId: number;
   name: string;
   slug: string;
   type?: 'income' | 'expense';
   sortOrder?: number;
 }) {
-  const [newGroup] = await db
+  const [newGroup] = await tx
     .insert(budgetGroups)
     .values({
       budgetId: data.budgetId,
@@ -409,15 +381,23 @@ export async function createGroup(data: {
 
 // Update a group
 export async function updateGroup(
+  tx: DbClient,
   id: number,
   data: {
     name?: string;
     slug?: string;
     type?: 'income' | 'expense';
     sortOrder?: number;
-  }
+  },
+  budgetId: number
 ) {
-  const [updated] = await db
+  const existing = await tx.query.budgetGroups.findFirst({
+    where: and(eq(budgetGroups.id, id), eq(budgetGroups.budgetId, budgetId)),
+  });
+
+  if (!existing) return null;
+
+  const [updated] = await tx
     .update(budgetGroups)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(budgetGroups.id, id))
@@ -427,69 +407,92 @@ export async function updateGroup(
 }
 
 // Reorder groups
-// Wrapped in a transaction to ensure atomicity
-export async function reorderGroups(groups: { id: number; sortOrder: number }[]) {
-  await db.transaction(async (tx) => {
-    for (const { id, sortOrder } of groups) {
-      await tx.update(budgetGroups).set({ sortOrder, updatedAt: new Date() }).where(eq(budgetGroups.id, id));
-    }
+export async function reorderGroups(tx: DbClient, groups: { id: number; sortOrder: number }[], budgetId: number) {
+  const groupIds = groups.map((g) => g.id);
+  const existingGroups = await tx.query.budgetGroups.findMany({
+    where: and(sql`${budgetGroups.id} IN ${groupIds}`, eq(budgetGroups.budgetId, budgetId)),
   });
+
+  if (existingGroups.length !== groupIds.length) {
+    throw new Error('One or more groups not found or do not belong to your budget');
+  }
+
+  for (const { id, sortOrder } of groups) {
+    await tx.update(budgetGroups).set({ sortOrder, updatedAt: new Date() }).where(eq(budgetGroups.id, id));
+  }
 }
 
 // Reorder items within a group
-// Wrapped in a transaction to ensure atomicity
-export async function reorderItems(items: { id: number; sortOrder: number }[]) {
-  await db.transaction(async (tx) => {
-    for (const { id, sortOrder } of items) {
-      await tx.update(budgetItems).set({ sortOrder, updatedAt: new Date() }).where(eq(budgetItems.id, id));
-    }
+export async function reorderItems(tx: DbClient, items: { id: number; sortOrder: number }[], budgetId: number) {
+  const itemIds = items.map((i) => i.id);
+  const existingItems = await tx.query.budgetItems.findMany({
+    where: sql`${budgetItems.id} IN ${itemIds}`,
+    with: {
+      year: true,
+    },
   });
+
+  const invalidItems = existingItems.filter((item) => item.year.budgetId !== budgetId);
+  if (invalidItems.length > 0 || existingItems.length !== itemIds.length) {
+    throw new Error('One or more items not found or do not belong to your budget');
+  }
+
+  for (const { id, sortOrder } of items) {
+    await tx.update(budgetItems).set({ sortOrder, updatedAt: new Date() }).where(eq(budgetItems.id, id));
+  }
 }
 
 // Delete a group and all its items
-// Returns true if group was deleted, false if it didn't exist
-// Wrapped in a transaction to ensure atomicity
-export async function deleteGroup(id: number): Promise<boolean> {
-  // Check if group exists
-  const existing = await db.query.budgetGroups.findFirst({
-    where: eq(budgetGroups.id, id),
+export async function deleteGroup(tx: DbClient, id: number, budgetId: number): Promise<boolean> {
+  const existing = await tx.query.budgetGroups.findFirst({
+    where: and(eq(budgetGroups.id, id), eq(budgetGroups.budgetId, budgetId)),
   });
 
   if (!existing) {
     return false;
   }
 
-  // Use transaction to ensure both operations succeed or fail together
-  await db.transaction(async (tx) => {
-    // Get all items in the group
-    const items = await tx.query.budgetItems.findMany({
-      where: eq(budgetItems.groupId, id),
-    });
-
-    // Delete monthly values for all items in the group
-    for (const item of items) {
-      await tx.delete(monthlyValues).where(eq(monthlyValues.itemId, item.id));
-    }
-
-    // Delete the items
-    await tx.delete(budgetItems).where(eq(budgetItems.groupId, id));
-
-    // Delete the group
-    await tx.delete(budgetGroups).where(eq(budgetGroups.id, id));
+  const items = await tx.query.budgetItems.findMany({
+    where: eq(budgetItems.groupId, id),
   });
+
+  for (const item of items) {
+    await tx.delete(monthlyValues).where(eq(monthlyValues.itemId, item.id));
+  }
+
+  await tx.delete(budgetItems).where(eq(budgetItems.groupId, id));
+  await tx.delete(budgetGroups).where(eq(budgetGroups.id, id));
 
   return true;
 }
 
 // Create a new item
-export async function createItem(data: {
+export async function createItem(tx: DbClient, data: {
   yearId: number;
   groupId?: number | null;
   name: string;
   slug: string;
   sortOrder?: number;
-}) {
-  const [newItem] = await db
+}, budgetId: number) {
+  const year = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.id, data.yearId), eq(budgetYears.budgetId, budgetId)),
+  });
+
+  if (!year) {
+    throw new Error('Year not found or does not belong to your budget');
+  }
+
+  if (data.groupId) {
+    const group = await tx.query.budgetGroups.findFirst({
+      where: and(eq(budgetGroups.id, data.groupId), eq(budgetGroups.budgetId, budgetId)),
+    });
+
+    if (!group) {
+      throw new Error('Group not found or does not belong to your budget');
+    }
+  }
+
+  const [newItem] = await tx
     .insert(budgetItems)
     .values({
       yearId: data.yearId,
@@ -500,7 +503,6 @@ export async function createItem(data: {
     })
     .returning();
 
-  // Create empty monthly values for the item
   const monthlyData = Array(12)
     .fill(null)
     .map((_, i) => ({
@@ -509,25 +511,23 @@ export async function createItem(data: {
       budget: '0',
       actual: '0',
     }));
-  await db.insert(monthlyValues).values(monthlyData);
+  await tx.insert(monthlyValues).values(monthlyData);
 
   return newItem;
 }
 
 // Get or create the unclassified item for a year
-// Uses upsert pattern to avoid race conditions under concurrent requests
 export async function getOrCreateUnclassifiedItem(
+  tx: DbClient,
   yearId: number,
-  budgetId: number = DEFAULT_BUDGET_ID
+  budgetId: number
 ): Promise<number> {
-  // First check if unclassified group exists for this budget
-  let unclassifiedGroup = await db.query.budgetGroups.findFirst({
+  let unclassifiedGroup = await tx.query.budgetGroups.findFirst({
     where: and(eq(budgetGroups.budgetId, budgetId), eq(budgetGroups.slug, UNCLASSIFIED_GROUP_SLUG)),
   });
 
   if (!unclassifiedGroup) {
-    // Create the unclassified group
-    const [newGroup] = await db
+    const [newGroup] = await tx
       .insert(budgetGroups)
       .values({
         budgetId,
@@ -540,8 +540,7 @@ export async function getOrCreateUnclassifiedItem(
     unclassifiedGroup = newGroup;
   }
 
-  // Check if unclassified item exists for this year and group
-  let unclassifiedItem = await db.query.budgetItems.findFirst({
+  let unclassifiedItem = await tx.query.budgetItems.findFirst({
     where: and(
       eq(budgetItems.yearId, yearId),
       eq(budgetItems.groupId, unclassifiedGroup.id),
@@ -550,8 +549,7 @@ export async function getOrCreateUnclassifiedItem(
   });
 
   if (!unclassifiedItem) {
-    // Create the unclassified item
-    const [newItem] = await db
+    const [newItem] = await tx
       .insert(budgetItems)
       .values({
         yearId,
@@ -564,22 +562,20 @@ export async function getOrCreateUnclassifiedItem(
     unclassifiedItem = newItem;
   }
 
-  // Check if monthly values exist (only create if this was a new item)
-  const existingMonthlyValues = await db.query.monthlyValues.findFirst({
+  const existingMonthlyValues = await tx.query.monthlyValues.findFirst({
     where: eq(monthlyValues.itemId, unclassifiedItem.id),
   });
 
   if (!existingMonthlyValues) {
-    // Create empty monthly values for the item
     const monthlyData = Array(12)
       .fill(null)
       .map((_, i) => ({
-        itemId: unclassifiedItem.id,
+        itemId: unclassifiedItem!.id,
         month: i + 1,
         budget: '0',
         actual: '0',
       }));
-    await db.insert(monthlyValues).values(monthlyData);
+    await tx.insert(monthlyValues).values(monthlyData);
   }
 
   return unclassifiedItem.id;
@@ -587,28 +583,62 @@ export async function getOrCreateUnclassifiedItem(
 
 // Update an item
 export async function updateItem(
+  tx: DbClient,
   id: number,
   data: {
     name?: string;
     slug?: string;
     sortOrder?: number;
     yearlyBudget?: number;
-  }
+  },
+  budgetId: number
 ) {
+  const existing = await tx.query.budgetItems.findFirst({
+    where: eq(budgetItems.id, id),
+    with: {
+      year: true,
+    },
+  });
+
+  if (!existing || existing.year.budgetId !== budgetId) {
+    return null;
+  }
+
   const updateData: Record<string, unknown> = { updatedAt: new Date() };
   if (data.name !== undefined) updateData.name = data.name;
   if (data.slug !== undefined) updateData.slug = data.slug;
   if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
   if (data.yearlyBudget !== undefined) updateData.yearlyBudget = data.yearlyBudget.toString();
 
-  const [updated] = await db.update(budgetItems).set(updateData).where(eq(budgetItems.id, id)).returning();
+  const [updated] = await tx.update(budgetItems).set(updateData).where(eq(budgetItems.id, id)).returning();
 
   return updated || null;
 }
 
 // Move item to a group (or unassign)
-export async function moveItem(itemId: number, groupId: number | null) {
-  const [updated] = await db
+export async function moveItem(tx: DbClient, itemId: number, groupId: number | null, budgetId: number) {
+  const existing = await tx.query.budgetItems.findFirst({
+    where: eq(budgetItems.id, itemId),
+    with: {
+      year: true,
+    },
+  });
+
+  if (!existing || existing.year.budgetId !== budgetId) {
+    return null;
+  }
+
+  if (groupId) {
+    const group = await tx.query.budgetGroups.findFirst({
+      where: and(eq(budgetGroups.id, groupId), eq(budgetGroups.budgetId, budgetId)),
+    });
+
+    if (!group) {
+      return null;
+    }
+  }
+
+  const [updated] = await tx
     .update(budgetItems)
     .set({ groupId: groupId || null, updatedAt: new Date() })
     .where(eq(budgetItems.id, itemId))
@@ -618,34 +648,45 @@ export async function moveItem(itemId: number, groupId: number | null) {
 }
 
 // Delete an item
-// Returns true if item was deleted, false if it didn't exist
-export async function deleteItem(id: number): Promise<boolean> {
-  // Check if item exists
-  const existing = await db.query.budgetItems.findFirst({
+export async function deleteItem(tx: DbClient, id: number, budgetId: number): Promise<boolean> {
+  const existing = await tx.query.budgetItems.findFirst({
     where: eq(budgetItems.id, id),
+    with: {
+      year: true,
+    },
   });
 
-  if (!existing) {
+  if (!existing || existing.year.budgetId !== budgetId) {
     return false;
   }
 
-  await db.delete(budgetItems).where(eq(budgetItems.id, id));
+  await tx.delete(budgetItems).where(eq(budgetItems.id, id));
   return true;
 }
 
 // Update monthly values
-// Uses upsert pattern to avoid race conditions under concurrent requests
-// Note: Requires unique constraint on (item_id, month) - see migration
 export async function updateMonthlyValue(
+  tx: DbClient,
   itemId: number,
   month: number,
   data: {
     budget?: number;
     actual?: number;
-  }
+  },
+  budgetId: number
 ) {
-  // First, try to get existing to determine if this is create or update
-  const existing = await db.query.monthlyValues.findFirst({
+  const item = await tx.query.budgetItems.findFirst({
+    where: eq(budgetItems.id, itemId),
+    with: {
+      year: true,
+    },
+  });
+
+  if (!item || item.year.budgetId !== budgetId) {
+    throw new Error('Item not found or does not belong to your budget');
+  }
+
+  const existing = await tx.query.monthlyValues.findFirst({
     where: (mv, { and }) => and(eq(mv.itemId, itemId), eq(mv.month, month)),
   });
 
@@ -653,8 +694,7 @@ export async function updateMonthlyValue(
   const budgetValue = data.budget?.toString() ?? existing?.budget ?? '0';
   const actualValue = data.actual?.toString() ?? existing?.actual ?? '0';
 
-  // Use upsert to handle race conditions
-  const [result] = await db
+  const [result] = await tx
     .insert(monthlyValues)
     .values({
       itemId,
@@ -681,12 +721,8 @@ export async function updateMonthlyValue(
 
 // ============ SAVINGS CATEGORY MANAGEMENT ============
 
-/**
- * Get or create the "Savings" group for a budget
- */
-export async function getOrCreateSavingsGroup(budgetId: number = DEFAULT_BUDGET_ID): Promise<number> {
-  // Check if savings group already exists
-  const existingGroup = await db.query.budgetGroups.findFirst({
+export async function getOrCreateSavingsGroup(tx: DbClient, budgetId: number): Promise<number> {
+  const existingGroup = await tx.query.budgetGroups.findFirst({
     where: and(eq(budgetGroups.budgetId, budgetId), eq(budgetGroups.slug, SAVINGS_GROUP_SLUG)),
   });
 
@@ -694,8 +730,7 @@ export async function getOrCreateSavingsGroup(budgetId: number = DEFAULT_BUDGET_
     return existingGroup.id;
   }
 
-  // Create the savings group
-  const [newGroup] = await db
+  const [newGroup] = await tx
     .insert(budgetGroups)
     .values({
       budgetId,
@@ -709,21 +744,16 @@ export async function getOrCreateSavingsGroup(budgetId: number = DEFAULT_BUDGET_
   return newGroup.id;
 }
 
-/**
- * Create budget items for a savings account across all years
- * Returns the created item IDs mapped by yearId
- */
 export async function createSavingsBudgetItems(
+  tx: DbClient,
   savingsAccountId: number,
   savingsAccountName: string,
   savingsAccountInstitution: string | null,
-  budgetId: number = DEFAULT_BUDGET_ID
+  budgetId: number
 ): Promise<Map<number, number>> {
-  // Get or create the savings group
-  const groupId = await getOrCreateSavingsGroup(budgetId);
+  const groupId = await getOrCreateSavingsGroup(tx, budgetId);
 
-  // Get all years for this budget
-  const years = await db.query.budgetYears.findMany({
+  const years = await tx.query.budgetYears.findMany({
     where: eq(budgetYears.budgetId, budgetId),
   });
 
@@ -735,8 +765,7 @@ export async function createSavingsBudgetItems(
   const createdItems = new Map<number, number>();
 
   for (const year of years) {
-    // Check if item already exists for this savings account and year
-    const existingItem = await db.query.budgetItems.findFirst({
+    const existingItem = await tx.query.budgetItems.findFirst({
       where: and(eq(budgetItems.yearId, year.id), eq(budgetItems.savingsAccountId, savingsAccountId)),
     });
 
@@ -745,8 +774,7 @@ export async function createSavingsBudgetItems(
       continue;
     }
 
-    // Create the budget item
-    const [newItem] = await db
+    const [newItem] = await tx
       .insert(budgetItems)
       .values({
         yearId: year.id,
@@ -758,7 +786,6 @@ export async function createSavingsBudgetItems(
       })
       .returning();
 
-    // Create monthly values for the item
     const monthlyData = Array(12)
       .fill(null)
       .map((_, i) => ({
@@ -767,7 +794,7 @@ export async function createSavingsBudgetItems(
         budget: '0',
         actual: '0',
       }));
-    await db.insert(monthlyValues).values(monthlyData);
+    await tx.insert(monthlyValues).values(monthlyData);
 
     createdItems.set(year.id, newItem.id);
   }
@@ -775,51 +802,40 @@ export async function createSavingsBudgetItems(
   return createdItems;
 }
 
-/**
- * Delete all budget items linked to a savings account
- */
-export async function deleteSavingsBudgetItems(savingsAccountId: number): Promise<void> {
-  // Delete all budget items linked to this savings account
-  // (monthly values will cascade delete)
-  await db.delete(budgetItems).where(eq(budgetItems.savingsAccountId, savingsAccountId));
+export async function deleteSavingsBudgetItems(tx: DbClient, savingsAccountId: number): Promise<void> {
+  await tx.delete(budgetItems).where(eq(budgetItems.savingsAccountId, savingsAccountId));
 }
 
-/**
- * Update the name of all budget items linked to a savings account
- */
 export async function updateSavingsBudgetItemsName(
+  tx: DbClient,
   savingsAccountId: number,
   newName: string,
   newInstitution: string | null
 ): Promise<void> {
   const itemName = newInstitution ? `${newName} (${newInstitution})` : newName;
 
-  await db
+  await tx
     .update(budgetItems)
     .set({ name: itemName, updatedAt: new Date() })
     .where(eq(budgetItems.savingsAccountId, savingsAccountId));
 }
 
-/**
- * Create a savings budget item for a new year (called when a new year is created)
- */
 export async function createSavingsItemForYear(
+  tx: DbClient,
   yearId: number,
   savingsAccountId: number,
   savingsAccountName: string,
   savingsAccountInstitution: string | null,
-  budgetId: number = DEFAULT_BUDGET_ID
+  budgetId: number
 ): Promise<number> {
-  // Get or create the savings group
-  const groupId = await getOrCreateSavingsGroup(budgetId);
+  const groupId = await getOrCreateSavingsGroup(tx, budgetId);
 
   const itemName = savingsAccountInstitution
     ? `${savingsAccountName} (${savingsAccountInstitution})`
     : savingsAccountName;
   const itemSlug = `savings-${savingsAccountId}`;
 
-  // Create the budget item
-  const [newItem] = await db
+  const [newItem] = await tx
     .insert(budgetItems)
     .values({
       yearId,
@@ -831,7 +847,6 @@ export async function createSavingsItemForYear(
     })
     .returning();
 
-  // Create monthly values for the item
   const monthlyData = Array(12)
     .fill(null)
     .map((_, i) => ({
@@ -840,7 +855,7 @@ export async function createSavingsItemForYear(
       budget: '0',
       actual: '0',
     }));
-  await db.insert(monthlyValues).values(monthlyData);
+  await tx.insert(monthlyValues).values(monthlyData);
 
   return newItem.id;
 }

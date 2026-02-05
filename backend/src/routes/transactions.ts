@@ -1,5 +1,6 @@
 import { Router, type Router as RouterType } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { withTenantContext } from '../db/context.js';
 import * as transactionsSvc from '../services/transactions.js';
 
 const router: RouterType = Router();
@@ -9,7 +10,11 @@ router.get(
   '/third-parties',
   asyncHandler(async (req, res) => {
     const search = req.query.search as string | undefined;
-    const thirdParties = await transactionsSvc.getThirdParties(search);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const thirdParties = await withTenantContext(userId, budgetId, (tx) =>
+      transactionsSvc.getThirdParties(tx, search, budgetId)
+    );
     res.json(thirdParties);
   })
 );
@@ -17,9 +22,13 @@ router.get(
 // GET /api/transactions - Get all transactions for current year
 router.get(
   '/',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const currentYear = new Date().getFullYear();
-    const transactions = await transactionsSvc.getTransactionsForYear(currentYear);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const transactions = await withTenantContext(userId, budgetId, (tx) =>
+      transactionsSvc.getTransactionsForYear(tx, currentYear, budgetId)
+    );
     res.json(transactions);
   })
 );
@@ -32,7 +41,11 @@ router.get(
     if (Number.isNaN(year)) {
       throw new AppError(400, 'Invalid year');
     }
-    const transactions = await transactionsSvc.getTransactionsForYear(year);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const transactions = await withTenantContext(userId, budgetId, (tx) =>
+      transactionsSvc.getTransactionsForYear(tx, year, budgetId)
+    );
     res.json(transactions);
   })
 );
@@ -43,34 +56,21 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const {
-      yearId,
-      itemId,
-      date,
-      description,
-      comment,
-      thirdParty,
-      paymentMethod,
-      amount,
-      accountingMonth,
-      accountingYear,
+      yearId, itemId, date, description, comment, thirdParty,
+      paymentMethod, amount, accountingMonth, accountingYear,
     } = req.body;
 
     if (!yearId || !date || !paymentMethod || amount === undefined) {
       throw new AppError(400, 'yearId, date, paymentMethod, and amount are required');
     }
 
-    const newTransaction = await transactionsSvc.createTransaction(userId, {
-      yearId,
-      itemId,
-      date,
-      description,
-      comment,
-      thirdParty,
-      paymentMethod,
-      amount,
-      accountingMonth,
-      accountingYear,
-    });
+    const budgetId = req.budget!.id;
+    const newTransaction = await withTenantContext(userId, budgetId, (tx) =>
+      transactionsSvc.createTransaction(tx, userId, budgetId, {
+        yearId, itemId, date, description, comment, thirdParty,
+        paymentMethod, amount, accountingMonth, accountingYear,
+      })
+    );
 
     res.status(201).json(newTransaction);
   })
@@ -87,30 +87,17 @@ router.put(
     }
 
     const {
-      itemId,
-      date,
-      description,
-      comment,
-      thirdParty,
-      paymentMethod,
-      amount,
-      accountingMonth,
-      accountingYear,
-      recalculateAccounting,
+      itemId, date, description, comment, thirdParty, paymentMethod,
+      amount, accountingMonth, accountingYear, recalculateAccounting,
     } = req.body;
 
-    const updated = await transactionsSvc.updateTransaction(userId, id, {
-      itemId,
-      date,
-      description,
-      comment,
-      thirdParty,
-      paymentMethod,
-      amount,
-      accountingMonth,
-      accountingYear,
-      recalculateAccounting,
-    });
+    const budgetId = req.budget!.id;
+    const updated = await withTenantContext(userId, budgetId, (tx) =>
+      transactionsSvc.updateTransaction(tx, userId, budgetId, id, {
+        itemId, date, description, comment, thirdParty, paymentMethod,
+        amount, accountingMonth, accountingYear, recalculateAccounting,
+      })
+    );
 
     if (!updated) {
       throw new AppError(404, 'Transaction not found');
@@ -130,12 +117,16 @@ router.delete(
       throw new AppError(400, 'ids must be a non-empty array');
     }
 
-    const numericIds = ids.map((id) => parseInt(id, 10)).filter((id) => !Number.isNaN(id));
+    const numericIds = ids.map((id: string) => parseInt(id, 10)).filter((id: number) => !Number.isNaN(id));
     if (numericIds.length !== ids.length) {
       throw new AppError(400, 'All IDs must be valid numbers');
     }
 
-    const result = await transactionsSvc.bulkDeleteTransactions(numericIds);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const result = await withTenantContext(userId, budgetId, (tx) =>
+      transactionsSvc.bulkDeleteTransactions(tx, numericIds, budgetId)
+    );
     res.json(result);
   })
 );
@@ -149,7 +140,11 @@ router.delete(
       throw new AppError(400, 'Invalid transaction ID');
     }
 
-    const deleted = await transactionsSvc.deleteTransaction(id);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const deleted = await withTenantContext(userId, budgetId, (tx) =>
+      transactionsSvc.deleteTransaction(tx, id, budgetId)
+    );
     if (!deleted) {
       throw new AppError(404, 'Transaction not found');
     }

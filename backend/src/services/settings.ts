@@ -1,9 +1,10 @@
 import { and, eq } from 'drizzle-orm';
-import { db, settings } from '../db/index.js';
+import { settings } from '../db/schema.js';
+import type { DbClient } from '../db/index.js';
 
 // Get all settings for a user as a key-value map
-export async function getAllSettings(userId: string): Promise<Record<string, string | null>> {
-  const allSettings = await db.query.settings.findMany({
+export async function getAllSettings(tx: DbClient, userId: string): Promise<Record<string, string | null>> {
+  const allSettings = await tx.query.settings.findMany({
     where: eq(settings.userId, userId),
   });
   return allSettings.reduce(
@@ -16,8 +17,8 @@ export async function getAllSettings(userId: string): Promise<Record<string, str
 }
 
 // Get a specific setting by key for a user
-export async function getSetting(userId: string, key: string): Promise<{ key: string; value: string | null } | null> {
-  const setting = await db.query.settings.findFirst({
+export async function getSetting(tx: DbClient, userId: string, key: string): Promise<{ key: string; value: string | null } | null> {
+  const setting = await tx.query.settings.findFirst({
     where: and(eq(settings.userId, userId), eq(settings.key, key)),
   });
 
@@ -27,14 +28,13 @@ export async function getSetting(userId: string, key: string): Promise<{ key: st
 }
 
 // Update or create a setting for a user
-// Uses upsert pattern to avoid race conditions under concurrent requests
 export async function upsertSetting(
+  tx: DbClient,
   userId: string,
   key: string,
   value: string | null
 ): Promise<{ key: string; value: string | null; created: boolean }> {
-  // Try to insert, on conflict (unique userId + key) update the existing row
-  const [result] = await db
+  const [result] = await tx
     .insert(settings)
     .values({ userId, key, value })
     .onConflictDoUpdate({
@@ -43,8 +43,6 @@ export async function upsertSetting(
     })
     .returning();
 
-  // We can't easily determine if it was created or updated with upsert,
-  // so we check if createdAt equals updatedAt (within a small window)
   const wasCreated =
     result.createdAt.getTime() === result.updatedAt.getTime() ||
     Math.abs(result.createdAt.getTime() - result.updatedAt.getTime()) < 1000;
@@ -53,6 +51,6 @@ export async function upsertSetting(
 }
 
 // Delete a setting for a user
-export async function deleteSetting(userId: string, key: string) {
-  await db.delete(settings).where(and(eq(settings.userId, userId), eq(settings.key, key)));
+export async function deleteSetting(tx: DbClient, userId: string, key: string) {
+  await tx.delete(settings).where(and(eq(settings.userId, userId), eq(settings.key, key)));
 }

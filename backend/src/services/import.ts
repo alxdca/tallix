@@ -1,12 +1,13 @@
-import { eq } from 'drizzle-orm';
-import { budgetItems, budgetYears, db } from '../db/index.js';
+import { and, eq } from 'drizzle-orm';
+import { budgetItems, budgetYears } from '../db/schema.js';
+import type { DbClient } from '../db/index.js';
 
 export interface ParsedTransaction {
   date: string;
   description: string;
-  amount: number; // Positive = expense, negative = income/refund (user can override in preview)
+  amount: number;
   thirdParty?: string;
-  isIncome?: boolean; // Detected from PDF context - helps user review
+  isIncome?: boolean;
   suggestedItemId?: number | null;
   suggestedItemName?: string;
   suggestedGroupName?: string;
@@ -15,300 +16,77 @@ export interface ParsedTransaction {
 
 // Category keyword mappings
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  // Groceries
   alimentation: [
-    'migros',
-    'coop',
-    'lidl',
-    'aldi',
-    'denner',
-    'spar',
-    'volg',
-    'manor food',
-    'aligro',
-    'carrefour',
-    'leclerc',
-    'auchan',
-    'intermarché',
-    'casino',
-    'franprix',
-    'monoprix',
-    'picard',
-    'boulangerie',
-    'boucherie',
-    'primeur',
+    'migros', 'coop', 'lidl', 'aldi', 'denner', 'spar', 'volg', 'manor food', 'aligro',
+    'carrefour', 'leclerc', 'auchan', 'intermarché', 'casino', 'franprix', 'monoprix', 'picard',
+    'boulangerie', 'boucherie', 'primeur',
   ],
   courses: ['migros', 'coop', 'lidl', 'aldi', 'denner', 'spar', 'volg', 'supermarché', 'épicerie', 'grocery'],
-
-  // Restaurants / Dining
   restaurant: [
-    'restaurant',
-    'resto',
-    'pizzeria',
-    'brasserie',
-    'bistro',
-    'café',
-    'starbucks',
-    'mcdonald',
-    'burger king',
-    'subway',
-    'kfc',
-    'kebab',
-    'sushi',
-    'thai',
-    'chinois',
-    'italien',
-    'take away',
-    'takeaway',
-    'uber eats',
-    'deliveroo',
-    'just eat',
-    'smood',
+    'restaurant', 'resto', 'pizzeria', 'brasserie', 'bistro', 'café', 'starbucks', 'mcdonald',
+    'burger king', 'subway', 'kfc', 'kebab', 'sushi', 'thai', 'chinois', 'italien', 'take away',
+    'takeaway', 'uber eats', 'deliveroo', 'just eat', 'smood',
   ],
   sorties: ['restaurant', 'bar', 'pub', 'club', 'cinema', 'cinéma', 'concert', 'spectacle', 'théâtre', 'musée'],
-
-  // Transport
   transport: [
-    'sbb',
-    'cff',
-    'ffs',
-    'tpg',
-    'tl',
-    'bls',
-    'ratp',
-    'sncf',
-    'train',
-    'tram',
-    'bus',
-    'metro',
-    'métro',
-    'uber',
-    'taxi',
-    'bolt',
-    'lyft',
-    'parking',
-    'parcmètre',
-    'essence',
-    'shell',
-    'bp',
-    'esso',
-    'migrol',
-    'agrola',
-    'péage',
-    'autoroute',
-    'vignette',
+    'sbb', 'cff', 'ffs', 'tpg', 'tl', 'bls', 'ratp', 'sncf', 'train', 'tram', 'bus', 'metro',
+    'métro', 'uber', 'taxi', 'bolt', 'lyft', 'parking', 'parcmètre', 'essence', 'shell', 'bp',
+    'esso', 'migrol', 'agrola', 'péage', 'autoroute', 'vignette',
   ],
   voiture: [
-    'essence',
-    'shell',
-    'bp',
-    'esso',
-    'migrol',
-    'agrola',
-    'garage',
-    'pneu',
-    'révision',
-    'entretien auto',
-    'parking',
-    'tcs',
-    'assurance auto',
+    'essence', 'shell', 'bp', 'esso', 'migrol', 'agrola', 'garage', 'pneu', 'révision',
+    'entretien auto', 'parking', 'tcs', 'assurance auto',
   ],
-
-  // Housing / Home
   loyer: ['loyer', 'rent', 'gérance', 'régie', 'immobilier'],
   logement: ['loyer', 'rent', 'gérance', 'électricité', 'gaz', 'chauffage', 'eau', 'copropriété', 'charges'],
   électricité: ['electricité', 'électricité', 'sig', 'romande energie', 'edf', 'engie', 'alpiq'],
-
-  // Telecom / Internet
   téléphone: [
-    'swisscom',
-    'sunrise',
-    'salt',
-    'wingo',
-    'yallo',
-    'lebara',
-    'lycamobile',
-    'orange',
-    'sfr',
-    'bouygues',
-    'free mobile',
-    'apple',
-    'samsung',
-    'mobile',
+    'swisscom', 'sunrise', 'salt', 'wingo', 'yallo', 'lebara', 'lycamobile', 'orange', 'sfr',
+    'bouygues', 'free mobile', 'apple', 'samsung', 'mobile',
   ],
   internet: ['swisscom', 'sunrise', 'salt', 'upc', 'orange', 'sfr', 'free', 'bouygues'],
   abonnements: ['netflix', 'spotify', 'apple', 'disney', 'hbo', 'youtube', 'amazon prime', 'dazn', 'canal+'],
-
-  // Health
   santé: [
-    'pharmacie',
-    'pharmacy',
-    'médecin',
-    'docteur',
-    'hôpital',
-    'clinique',
-    'dentiste',
-    'opticien',
-    'optique',
-    'lunettes',
-    'lentilles',
-    'laboratoire',
-    'radiologie',
-    'kiné',
-    'physio',
-    'ostéo',
-    'css',
-    'swica',
-    'helsana',
-    'sanitas',
-    'visana',
-    'concordia',
-    'groupe mutuel',
-    'assura',
-    'atupri',
+    'pharmacie', 'pharmacy', 'médecin', 'docteur', 'hôpital', 'clinique', 'dentiste', 'opticien',
+    'optique', 'lunettes', 'lentilles', 'laboratoire', 'radiologie', 'kiné', 'physio', 'ostéo',
+    'css', 'swica', 'helsana', 'sanitas', 'visana', 'concordia', 'groupe mutuel', 'assura', 'atupri',
   ],
   'assurance maladie': [
-    'css',
-    'swica',
-    'helsana',
-    'sanitas',
-    'visana',
-    'concordia',
-    'groupe mutuel',
-    'assura',
-    'atupri',
-    'mutuelle',
+    'css', 'swica', 'helsana', 'sanitas', 'visana', 'concordia', 'groupe mutuel', 'assura',
+    'atupri', 'mutuelle',
   ],
-
-  // Shopping
   vêtements: [
-    'h&m',
-    'zara',
-    'mango',
-    'uniqlo',
-    'c&a',
-    'manor',
-    'globus',
-    'zalando',
-    'la redoute',
-    'asos',
-    'primark',
-    'décathlon',
-    'intersport',
-    'ochsner',
+    'h&m', 'zara', 'mango', 'uniqlo', 'c&a', 'manor', 'globus', 'zalando', 'la redoute', 'asos',
+    'primark', 'décathlon', 'intersport', 'ochsner',
   ],
   shopping: [
-    'amazon',
-    'galaxus',
-    'digitec',
-    'fnac',
-    'darty',
-    'ikea',
-    'conforama',
-    'manor',
-    'globus',
-    'jelmoli',
-    'wish',
-    'aliexpress',
-    'temu',
-    'shein',
+    'amazon', 'galaxus', 'digitec', 'fnac', 'darty', 'ikea', 'conforama', 'manor', 'globus',
+    'jelmoli', 'wish', 'aliexpress', 'temu', 'shein',
   ],
-
-  // Insurance
   assurance: [
-    'axa',
-    'allianz',
-    'zurich',
-    'helvetia',
-    'mobilière',
-    'mobiliar',
-    'bâloise',
-    'generali',
-    'vaudoise',
-    'maif',
-    'macif',
-    'matmut',
-    'groupama',
+    'axa', 'allianz', 'zurich', 'helvetia', 'mobilière', 'mobiliar', 'bâloise', 'generali',
+    'vaudoise', 'maif', 'macif', 'matmut', 'groupama',
   ],
-
-  // Bank / Finance
   banque: [
-    'ubs',
-    'credit suisse',
-    'raiffeisen',
-    'bcv',
-    'bcge',
-    'postfinance',
-    'bnp',
-    'société générale',
-    'crédit agricole',
-    'banque populaire',
-    'caisse épargne',
-    'lcl',
-    'frais bancaires',
-    'commission',
+    'ubs', 'credit suisse', 'raiffeisen', 'bcv', 'bcge', 'postfinance', 'bnp', 'société générale',
+    'crédit agricole', 'banque populaire', 'caisse épargne', 'lcl', 'frais bancaires', 'commission',
     'intérêts',
   ],
-
-  // Income
   salaire: ['salaire', 'salary', 'paie', 'virement employeur', 'wage'],
   revenus: ['dividende', 'intérêts', 'loyer reçu', 'remboursement'],
 };
 
 // Common header/label keywords to filter out
 const HEADER_KEYWORDS = [
-  'solde',
-  'disponible',
-  'payable',
-  'montant minimum',
-  'date de',
-  'votre paiement',
-  'numéro de compte',
-  'iban',
-  'bic',
-  'relevé',
-  'extrait',
-  'période',
-  'page',
-  'total',
-  'sous-total',
-  'récapitulatif',
-  'résumé',
-  'balance',
-  'ancien solde',
-  'nouveau solde',
-  'solde initial',
-  'solde final',
-  'solde créditeur',
-  'solde débiteur',
-  'date valeur',
-  "date d'opération",
-  'libellé',
-  'débit',
-  'crédit',
-  'référence',
-  'n° de compte',
-  'titulaire',
-  'agence',
-  'code guichet',
-  'intérêts',
-  'frais',
-  'commission',
-  'taux',
-  'plafond',
-  'limite',
-  'échéance',
-  'prélèvement automatique',
-  'conditions',
-  'tarif',
-  'barème',
-  'en notre faveur',
-  'en votre faveur',
-  'au en notre',
-  "jusqu'au",
-  'aturation',
-  'maturation',
-  'encours',
+  'solde', 'disponible', 'payable', 'montant minimum', 'date de', 'votre paiement',
+  'numéro de compte', 'iban', 'bic', 'relevé', 'extrait', 'période', 'page', 'total',
+  'sous-total', 'récapitulatif', 'résumé', 'balance', 'ancien solde', 'nouveau solde',
+  'solde initial', 'solde final', 'solde créditeur', 'solde débiteur', 'date valeur',
+  "date d'opération", 'libellé', 'débit', 'crédit', 'référence', 'n° de compte',
+  'titulaire', 'agence', 'code guichet', 'intérêts', 'frais', 'commission', 'taux',
+  'plafond', 'limite', 'échéance', 'prélèvement automatique', 'conditions', 'tarif',
+  'barème', 'en notre faveur', 'en votre faveur', 'au en notre', "jusqu'au", 'aturation',
+  'maturation', 'encours',
 ];
 
 interface ItemForMatching {
@@ -321,8 +99,16 @@ interface ItemForMatching {
 }
 
 // Get all items for a year with their groups
-export async function getItemsForMatching(yearId: number): Promise<ItemForMatching[]> {
-  const items = await db.query.budgetItems.findMany({
+export async function getItemsForMatching(tx: DbClient, yearId: number, budgetId: number): Promise<ItemForMatching[]> {
+  const year = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.id, yearId), eq(budgetYears.budgetId, budgetId)),
+  });
+
+  if (!year) {
+    throw new Error('Year not found or does not belong to your budget');
+  }
+
+  const items = await tx.query.budgetItems.findMany({
     where: eq(budgetItems.yearId, yearId),
     with: {
       group: true,
@@ -339,10 +125,10 @@ export async function getItemsForMatching(yearId: number): Promise<ItemForMatchi
   }));
 }
 
-// Get year ID by year number
-export async function getYearIdByYear(year: number): Promise<number | null> {
-  const budgetYear = await db.query.budgetYears.findFirst({
-    where: eq(budgetYears.year, year),
+// Get year ID by year number (budget-scoped)
+export async function getYearIdByYear(tx: DbClient, year: number, budgetId: number): Promise<number | null> {
+  const budgetYear = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.year, year), eq(budgetYears.budgetId, budgetId)),
   });
   return budgetYear?.id ?? null;
 }
@@ -354,16 +140,13 @@ export function suggestCategory(
 ): { itemId: number | null; itemName: string; groupName: string } | null {
   const lowerText = text.toLowerCase();
 
-  // First, try to match against existing items/groups by name
   for (const item of items) {
     const itemNameLower = item.name.toLowerCase();
-
     if (lowerText.includes(itemNameLower) || itemNameLower.includes(lowerText)) {
       return { itemId: item.id, itemName: item.name, groupName: item.groupName };
     }
   }
 
-  // Then try keyword matching
   for (const [categoryKey, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
     for (const keyword of keywords) {
       if (lowerText.includes(keyword.toLowerCase())) {
@@ -394,7 +177,6 @@ export function extractThirdParty(description: string): { thirdParty: string; cl
   let thirdParty = '';
   let cleanDescription = description;
 
-  // Remove common prefixes
   const prefixes = [
     /^(paiement|payment|achat|purchase|virement|transfer|prélèvement|direct debit)\s+(à|to|chez|at|de|from)?\s*/i,
     /^(carte|card)\s*\d*\s*/i,
@@ -406,7 +188,6 @@ export function extractThirdParty(description: string): { thirdParty: string; cl
     cleanDescription = cleanDescription.replace(prefix, '');
   }
 
-  // Remove trailing location/date info
   const suffixes = [
     /\s+(suisse|switzerland|france|ch|fr)\s*$/i,
     /\s+\d{2}[./]\d{2}[./]?\d{0,4}\s*$/i,
@@ -419,7 +200,6 @@ export function extractThirdParty(description: string): { thirdParty: string; cl
 
   cleanDescription = cleanDescription.trim();
 
-  // For credit card statements, the whole cleaned description is often the merchant
   if (cleanDescription.length > 2 && cleanDescription.length < 50) {
     const words = cleanDescription.split(/\s+/);
     if (words.length <= 5) {
@@ -427,7 +207,6 @@ export function extractThirdParty(description: string): { thirdParty: string; cl
     }
   }
 
-  // Try to extract from patterns like "at X" or "from X"
   if (!thirdParty) {
     const thirdPartyMatch = cleanDescription.match(/(?:chez|à|at|de|from|pour|to)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s&'.-]+)/i);
     if (thirdPartyMatch) {
@@ -455,16 +234,13 @@ export function parseDate(dateStr: string): string | null {
 }
 
 // Parse amount from string (handles Swiss/European format)
-// Preserves sign: positive for expenses, negative for income/credits/refunds
 export function parseAmount(amountStr: string): number | null {
-  // Check for explicit sign before cleaning
   const trimmed = amountStr.trim();
   const hasExplicitMinus = trimmed.startsWith('-');
   const hasExplicitPlus = trimmed.startsWith('+');
 
   let cleaned = amountStr.replace(/[CHF€$\s]/gi, '').trim();
 
-  // Preserve the sign character for parsing
   const signMatch = cleaned.match(/^([+-])/);
   const sign = signMatch ? signMatch[1] : '';
   cleaned = cleaned.replace(/^[+-]/, '');
@@ -481,8 +257,6 @@ export function parseAmount(amountStr: string): number | null {
   const amount = parseFloat(sign + cleaned);
   if (Number.isNaN(amount)) return null;
 
-  // Return absolute value - sign detection is handled separately via detectTransactionType
-  // This preserves explicit signs from the PDF while defaulting to positive
   if (hasExplicitMinus) return -Math.abs(amount);
   if (hasExplicitPlus) return Math.abs(amount);
   return Math.abs(amount);
@@ -612,19 +386,13 @@ export function extractTransactionsFromText(text: string): ParsedTransaction[] {
 
     const { thirdParty, cleanDescription } = extractThirdParty(description);
 
-    // Detect if this is income based on:
-    // 1. Explicit negative sign in the raw amount string
-    // 2. Context keywords (salary, credit, etc.)
     const hasExplicitSign = rawAmountStr.trim().startsWith('-') || rawAmountStr.trim().startsWith('+');
-    let isIncome = amount < 0; // Negative amounts from explicit signs are income
+    let isIncome = amount < 0;
 
-    // If no explicit sign, use context-based detection
     if (!hasExplicitSign) {
       isIncome = detectTransactionType(line, context);
     }
 
-    // Store absolute amount - sign is indicated by isIncome flag
-    // User can override in the preview UI
     transactions.push({
       date,
       description: cleanDescription.substring(0, 200),
@@ -638,9 +406,10 @@ export function extractTransactionsFromText(text: string): ParsedTransaction[] {
 }
 
 // Parse PDF buffer and extract transactions
-// If skipSuggestions is true, skip category matching (for AI-only classification)
 export async function parsePdfAndExtract(
+  tx: DbClient,
   buffer: Buffer,
+  budgetId: number,
   yearId?: number | null,
   skipSuggestions: boolean = false
 ): Promise<{
@@ -648,7 +417,6 @@ export async function parsePdfAndExtract(
   totalFound: number;
   rawTextSample: string;
 }> {
-  // Dynamic import pdf-parse
   const { PDFParse } = await import('pdf-parse');
 
   const parser = new PDFParse({ data: buffer }) as any;
@@ -658,7 +426,6 @@ export async function parsePdfAndExtract(
 
   const parsedTransactions = extractTransactionsFromText(text);
 
-  // Skip category suggestions if requested (for AI-only mode)
   if (skipSuggestions) {
     return {
       transactions: parsedTransactions.map((t) => ({
@@ -672,19 +439,17 @@ export async function parsePdfAndExtract(
     };
   }
 
-  // Get items for category matching
   let items: ItemForMatching[] = [];
   if (yearId) {
-    items = await getItemsForMatching(yearId);
+    items = await getItemsForMatching(tx, yearId, budgetId);
   } else {
     const currentYear = new Date().getFullYear();
-    const currentYearId = await getYearIdByYear(currentYear);
+    const currentYearId = await getYearIdByYear(tx, currentYear, budgetId);
     if (currentYearId) {
-      items = await getItemsForMatching(currentYearId);
+      items = await getItemsForMatching(tx, currentYearId, budgetId);
     }
   }
 
-  // Add category suggestions to transactions
   const transactionsWithSuggestions = parsedTransactions.map((t) => {
     const textToMatch = t.thirdParty || t.description;
     const suggestion = suggestCategory(textToMatch, items);

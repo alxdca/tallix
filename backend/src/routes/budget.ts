@@ -1,5 +1,6 @@
 import { Router, type Router as RouterType } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { withTenantContext } from '../db/context.js';
 import * as budget from '../services/budget.js';
 
 const router: RouterType = Router();
@@ -7,9 +8,13 @@ const router: RouterType = Router();
 // GET /api/budget - Get budget data for current year
 router.get(
   '/',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const currentYear = new Date().getFullYear();
-    const data = await budget.getBudgetDataForYear(currentYear);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const data = await withTenantContext(userId, budgetId, (tx) =>
+      budget.getBudgetDataForYear(tx, currentYear, budgetId)
+    );
     res.json(data);
   })
 );
@@ -22,7 +27,11 @@ router.get(
     if (Number.isNaN(year)) {
       throw new AppError(400, 'Invalid year');
     }
-    const data = await budget.getBudgetDataForYear(year);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const data = await withTenantContext(userId, budgetId, (tx) =>
+      budget.getBudgetDataForYear(tx, year, budgetId)
+    );
     res.json(data);
   })
 );
@@ -35,9 +44,13 @@ router.get('/months', (_req, res) => {
 // GET /api/budget/summary - Get budget summary for current year
 router.get(
   '/summary',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const currentYear = new Date().getFullYear();
-    const summary = await budget.getBudgetSummary(currentYear);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const summary = await withTenantContext(userId, budgetId, (tx) =>
+      budget.getBudgetSummary(tx, currentYear, budgetId, userId)
+    );
     res.json(summary);
   })
 );
@@ -45,8 +58,12 @@ router.get(
 // GET /api/budget/years - Get all years
 router.get(
   '/years',
-  asyncHandler(async (_req, res) => {
-    const years = await budget.getAllYears();
+  asyncHandler(async (req, res) => {
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const years = await withTenantContext(userId, budgetId, (tx) =>
+      budget.getAllYears(tx, budgetId)
+    );
     res.json(years);
   })
 );
@@ -59,7 +76,11 @@ router.post(
     if (!year) {
       throw new AppError(400, 'Year is required');
     }
-    const newYear = await budget.createYear(year, initialBalance);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const newYear = await withTenantContext(userId, budgetId, (tx) =>
+      budget.createYear(tx, year, initialBalance, budgetId, userId)
+    );
     res.status(201).json(newYear);
   })
 );
@@ -80,7 +101,11 @@ router.put(
     if (Number.isNaN(parsedBalance)) {
       throw new AppError(400, 'initialBalance must be a valid number');
     }
-    const updated = await budget.updateYear(id, parsedBalance);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const updated = await withTenantContext(userId, budgetId, (tx) =>
+      budget.updateYear(tx, id, parsedBalance, budgetId)
+    );
     if (!updated) {
       throw new AppError(404, 'Year not found');
     }
@@ -92,11 +117,15 @@ router.put(
 router.post(
   '/groups',
   asyncHandler(async (req, res) => {
-    const { budgetId = 1, name, slug, type = 'expense', sortOrder = 0 } = req.body;
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const { name, slug, type = 'expense', sortOrder = 0 } = req.body;
     if (!name || !slug) {
       throw new AppError(400, 'name and slug are required');
     }
-    const newGroup = await budget.createGroup({ budgetId, name, slug, type, sortOrder });
+    const newGroup = await withTenantContext(userId, budgetId, (tx) =>
+      budget.createGroup(tx, { budgetId, name, slug, type, sortOrder })
+    );
     res.status(201).json(newGroup);
   })
 );
@@ -109,7 +138,11 @@ router.put(
     if (!groups || !Array.isArray(groups)) {
       throw new AppError(400, 'groups array is required');
     }
-    await budget.reorderGroups(groups);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    await withTenantContext(userId, budgetId, (tx) =>
+      budget.reorderGroups(tx, groups, budgetId)
+    );
     res.json({ success: true });
   })
 );
@@ -123,7 +156,11 @@ router.put(
       throw new AppError(400, 'Invalid group ID');
     }
     const { name, slug, type, sortOrder } = req.body;
-    const updated = await budget.updateGroup(id, { name, slug, type, sortOrder });
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const updated = await withTenantContext(userId, budgetId, (tx) =>
+      budget.updateGroup(tx, id, { name, slug, type, sortOrder }, budgetId)
+    );
     if (!updated) {
       throw new AppError(404, 'Group not found');
     }
@@ -139,7 +176,11 @@ router.delete(
     if (Number.isNaN(id)) {
       throw new AppError(400, 'Invalid group ID');
     }
-    const deleted = await budget.deleteGroup(id);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const deleted = await withTenantContext(userId, budgetId, (tx) =>
+      budget.deleteGroup(tx, id, budgetId)
+    );
     if (!deleted) {
       throw new AppError(404, 'Group not found');
     }
@@ -155,7 +196,11 @@ router.post(
     if (!yearId || !name || !slug) {
       throw new AppError(400, 'yearId, name, and slug are required');
     }
-    const newItem = await budget.createItem({ yearId, groupId, name, slug, sortOrder });
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const newItem = await withTenantContext(userId, budgetId, (tx) =>
+      budget.createItem(tx, { yearId, groupId, name, slug, sortOrder }, budgetId)
+    );
     res.status(201).json(newItem);
   })
 );
@@ -168,7 +213,11 @@ router.put(
     if (!itemId) {
       throw new AppError(400, 'itemId is required');
     }
-    const updated = await budget.moveItem(itemId, groupId);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const updated = await withTenantContext(userId, budgetId, (tx) =>
+      budget.moveItem(tx, itemId, groupId, budgetId)
+    );
     if (!updated) {
       throw new AppError(404, 'Item not found');
     }
@@ -184,7 +233,11 @@ router.put(
     if (!items || !Array.isArray(items)) {
       throw new AppError(400, 'items array is required');
     }
-    await budget.reorderItems(items);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    await withTenantContext(userId, budgetId, (tx) =>
+      budget.reorderItems(tx, items, budgetId)
+    );
     res.json({ success: true });
   })
 );
@@ -198,7 +251,11 @@ router.put(
       throw new AppError(400, 'Invalid item ID');
     }
     const { name, slug, sortOrder, yearlyBudget } = req.body;
-    const updated = await budget.updateItem(id, { name, slug, sortOrder, yearlyBudget });
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const updated = await withTenantContext(userId, budgetId, (tx) =>
+      budget.updateItem(tx, id, { name, slug, sortOrder, yearlyBudget }, budgetId)
+    );
     if (!updated) {
       throw new AppError(404, 'Item not found');
     }
@@ -214,7 +271,11 @@ router.delete(
     if (Number.isNaN(id)) {
       throw new AppError(400, 'Invalid item ID');
     }
-    const deleted = await budget.deleteItem(id);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const deleted = await withTenantContext(userId, budgetId, (tx) =>
+      budget.deleteItem(tx, id, budgetId)
+    );
     if (!deleted) {
       throw new AppError(404, 'Item not found');
     }
@@ -237,7 +298,11 @@ router.put(
       throw new AppError(400, 'Month must be between 1 and 12');
     }
 
-    const result = await budget.updateMonthlyValue(itemId, month, { budget: budgetValue, actual });
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const result = await withTenantContext(userId, budgetId, (tx) =>
+      budget.updateMonthlyValue(tx, itemId, month, { budget: budgetValue, actual }, budgetId)
+    );
     res.status(result.created ? 201 : 200).json({ budget: result.budget, actual: result.actual });
   })
 );

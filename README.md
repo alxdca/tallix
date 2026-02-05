@@ -135,13 +135,17 @@ pnpm frontend  # Frontend only (port 5173)
 tallix/
 ├── backend/
 │   ├── drizzle/          # Database migrations
+│   ├── scripts/          # Guard scripts (RLS enforcement)
 │   ├── src/
 │   │   ├── db/           # Database schema and connection
 │   │   ├── middleware/   # Express middleware (error handling)
 │   │   ├── routes/       # API route handlers
 │   │   ├── services/     # Business logic
 │   │   └── types/        # Shared TypeScript types
+│   ├── tests/            # Test files
 │   └── drizzle.config.ts
+├── docs/                 # 📚 Documentation
+│   └── rls/             # Row-Level Security documentation
 ├── frontend/
 │   ├── public/           # Static assets
 │   └── src/
@@ -151,6 +155,41 @@ tallix/
 │       └── types.ts      # TypeScript types
 ├── docker-compose.yml
 └── pnpm-workspace.yaml
+```
+
+## Documentation
+
+Comprehensive documentation is available in the [`docs/`](docs/) directory:
+
+### 🔒 Security & RLS (Row-Level Security)
+
+The application implements a multi-tenant security architecture with Row-Level Security:
+
+- **[RLS Enforcement Guide](docs/rls/RLS_ENFORCEMENT_GUIDE.md)** - Developer guide for working with RLS
+- **[RLS Implementation](docs/rls/RLS_IMPLEMENTATION.md)** - Architecture and technical details
+
+**Key Security Features**:
+- 4-layer defense: Static analysis → Runtime guard → Application logic → RLS policies
+- Automated guardrails prevent unauthorized `rawDb` usage
+- PostgreSQL Row-Level Security isolates tenant data at the database level
+- Comprehensive test coverage for cross-tenant isolation
+
+### Running Security Checks
+
+```bash
+cd backend
+
+# Check RLS service imports
+pnpm check:rls
+
+# Check rawDb allowlist
+pnpm rls:guard
+
+# Run RLS enforcement tests
+pnpm test:rls
+
+# Run all tests
+pnpm test
 ```
 
 ## Available Scripts

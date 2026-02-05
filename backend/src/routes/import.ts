@@ -1,6 +1,7 @@
 import { Router, type Router as RouterType } from 'express';
 import multer from 'multer';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { withTenantContext } from '../db/context.js';
 import * as importSvc from '../services/import.js';
 import * as llmSvc from '../services/llm.js';
 import * as transactionsSvc from '../services/transactions.js';
@@ -31,9 +32,13 @@ router.post(
       throw new AppError(400, 'No file uploaded');
     }
 
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
     const yearId = req.query.yearId ? parseInt(req.query.yearId as string, 10) : null;
     const skipSuggestions = req.query.skipSuggestions === 'true';
-    const result = await importSvc.parsePdfAndExtract(req.file.buffer, yearId, skipSuggestions);
+    const result = await withTenantContext(userId, budgetId, (tx) =>
+      importSvc.parsePdfAndExtract(tx, req.file!.buffer, budgetId, yearId, skipSuggestions)
+    );
 
     if (result.transactions.length === 0) {
       throw new AppError(400, 'No transactions found in PDF. The PDF format may not be supported.');
@@ -57,8 +62,8 @@ router.post(
     }
 
     const { categories, paymentMethods, language, country } = req.body as {
-      categories: string; // JSON string
-      paymentMethods?: string; // JSON string
+      categories: string;
+      paymentMethods?: string;
       language?: string;
       country?: string;
     };
@@ -67,7 +72,6 @@ router.post(
       throw new AppError(400, 'categories is required');
     }
 
-    // Parse JSON strings (sent as form data)
     const parsedCategories = JSON.parse(categories) as Array<{
       id: number;
       name: string;
@@ -83,7 +87,7 @@ router.post(
         }>)
       : [];
 
-    // Extract raw text from PDF
+    // Extract raw text from PDF (no DB needed)
     const { PDFParse } = await import('pdf-parse');
     const parser = new PDFParse({ data: req.file.buffer }) as any;
     await parser.load();
@@ -99,7 +103,6 @@ router.post(
       throw new AppError(400, 'country is required for PDF LLM classification');
     }
 
-    // Send raw text to LLM for extraction and classification
     const transactions = await llmSvc.extractAndClassifyFromPdf(
       rawText,
       parsedCategories,
@@ -140,7 +143,6 @@ router.post(
       throw new AppError(400, 'yearId and transactions array are required');
     }
 
-    // Validate all transactions have required fields
     const invalidTransactions: number[] = [];
     transactionsData.forEach((t, index) => {
       if (!t.date || !t.paymentMethod || t.amount === undefined) {
@@ -159,7 +161,10 @@ router.post(
       );
     }
 
-    const result = await transactionsSvc.bulkCreateTransactions(userId, yearId, transactionsData);
+    const budgetId = req.budget!.id;
+    const result = await withTenantContext(userId, budgetId, (tx) =>
+      transactionsSvc.bulkCreateTransactions(tx, userId, budgetId, yearId, transactionsData)
+    );
     res.status(201).json(result);
   })
 );
@@ -216,10 +221,13 @@ router.post(
     }
 
     try {
-      // Fetch known third parties for consistency
-      const knownThirdParties = await transactionsSvc.getThirdParties();
+      const budgetId = req.budget!.id;
+      const userId = req.user!.id;
 
-      // Get user's preferred language for descriptions
+      const knownThirdParties = await withTenantContext(userId, budgetId, (tx) =>
+        transactionsSvc.getThirdParties(tx, undefined, budgetId)
+      );
+
       const userLanguage = req.user?.language || 'fr';
       const userCountry = req.user?.country || undefined;
 

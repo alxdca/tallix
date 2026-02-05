@@ -48,4 +48,4 @@ WORKDIR /app/backend
 EXPOSE 3001
 
 # Run migrations and start the server
-CMD ["sh", "-c", "pnpm db:push && node dist/index.js"]
+CMD ["sh", "-c", "pnpm db:migrate && node dist/index.js"]

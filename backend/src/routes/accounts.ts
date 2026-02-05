@@ -1,5 +1,6 @@
 import { type Router as RouterType, Router } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { withTenantContext } from '../db/context.js';
 import * as accountsSvc from '../services/accounts.js';
 
 const router: RouterType = Router();
@@ -12,7 +13,11 @@ router.get(
     if (Number.isNaN(year)) {
       throw new AppError(400, 'Invalid year');
     }
-    const accounts = await accountsSvc.getAccountsForYear(year);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const accounts = await withTenantContext(userId, budgetId, (tx) =>
+      accountsSvc.getAccountsForYear(tx, year, budgetId, userId)
+    );
     res.json(accounts);
   })
 );
@@ -31,7 +36,11 @@ router.put(
       throw new AppError(400, 'paymentMethodId and initialBalance are required');
     }
 
-    await accountsSvc.setAccountBalance(year, parseInt(paymentMethodId, 10), initialBalance);
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    await withTenantContext(userId, budgetId, (tx) =>
+      accountsSvc.setAccountBalance(tx, year, parseInt(paymentMethodId, 10), initialBalance, budgetId, userId)
+    );
     res.json({ success: true });
   })
 );
@@ -50,7 +59,11 @@ router.put(
       throw new AppError(400, 'isAccount must be a boolean');
     }
 
-    await accountsSvc.setPaymentMethodAsAccount(id, isAccount);
+    const userId = req.user!.id;
+    const budgetId = req.budget!.id;
+    await withTenantContext(userId, budgetId, (tx) =>
+      accountsSvc.setPaymentMethodAsAccount(tx, id, isAccount, userId)
+    );
     res.json({ success: true });
   })
 );
@@ -69,7 +82,11 @@ router.put(
       throw new AppError(400, 'isSavingsAccount must be a boolean');
     }
 
-    await accountsSvc.setPaymentMethodAsSavingsAccount(id, isSavingsAccount);
+    const userId = req.user!.id;
+    const budgetId = req.budget!.id;
+    await withTenantContext(userId, budgetId, (tx) =>
+      accountsSvc.setPaymentMethodAsSavingsAccount(tx, id, isSavingsAccount, userId, budgetId)
+    );
     res.json({ success: true });
   })
 );

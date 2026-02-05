@@ -1,0 +1,39 @@
+# Tallix - Documentation
+
+Welcome to the Tallix documentation! This documentation is organized by topic.
+
+## 📚 Documentation Index
+
+### 🔒 Security & RLS (Row-Level Security)
+
+Complete documentation for the multi-tenant security architecture:
+
+- **[RLS Implementation Guide](rls/RLS_IMPLEMENTATION.md)** - Architecture overview, policy details, and technical implementation
+- **[RLS Enforcement Guide](rls/RLS_ENFORCEMENT_GUIDE.md)** - Practical guide for developers: rules, patterns, and verification
+
+### 🎯 Quick Links
+
+**For Developers**:
+- Start with [RLS Enforcement Guide](rls/RLS_ENFORCEMENT_GUIDE.md) for day-to-day development patterns
+- Reference [RLS Implementation](rls/RLS_IMPLEMENTATION.md) for architecture details
+
+**For Security Review**:
+- Read [RLS Implementation](rls/RLS_IMPLEMENTATION.md) for the complete security model
+- Check the verification section in [RLS Enforcement Guide](rls/RLS_ENFORCEMENT_GUIDE.md) for testing
+
+## 📖 Additional Topics
+
+_(Documentation will be added here as the project grows)_
+
+- API Documentation (coming soon)
+- Deployment Guide (coming soon)
+- Database Migrations (coming soon)
+- Frontend Architecture (coming soon)
+
+## 🤝 Contributing
+
+When adding new documentation:
+1. Create topic-specific subdirectories (e.g., `docs/api/`, `docs/deployment/`)
+2. Use clear, descriptive filenames
+3. Update this README with links to new documentation
+4. Follow the existing documentation style

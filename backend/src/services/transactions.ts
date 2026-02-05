@@ -1,5 +1,6 @@
-import { desc, eq, isNotNull, sql } from 'drizzle-orm';
-import { budgetYears, db, transactions } from '../db/index.js';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import { budgetItems, budgetYears, transactions } from '../db/schema.js';
+import type { DbClient } from '../db/index.js';
 import { getOrCreateUnclassifiedItem } from './budget.js';
 import { getPaymentMethodByName } from './paymentMethods.js';
 
@@ -20,22 +21,19 @@ interface TransactionWithRelations {
     name: string;
     group?: {
       name: string;
-      type: string; // Will be cast to GroupType at runtime
+      type: string;
     } | null;
   } | null;
 }
 
 // Format date to YYYY-MM-DD
-// Treats dates as plain strings to avoid timezone shifts
 function formatDate(date: string | Date): string {
   if (typeof date === 'string') {
-    // If already YYYY-MM-DD format, return as-is
     const isoMatch = date.match(/^(\d{4}-\d{2}-\d{2})/);
     if (isoMatch) {
       return isoMatch[1];
     }
   }
-  // For Date objects, use UTC methods to avoid timezone shift
   const d = date instanceof Date ? date : new Date(date);
   const year = d.getUTCFullYear();
   const month = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -44,27 +42,21 @@ function formatDate(date: string | Date): string {
 }
 
 // Calculate accounting month and year based on transaction date and settlement day
-// settlementDay: the day of month when billing cycle starts (1-31)
-// e.g., settlementDay=18 means transactions from 18th of month N to 17th of month N+1 are billed in month N+1
-// Uses UTC to avoid timezone-related date shifts
 export function calculateAccountingPeriod(
   transactionDate: string | Date,
   settlementDay: number | null
 ): { accountingMonth: number; accountingYear: number } {
-  // Parse YYYY-MM-DD string directly to avoid timezone issues
   if (typeof transactionDate === 'string') {
     const match = transactionDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (match) {
       const year = parseInt(match[1], 10);
-      let month = parseInt(match[2], 10); // 1-12
+      let month = parseInt(match[2], 10);
       const day = parseInt(match[3], 10);
 
-      // If no settlement day or day is before settlement day, use the transaction's month
       if (settlementDay === null || day < settlementDay) {
         return { accountingMonth: month, accountingYear: year };
       }
 
-      // Day is on or after settlement day, so it goes to next month
       month++;
       if (month > 12) {
         return { accountingMonth: 1, accountingYear: year + 1 };
@@ -73,18 +65,15 @@ export function calculateAccountingPeriod(
     }
   }
 
-  // Fallback: use Date with UTC methods to avoid timezone shifts
   const d = new Date(transactionDate);
   const day = d.getUTCDate();
-  let month = d.getUTCMonth() + 1; // 1-12
+  let month = d.getUTCMonth() + 1;
   let year = d.getUTCFullYear();
 
-  // If no settlement day or day is before settlement day, use the transaction's month
   if (settlementDay === null || day < settlementDay) {
     return { accountingMonth: month, accountingYear: year };
   }
 
-  // Day is on or after settlement day, so it goes to next month
   month++;
   if (month > 12) {
     month = 1;
@@ -115,19 +104,19 @@ function formatTransaction(t: TransactionWithRelations) {
 }
 
 // Get year ID by year number
-async function getYearId(year: number): Promise<number | null> {
-  const budgetYear = await db.query.budgetYears.findFirst({
-    where: eq(budgetYears.year, year),
+async function getYearId(tx: DbClient, year: number, budgetId: number): Promise<number | null> {
+  const budgetYear = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.year, year), eq(budgetYears.budgetId, budgetId)),
   });
   return budgetYear?.id ?? null;
 }
 
 // Get all transactions for a year
-export async function getTransactionsForYear(year: number) {
-  const yearId = await getYearId(year);
+export async function getTransactionsForYear(tx: DbClient, year: number, budgetId: number) {
+  const yearId = await getYearId(tx, year, budgetId);
   if (!yearId) return [];
 
-  const allTransactions = await db.query.transactions.findMany({
+  const allTransactions = await tx.query.transactions.findMany({
     where: eq(transactions.yearId, yearId),
     orderBy: [desc(transactions.date), desc(transactions.id)],
     with: {
@@ -144,7 +133,9 @@ export async function getTransactionsForYear(year: number) {
 
 // Create a new transaction
 export async function createTransaction(
+  tx: DbClient,
   userId: string,
+  budgetId: number,
   data: {
     yearId: number;
     itemId?: number | null;
@@ -158,26 +149,40 @@ export async function createTransaction(
     accountingYear?: number;
   }
 ) {
-  // If no itemId provided, use the unclassified category
-  let itemId = data.itemId;
-  if (!itemId) {
-    itemId = await getOrCreateUnclassifiedItem(data.yearId);
+  const year = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.id, data.yearId), eq(budgetYears.budgetId, budgetId)),
+  });
+  if (!year) {
+    throw new Error('Year not found or does not belong to your budget');
   }
 
-  // Calculate accounting period if not provided
+  let itemId = data.itemId;
+  if (!itemId) {
+    itemId = await getOrCreateUnclassifiedItem(tx, data.yearId, budgetId);
+  } else {
+    const item = await tx.query.budgetItems.findFirst({
+      where: eq(budgetItems.id, itemId),
+      with: {
+        year: true,
+      },
+    });
+    if (!item || item.yearId !== data.yearId || item.year.budgetId !== budgetId) {
+      throw new Error('Item not found or does not belong to the specified year and budget');
+    }
+  }
+
   let accountingMonth = data.accountingMonth;
   let accountingYear = data.accountingYear;
 
   if (accountingMonth === undefined || accountingYear === undefined) {
-    // Look up payment method's settlement day
-    const pm = await getPaymentMethodByName(userId, data.paymentMethod);
+    const pm = await getPaymentMethodByName(tx, userId, data.paymentMethod);
     const settlementDay = pm?.settlementDay ?? null;
     const accounting = calculateAccountingPeriod(data.date, settlementDay);
     accountingMonth = accountingMonth ?? accounting.accountingMonth;
     accountingYear = accountingYear ?? accounting.accountingYear;
   }
 
-  const [newTransaction] = await db
+  const [newTransaction] = await tx
     .insert(transactions)
     .values({
       yearId: data.yearId,
@@ -209,7 +214,9 @@ export async function createTransaction(
 
 // Update a transaction
 export async function updateTransaction(
+  tx: DbClient,
   userId: string,
+  budgetId: number,
   id: number,
   data: {
     itemId?: number | null;
@@ -221,9 +228,31 @@ export async function updateTransaction(
     amount?: number;
     accountingMonth?: number;
     accountingYear?: number;
-    recalculateAccounting?: boolean; // If true, recalculate based on date/payment method
+    recalculateAccounting?: boolean;
   }
 ) {
+  const transaction = await tx.query.transactions.findFirst({
+    where: eq(transactions.id, id),
+    with: {
+      year: true,
+    },
+  });
+  if (!transaction || transaction.year.budgetId !== budgetId) {
+    return null;
+  }
+
+  if (data.itemId !== undefined && data.itemId !== null) {
+    const item = await tx.query.budgetItems.findFirst({
+      where: eq(budgetItems.id, data.itemId),
+      with: {
+        year: true,
+      },
+    });
+    if (!item || item.yearId !== transaction.yearId || item.year.budgetId !== budgetId) {
+      throw new Error('Item not found or does not belong to the transaction year and budget');
+    }
+  }
+
   const updateData: Partial<{
     itemId: number | null;
     date: string;
@@ -245,25 +274,22 @@ export async function updateTransaction(
   if (data.paymentMethod !== undefined) updateData.paymentMethod = data.paymentMethod || null;
   if (data.amount !== undefined) updateData.amount = data.amount.toString();
 
-  // Handle accounting period
   if (data.accountingMonth !== undefined) updateData.accountingMonth = data.accountingMonth;
   if (data.accountingYear !== undefined) updateData.accountingYear = data.accountingYear;
 
-  // Recalculate accounting period if requested or if date/payment method changed without explicit accounting values
   if (
     data.recalculateAccounting ||
     ((data.date !== undefined || data.paymentMethod !== undefined) &&
       data.accountingMonth === undefined &&
       data.accountingYear === undefined)
   ) {
-    // Need to get current transaction to know date and payment method
-    const current = await db.query.transactions.findFirst({
+    const current = await tx.query.transactions.findFirst({
       where: eq(transactions.id, id),
     });
     if (current) {
       const date = data.date ?? current.date;
       const paymentMethodName = data.paymentMethod ?? current.paymentMethod;
-      const pm = paymentMethodName ? await getPaymentMethodByName(userId, paymentMethodName) : null;
+      const pm = paymentMethodName ? await getPaymentMethodByName(tx, userId, paymentMethodName) : null;
       const settlementDay = pm?.settlementDay ?? null;
       const accounting = calculateAccountingPeriod(date, settlementDay);
       updateData.accountingMonth = accounting.accountingMonth;
@@ -271,7 +297,7 @@ export async function updateTransaction(
     }
   }
 
-  const [updated] = await db.update(transactions).set(updateData).where(eq(transactions.id, id)).returning();
+  const [updated] = await tx.update(transactions).set(updateData).where(eq(transactions.id, id)).returning();
 
   if (!updated) return null;
 
@@ -289,50 +315,66 @@ export async function updateTransaction(
 }
 
 // Delete a transaction
-// Returns true if transaction was deleted, false if it didn't exist
-export async function deleteTransaction(id: number): Promise<boolean> {
-  const result = await db.delete(transactions).where(eq(transactions.id, id)).returning({ id: transactions.id });
+export async function deleteTransaction(tx: DbClient, id: number, budgetId: number): Promise<boolean> {
+  const transaction = await tx.query.transactions.findFirst({
+    where: eq(transactions.id, id),
+    with: {
+      year: true,
+    },
+  });
+  if (!transaction || transaction.year.budgetId !== budgetId) {
+    return false;
+  }
 
+  const result = await tx.delete(transactions).where(eq(transactions.id, id)).returning({ id: transactions.id });
   return result.length > 0;
 }
 
 // Bulk delete transactions
-export async function bulkDeleteTransactions(ids: number[]) {
+export async function bulkDeleteTransactions(tx: DbClient, ids: number[], budgetId: number) {
   if (ids.length === 0) {
     return { deleted: 0 };
   }
 
-  const result = await db
+  const transactionsToDelete = await tx.query.transactions.findMany({
+    where: sql`${transactions.id} IN ${ids}`,
+    with: {
+      year: true,
+    },
+  });
+
+  const validIds = transactionsToDelete.filter((t) => t.year.budgetId === budgetId).map((t) => t.id);
+
+  if (validIds.length === 0) {
+    return { deleted: 0 };
+  }
+
+  const result = await tx
     .delete(transactions)
-    .where(sql`${transactions.id} IN ${ids}`)
+    .where(sql`${transactions.id} IN ${validIds}`)
     .returning({ id: transactions.id });
 
-  return {
-    deleted: result.length,
-  };
+  return { deleted: result.length };
 }
 
 // Get distinct third parties for autocomplete
-export async function getThirdParties(search?: string): Promise<string[]> {
-  const baseQuery = db
-    .select({
-      thirdParty: transactions.thirdParty,
-      count: sql<number>`COUNT(*)`.as('count'),
-    })
-    .from(transactions)
-    .where(isNotNull(transactions.thirdParty))
-    .groupBy(transactions.thirdParty)
-    .orderBy(desc(sql`COUNT(*)`))
-    .limit(50);
+export async function getThirdParties(tx: DbClient, search: string | undefined, budgetId: number): Promise<string[]> {
+  const budgetCondition = sql`EXISTS (
+    SELECT 1 FROM ${budgetYears}
+    WHERE ${budgetYears.id} = ${transactions.yearId}
+    AND ${budgetYears.budgetId} = ${budgetId}
+  )`;
 
   if (search?.trim()) {
-    const results = await db
+    const results = await tx
       .select({
         thirdParty: transactions.thirdParty,
         count: sql<number>`COUNT(*)`.as('count'),
       })
       .from(transactions)
-      .where(sql`${transactions.thirdParty} IS NOT NULL AND ${transactions.thirdParty} ILIKE ${`%${search}%`}`)
+      .where(
+        sql`${transactions.thirdParty} IS NOT NULL AND ${transactions.thirdParty} ILIKE ${`%${search}%`} AND ${budgetCondition}`
+      )
       .groupBy(transactions.thirdParty)
       .orderBy(desc(sql`COUNT(*)`))
       .limit(20);
@@ -340,13 +382,25 @@ export async function getThirdParties(search?: string): Promise<string[]> {
     return results.map((r) => r.thirdParty).filter((tp): tp is string => tp !== null);
   }
 
-  const results = await baseQuery;
+  const results = await tx
+    .select({
+      thirdParty: transactions.thirdParty,
+      count: sql<number>`COUNT(*)`.as('count'),
+    })
+    .from(transactions)
+    .where(sql`${transactions.thirdParty} IS NOT NULL AND ${budgetCondition}`)
+    .groupBy(transactions.thirdParty)
+    .orderBy(desc(sql`COUNT(*)`))
+    .limit(50);
+
   return results.map((r) => r.thirdParty).filter((tp): tp is string => tp !== null);
 }
 
 // Bulk create transactions
 export async function bulkCreateTransactions(
+  tx: DbClient,
   userId: string,
+  budgetId: number,
   yearId: number,
   transactionsData: Array<{
     date: string;
@@ -364,27 +418,56 @@ export async function bulkCreateTransactions(
     return { created: 0, transactions: [] };
   }
 
-  // Get unclassified item ID for transactions without a category
+  const year = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.id, yearId), eq(budgetYears.budgetId, budgetId)),
+  });
+  if (!year) {
+    throw new Error('Year not found or does not belong to your budget');
+  }
+
+  const providedItemIds = transactionsData
+    .map((t) => t.itemId)
+    .filter((id): id is number => id !== null && id !== undefined);
+
+  if (providedItemIds.length > 0) {
+    const uniqueItemIds = [...new Set(providedItemIds)];
+    const items = await tx.query.budgetItems.findMany({
+      where: sql`${budgetItems.id} IN ${uniqueItemIds}`,
+      with: {
+        year: true,
+      },
+    });
+
+    const validItemIds = new Set(
+      items.filter((item) => item.yearId === yearId && item.year.budgetId === budgetId).map((item) => item.id)
+    );
+
+    const invalidItemIds = uniqueItemIds.filter((id) => !validItemIds.has(id));
+    if (invalidItemIds.length > 0) {
+      throw new Error(
+        `Invalid item IDs: ${invalidItemIds.join(', ')} - items not found or do not belong to the specified year and budget`
+      );
+    }
+  }
+
   let unclassifiedItemId: number | null = null;
   const needsUnclassified = transactionsData.some((t) => !t.itemId);
   if (needsUnclassified) {
-    unclassifiedItemId = await getOrCreateUnclassifiedItem(yearId);
+    unclassifiedItemId = await getOrCreateUnclassifiedItem(tx, yearId, budgetId);
   }
 
-  // Get all unique payment methods and their settlement days
   const uniquePaymentMethods = [...new Set(transactionsData.map((t) => t.paymentMethod))];
   const paymentMethodSettlements = new Map<string, number | null>();
 
   for (const pmName of uniquePaymentMethods) {
-    const pm = await getPaymentMethodByName(userId, pmName);
+    const pm = await getPaymentMethodByName(tx, userId, pmName);
     paymentMethodSettlements.set(pmName, pm?.settlementDay ?? null);
   }
 
-  const inserted = await db
+  const inserted = await tx
     .insert(transactions)
     .values(
       transactionsData.map((t) => {
-        // Use provided accounting period or calculate it
         let accountingMonth = t.accountingMonth;
         let accountingYear = t.accountingYear;
 

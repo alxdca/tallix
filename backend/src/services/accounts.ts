@@ -5,11 +5,11 @@ import {
   budgetGroups,
   budgetItems,
   budgetYears,
-  db,
   paymentMethods,
   transactions,
   transfers,
-} from '../db/index.js';
+} from '../db/schema.js';
+import type { DbClient } from '../db/index.js';
 
 // Configure Decimal.js for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -26,10 +26,10 @@ export interface Account {
 }
 
 // Get all accounts for a year with their balances
-export async function getAccountsForYear(year: number): Promise<Account[]> {
-  // Get year ID
-  const budgetYear = await db.query.budgetYears.findFirst({
-    where: eq(budgetYears.year, year),
+export async function getAccountsForYear(tx: DbClient, year: number, budgetId: number, userId: string): Promise<Account[]> {
+  // Get year ID for this budget
+  const budgetYear = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.year, year), eq(budgetYears.budgetId, budgetId)),
   });
 
   if (!budgetYear) {
@@ -38,8 +38,12 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
 
   const yearId = budgetYear.id;
 
-  // Get all payment methods (we need all to know which are linked)
-  const allPaymentMethods = await db.select().from(paymentMethods).orderBy(asc(paymentMethods.sortOrder));
+  // Get all payment methods for this user (we need all to know which are linked)
+  const allPaymentMethods = await tx
+    .select()
+    .from(paymentMethods)
+    .where(eq(paymentMethods.userId, userId))
+    .orderBy(asc(paymentMethods.sortOrder));
 
   // Filter to just accounts
   const paymentMethodAccounts = allPaymentMethods.filter((pm) => pm.isAccount);
@@ -55,7 +59,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
   }
 
   // Get initial balances for all accounts
-  const balances = await db.select().from(accountBalances).where(eq(accountBalances.yearId, yearId));
+  const balances = await tx.select().from(accountBalances).where(eq(accountBalances.yearId, yearId));
 
   // Use Decimal for precise balance calculations
   const balanceMap = new Map<number, Decimal>();
@@ -64,18 +68,12 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
   }
 
   // Calculate monthly transaction totals for payment method accounts
-  // Use accountingMonth AND accountingYear (based on settlement day) instead of raw date
-  // For account balance:
-  // - Income transactions ADD to balance (money received)
-  // - Expense transactions SUBTRACT from balance (money spent)
-  // - If no category, treat as expense (most common case)
-  const pmTransactions = await db
+  const pmTransactions = await tx
     .select({
       paymentMethod: transactions.paymentMethod,
       month: transactions.accountingMonth,
-      // Net effect on balance: income adds, expense subtracts
       balanceChange: sql<string>`SUM(
-        CASE 
+        CASE
           WHEN ${budgetGroups.type} = 'income' THEN ${transactions.amount}
           WHEN ${budgetGroups.type} = 'expense' THEN -${transactions.amount}
           ELSE -${transactions.amount}
@@ -89,7 +87,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
     .groupBy(transactions.paymentMethod, transactions.accountingMonth);
 
   // Get all transfers for balance adjustment
-  const allTransfers = await db
+  const allTransfers = await tx
     .select()
     .from(transfers)
     .where(and(eq(transfers.yearId, yearId), eq(transfers.accountingYear, year)));
@@ -128,9 +126,6 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
   for (const pm of paymentMethodAccounts) {
     const initialBalance = balanceMap.get(pm.id) || new Decimal(0);
 
-    // Get list of payment method names that should affect this account's balance:
-    // 1. The account's own name
-    // 2. Any payment methods linked to this account
     const affectingMethods = [pm.name, ...(accountLinkedMethods.get(pm.id) || [])];
 
     // Calculate cumulative balance per month
@@ -183,10 +178,18 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
 }
 
 // Set initial balance for an account
-export async function setAccountBalance(year: number, paymentMethodId: number, initialBalance: number): Promise<void> {
-  // Get year ID
-  const budgetYear = await db.query.budgetYears.findFirst({
-    where: eq(budgetYears.year, year),
+export async function setAccountBalance(tx: DbClient, year: number, paymentMethodId: number, initialBalance: number, budgetId: number, userId: string): Promise<void> {
+  // Verify payment method belongs to user
+  const pm = await tx.query.paymentMethods.findFirst({
+    where: and(eq(paymentMethods.id, paymentMethodId), eq(paymentMethods.userId, userId)),
+  });
+  if (!pm) {
+    throw new Error('Payment method not found or does not belong to you');
+  }
+
+  // Get year ID for this budget
+  const budgetYear = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.year, year), eq(budgetYears.budgetId, budgetId)),
   });
 
   if (!budgetYear) {
@@ -196,7 +199,7 @@ export async function setAccountBalance(year: number, paymentMethodId: number, i
   const yearId = budgetYear.id;
 
   // Use upsert to avoid race conditions
-  await db
+  await tx
     .insert(accountBalances)
     .values({
       yearId,
@@ -213,8 +216,9 @@ export async function setAccountBalance(year: number, paymentMethodId: number, i
 }
 
 // Get payment methods with account flags
-export async function getPaymentMethodsWithAccountFlag() {
-  const methods = await db.query.paymentMethods.findMany({
+export async function getPaymentMethodsWithAccountFlag(tx: DbClient, userId: string) {
+  const methods = await tx.query.paymentMethods.findMany({
+    where: eq(paymentMethods.userId, userId),
     orderBy: (pm, { asc }) => [asc(pm.sortOrder)],
   });
 
@@ -229,33 +233,41 @@ export async function getPaymentMethodsWithAccountFlag() {
 }
 
 // Update payment method isAccount flag
-export async function setPaymentMethodAsAccount(id: number, isAccount: boolean): Promise<void> {
-  await db.update(paymentMethods).set({ isAccount, updatedAt: new Date() }).where(eq(paymentMethods.id, id));
+export async function setPaymentMethodAsAccount(tx: DbClient, id: number, isAccount: boolean, userId: string): Promise<void> {
+  // Verify payment method belongs to user
+  const pm = await tx.query.paymentMethods.findFirst({
+    where: and(eq(paymentMethods.id, id), eq(paymentMethods.userId, userId)),
+  });
+  if (!pm) {
+    throw new Error('Payment method not found or does not belong to you');
+  }
+
+  await tx.update(paymentMethods).set({ isAccount, updatedAt: new Date() }).where(eq(paymentMethods.id, id));
 }
 
 // Update payment method isSavingsAccount flag
 // Also creates/deletes corresponding budget items in the "Savings" category
-export async function setPaymentMethodAsSavingsAccount(id: number, isSavingsAccount: boolean): Promise<void> {
+export async function setPaymentMethodAsSavingsAccount(tx: DbClient, id: number, isSavingsAccount: boolean, userId: string, budgetId: number): Promise<void> {
   // Import here to avoid circular dependency
   const budgetSvc = await import('./budget.js');
 
-  // Get the payment method details
-  const pm = await db.query.paymentMethods.findFirst({
-    where: eq(paymentMethods.id, id),
+  // Verify payment method belongs to user
+  const pm = await tx.query.paymentMethods.findFirst({
+    where: and(eq(paymentMethods.id, id), eq(paymentMethods.userId, userId)),
   });
 
   if (!pm) {
-    throw new Error('Payment method not found');
+    throw new Error('Payment method not found or does not belong to you');
   }
 
   // Update the flag
-  await db.update(paymentMethods).set({ isSavingsAccount, updatedAt: new Date() }).where(eq(paymentMethods.id, id));
+  await tx.update(paymentMethods).set({ isSavingsAccount, updatedAt: new Date() }).where(eq(paymentMethods.id, id));
 
   if (isSavingsAccount) {
     // Create budget items for this savings account across all years
-    await budgetSvc.createSavingsBudgetItems(id, pm.name, pm.institution);
+    await budgetSvc.createSavingsBudgetItems(tx, id, pm.name, pm.institution, budgetId);
   } else {
     // Delete budget items linked to this savings account
-    await budgetSvc.deleteSavingsBudgetItems(id);
+    await budgetSvc.deleteSavingsBudgetItems(tx, id);
   }
 }
