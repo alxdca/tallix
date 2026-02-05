@@ -4,6 +4,14 @@ Welcome to the Tallix documentation! This documentation is organized by topic.
 
 ## 📚 Documentation Index
 
+### User Documentation
+
+- **[User Guide](user/README.md)** - Setup, budgeting, transactions, assets, and settings
+
+### Developer Documentation
+
+- **[Developer Guide](developer/README.md)** - Setup, architecture, backend, frontend, database, API, testing, deployment
+
 ### 🔒 Security & RLS (Row-Level Security)
 
 Complete documentation for the multi-tenant security architecture:
@@ -23,12 +31,10 @@ Complete documentation for the multi-tenant security architecture:
 
 ## 📖 Additional Topics
 
-_(Documentation will be added here as the project grows)_
-
-- API Documentation (coming soon)
-- Deployment Guide (coming soon)
-- Database Migrations (coming soon)
-- Frontend Architecture (coming soon)
+- **[API Documentation](api/README.md)**
+- **[Deployment Guide](deployment/README.md)**
+- **[Database Migrations](database/README.md)**
+- **[Frontend Architecture](frontend/README.md)**
 
 ## 🤝 Contributing
 
