@@ -78,7 +78,7 @@ export const budgetYears = pgTable(
   })
 );
 
-// Budget Groups (categories like REVENUS, MAISON, etc.)
+// Budget Groups
 // type: 'income' | 'expense'
 // Groups are per-budget and shared across all years within that budget
 export const budgetGroups = pgTable(
@@ -381,6 +381,11 @@ export const paymentMethodsRelations = relations(paymentMethods, ({ one }) => ({
   user: one(users, {
     fields: [paymentMethods.userId],
     references: [users.id],
+  }),
+  linkedPaymentMethod: one(paymentMethods, {
+    fields: [paymentMethods.linkedPaymentMethodId],
+    references: [paymentMethods.id],
+    relationName: 'linkedPaymentMethod',
   }),
 }));
 

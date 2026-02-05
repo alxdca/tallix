@@ -141,6 +141,13 @@
       "when": 1770157232000,
       "tag": "0020_remove_legacy_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1770157539000,
+      "tag": "0021_linked_payment_method_fk",
+      "breakpoints": true
     }
   ]
 }

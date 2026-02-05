@@ -1,2 +1,23 @@
+if ! command -v node >/dev/null 2>&1; then
+  if [ -s "$HOME/.nvm/nvm.sh" ]; then
+    . "$HOME/.nvm/nvm.sh"
+  fi
+  if [ -s "$HOME/.asdf/asdf.sh" ]; then
+    . "$HOME/.asdf/asdf.sh"
+  fi
+  if [ -d "$HOME/.volta/bin" ]; then
+    PATH="$HOME/.volta/bin:$PATH"
+  fi
+  if [ -x "$HOME/.fnm/fnm" ]; then
+    PATH="$HOME/.fnm:$PATH"
+    eval "$($HOME/.fnm/fnm env)"
+  fi
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "node not found in PATH; aborting pre-commit" >&2
+  exit 1
+fi
+
 pnpm test
 pnpm build
