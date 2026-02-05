@@ -143,18 +143,21 @@ export async function getTransactionsForYear(year: number) {
 }
 
 // Create a new transaction
-export async function createTransaction(data: {
-  yearId: number;
-  itemId?: number | null;
-  date: string;
-  description?: string;
-  comment?: string;
-  thirdParty?: string;
-  paymentMethod: string;
-  amount: number;
-  accountingMonth?: number;
-  accountingYear?: number;
-}) {
+export async function createTransaction(
+  userId: string,
+  data: {
+    yearId: number;
+    itemId?: number | null;
+    date: string;
+    description?: string;
+    comment?: string;
+    thirdParty?: string;
+    paymentMethod: string;
+    amount: number;
+    accountingMonth?: number;
+    accountingYear?: number;
+  }
+) {
   // If no itemId provided, use the unclassified category
   let itemId = data.itemId;
   if (!itemId) {
@@ -167,7 +170,7 @@ export async function createTransaction(data: {
 
   if (accountingMonth === undefined || accountingYear === undefined) {
     // Look up payment method's settlement day
-    const pm = await getPaymentMethodByName(data.paymentMethod);
+    const pm = await getPaymentMethodByName(userId, data.paymentMethod);
     const settlementDay = pm?.settlementDay ?? null;
     const accounting = calculateAccountingPeriod(data.date, settlementDay);
     accountingMonth = accountingMonth ?? accounting.accountingMonth;
@@ -206,6 +209,7 @@ export async function createTransaction(data: {
 
 // Update a transaction
 export async function updateTransaction(
+  userId: string,
   id: number,
   data: {
     itemId?: number | null;
@@ -259,7 +263,7 @@ export async function updateTransaction(
     if (current) {
       const date = data.date ?? current.date;
       const paymentMethodName = data.paymentMethod ?? current.paymentMethod;
-      const pm = paymentMethodName ? await getPaymentMethodByName(paymentMethodName) : null;
+      const pm = paymentMethodName ? await getPaymentMethodByName(userId, paymentMethodName) : null;
       const settlementDay = pm?.settlementDay ?? null;
       const accounting = calculateAccountingPeriod(date, settlementDay);
       updateData.accountingMonth = accounting.accountingMonth;
@@ -342,6 +346,7 @@ export async function getThirdParties(search?: string): Promise<string[]> {
 
 // Bulk create transactions
 export async function bulkCreateTransactions(
+  userId: string,
   yearId: number,
   transactionsData: Array<{
     date: string;
@@ -371,7 +376,7 @@ export async function bulkCreateTransactions(
   const paymentMethodSettlements = new Map<string, number | null>();
 
   for (const pmName of uniquePaymentMethods) {
-    const pm = await getPaymentMethodByName(pmName);
+    const pm = await getPaymentMethodByName(userId, pmName);
     paymentMethodSettlements.set(pmName, pm?.settlementDay ?? null);
   }
 

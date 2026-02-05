@@ -1,10 +1,9 @@
 import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, MonthlyValue, OrganizedBudgetData } from './types';
 
-// Organize flat budget data into 3-layer hierarchy
+// Organize flat budget data into 2-layer hierarchy (income and expenses)
 export function organizeBudgetData(data: BudgetData): OrganizedBudgetData {
   const incomeGroups = data.groups.filter((g) => g.type === 'income');
   const expenseGroups = data.groups.filter((g) => g.type === 'expense');
-  const savingsGroups = data.groups.filter((g) => g.type === 'savings');
 
   return {
     year: data.year,
@@ -19,11 +18,6 @@ export function organizeBudgetData(data: BudgetData): OrganizedBudgetData {
         type: 'expense',
         name: 'Dépenses',
         groups: expenseGroups,
-      },
-      {
-        type: 'savings',
-        name: 'Épargne',
-        groups: savingsGroups,
       },
     ],
   };

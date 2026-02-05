@@ -1,16 +1,14 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
-import { budgetGroups, budgetItems, budgetYears, db, paymentMethods, transfers } from '../db/index.js';
-import type { AccountType } from '../types/accounts.js';
-
-export { ACCOUNT_TYPES, type AccountType } from '../types/accounts.js';
+import { desc, eq, sql } from 'drizzle-orm';
+import { budgetYears, db, paymentMethods, transfers } from '../db/index.js';
 
 // Constant for unknown account names
 const UNKNOWN_ACCOUNT_NAME = 'Unknown';
 
 export interface AccountIdentifier {
-  type: AccountType;
   id: number;
   name: string;
+  institution: string | null;
+  isSavingsAccount: boolean;
 }
 
 export interface Transfer {
@@ -20,8 +18,6 @@ export interface Transfer {
   description: string | null;
   sourceAccount: AccountIdentifier;
   destinationAccount: AccountIdentifier;
-  savingsItemId: number | null;
-  savingsItemName: string | null;
   accountingMonth: number;
   accountingYear: number;
 }
@@ -30,31 +26,10 @@ export interface CreateTransferData {
   date: string;
   amount: number;
   description?: string;
-  sourceAccountType: AccountType;
   sourceAccountId: number;
-  destinationAccountType: AccountType;
   destinationAccountId: number;
   accountingMonth?: number;
   accountingYear?: number;
-}
-
-// Helper to get account name
-async function getAccountName(type: AccountType, id: number): Promise<string> {
-  if (type === 'payment_method') {
-    const pm = await db.query.paymentMethods.findFirst({
-      where: eq(paymentMethods.id, id),
-    });
-    return pm?.name || UNKNOWN_ACCOUNT_NAME;
-  } else {
-    const item = await db.query.budgetItems.findFirst({
-      where: eq(budgetItems.id, id),
-      with: { group: true },
-    });
-    if (item?.group) {
-      return `${item.group.name} → ${item.name}`;
-    }
-    return item?.name || UNKNOWN_ACCOUNT_NAME;
-  }
 }
 
 // Get all transfers for a year
@@ -77,86 +52,51 @@ export async function getTransfersForYear(year: number): Promise<Transfer[]> {
     return [];
   }
 
-  // Collect all unique account IDs by type for batch fetching
-  const paymentMethodIds = new Set<number>();
-  const savingsItemIds = new Set<number>();
-
+  // Collect all unique account IDs for batch fetching
+  const accountIds = new Set<number>();
   for (const t of transferRecords) {
-    if (t.sourceAccountType === 'payment_method') {
-      paymentMethodIds.add(t.sourceAccountId);
-    } else {
-      savingsItemIds.add(t.sourceAccountId);
-    }
-    if (t.destinationAccountType === 'payment_method') {
-      paymentMethodIds.add(t.destinationAccountId);
-    } else {
-      savingsItemIds.add(t.destinationAccountId);
-    }
-    if (t.savingsItemId) {
-      savingsItemIds.add(t.savingsItemId);
-    }
+    accountIds.add(t.sourceAccountId);
+    accountIds.add(t.destinationAccountId);
   }
 
   // Batch fetch all payment methods in one query
-  const paymentMethodNames = new Map<number, string>();
-  if (paymentMethodIds.size > 0) {
+  const accountMap = new Map<number, { name: string; institution: string | null; isSavingsAccount: boolean }>();
+  if (accountIds.size > 0) {
     const pmRecords = await db
-      .select({ id: paymentMethods.id, name: paymentMethods.name })
+      .select({ id: paymentMethods.id, name: paymentMethods.name, institution: paymentMethods.institution, isSavingsAccount: paymentMethods.isSavingsAccount })
       .from(paymentMethods)
-      .where(sql`${paymentMethods.id} IN ${[...paymentMethodIds]}`);
+      .where(sql`${paymentMethods.id} IN ${[...accountIds]}`);
 
     for (const pm of pmRecords) {
-      paymentMethodNames.set(pm.id, pm.name);
+      accountMap.set(pm.id, { name: pm.name, institution: pm.institution, isSavingsAccount: pm.isSavingsAccount });
     }
   }
 
-  // Batch fetch all savings items (budget items) in one query
-  const savingsItemNamesMap = new Map<number, string>();
-  if (savingsItemIds.size > 0) {
-    const itemRecords = await db
-      .select({
-        id: budgetItems.id,
-        name: budgetItems.name,
-        groupName: budgetGroups.name,
-      })
-      .from(budgetItems)
-      .leftJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
-      .where(sql`${budgetItems.id} IN ${[...savingsItemIds]}`);
+  return transferRecords.map((t) => {
+    const source = accountMap.get(t.sourceAccountId);
+    const dest = accountMap.get(t.destinationAccountId);
 
-    for (const item of itemRecords) {
-      const fullName = item.groupName ? `${item.groupName} → ${item.name}` : item.name;
-      savingsItemNamesMap.set(item.id, fullName);
-    }
-  }
-
-  // Helper to get account name from the pre-fetched maps
-  const getAccountNameFromMaps = (type: string, id: number): string => {
-    if (type === 'payment_method') {
-      return paymentMethodNames.get(id) || UNKNOWN_ACCOUNT_NAME;
-    }
-    return savingsItemNamesMap.get(id) || UNKNOWN_ACCOUNT_NAME;
-  };
-
-  return transferRecords.map((t) => ({
-    id: t.id,
-    date: t.date,
-    amount: parseFloat(t.amount),
-    description: t.description,
-    sourceAccount: {
-      type: t.sourceAccountType as AccountType,
-      id: t.sourceAccountId,
-      name: getAccountNameFromMaps(t.sourceAccountType, t.sourceAccountId),
-    },
-    destinationAccount: {
-      type: t.destinationAccountType as AccountType,
-      id: t.destinationAccountId,
-      name: getAccountNameFromMaps(t.destinationAccountType, t.destinationAccountId),
-    },
-    savingsItemId: t.savingsItemId,
-    savingsItemName: t.savingsItemId ? savingsItemNamesMap.get(t.savingsItemId) || null : null,
-    accountingMonth: t.accountingMonth,
-    accountingYear: t.accountingYear,
-  }));
+    return {
+      id: t.id,
+      date: t.date,
+      amount: parseFloat(t.amount),
+      description: t.description,
+      sourceAccount: {
+        id: t.sourceAccountId,
+        name: source?.name || UNKNOWN_ACCOUNT_NAME,
+        institution: source?.institution || null,
+        isSavingsAccount: source?.isSavingsAccount || false,
+      },
+      destinationAccount: {
+        id: t.destinationAccountId,
+        name: dest?.name || UNKNOWN_ACCOUNT_NAME,
+        institution: dest?.institution || null,
+        isSavingsAccount: dest?.isSavingsAccount || false,
+      },
+      accountingMonth: t.accountingMonth,
+      accountingYear: t.accountingYear,
+    };
+  });
 }
 
 // Parse date string (YYYY-MM-DD) to extract month and year using UTC to avoid timezone issues
@@ -192,14 +132,6 @@ export async function createTransfer(year: number, data: CreateTransferData): Pr
   const accountingMonth = data.accountingMonth ?? dateParsed.month;
   const accountingYear = data.accountingYear ?? dateParsed.year;
 
-  // Determine savingsItemId: if destination is a savings item, link to it
-  let savingsItemId: number | null = null;
-  if (data.destinationAccountType === 'savings_item') {
-    savingsItemId = data.destinationAccountId;
-  } else if (data.sourceAccountType === 'savings_item') {
-    savingsItemId = data.sourceAccountId;
-  }
-
   const [inserted] = await db
     .insert(transfers)
     .values({
@@ -207,29 +139,20 @@ export async function createTransfer(year: number, data: CreateTransferData): Pr
       date: data.date,
       amount: data.amount.toString(),
       description: data.description || null,
-      sourceAccountType: data.sourceAccountType,
       sourceAccountId: data.sourceAccountId,
-      destinationAccountType: data.destinationAccountType,
       destinationAccountId: data.destinationAccountId,
-      savingsItemId,
       accountingMonth,
       accountingYear,
     })
     .returning();
 
-  const sourceAccountName = await getAccountName(data.sourceAccountType, data.sourceAccountId);
-  const destAccountName = await getAccountName(data.destinationAccountType, data.destinationAccountId);
-
-  let savingsItemName: string | null = null;
-  if (savingsItemId) {
-    const item = await db.query.budgetItems.findFirst({
-      where: eq(budgetItems.id, savingsItemId),
-      with: { group: true },
-    });
-    if (item?.group) {
-      savingsItemName = `${item.group.name} → ${item.name}`;
-    }
-  }
+  // Fetch account details
+  const sourceAccount = await db.query.paymentMethods.findFirst({
+    where: eq(paymentMethods.id, data.sourceAccountId),
+  });
+  const destAccount = await db.query.paymentMethods.findFirst({
+    where: eq(paymentMethods.id, data.destinationAccountId),
+  });
 
   return {
     id: inserted.id,
@@ -237,17 +160,17 @@ export async function createTransfer(year: number, data: CreateTransferData): Pr
     amount: parseFloat(inserted.amount),
     description: inserted.description,
     sourceAccount: {
-      type: data.sourceAccountType,
       id: data.sourceAccountId,
-      name: sourceAccountName,
+      name: sourceAccount?.name || UNKNOWN_ACCOUNT_NAME,
+      institution: sourceAccount?.institution || null,
+      isSavingsAccount: sourceAccount?.isSavingsAccount || false,
     },
     destinationAccount: {
-      type: data.destinationAccountType,
       id: data.destinationAccountId,
-      name: destAccountName,
+      name: destAccount?.name || UNKNOWN_ACCOUNT_NAME,
+      institution: destAccount?.institution || null,
+      isSavingsAccount: destAccount?.isSavingsAccount || false,
     },
-    savingsItemId,
-    savingsItemName,
     accountingMonth,
     accountingYear,
   };
@@ -270,18 +193,15 @@ export async function updateTransfer(id: number, data: Partial<CreateTransferDat
   }
 
   // Build update object
-  const updates: Record<string, any> = { updatedAt: new Date() };
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
 
   if (data.date !== undefined) updates.date = data.date;
   if (data.amount !== undefined) updates.amount = data.amount.toString();
   if (data.description !== undefined) updates.description = data.description || null;
-  if (data.sourceAccountType !== undefined) updates.sourceAccountType = data.sourceAccountType;
   if (data.sourceAccountId !== undefined) updates.sourceAccountId = data.sourceAccountId;
-  if (data.destinationAccountType !== undefined) updates.destinationAccountType = data.destinationAccountType;
   if (data.destinationAccountId !== undefined) updates.destinationAccountId = data.destinationAccountId;
 
-  // Handle accounting period: if explicit values provided, use them
-  // Otherwise, recalculate if date changed
+  // Handle accounting period
   if (data.accountingMonth !== undefined) {
     updates.accountingMonth = data.accountingMonth;
   }
@@ -290,46 +210,21 @@ export async function updateTransfer(id: number, data: Partial<CreateTransferDat
   }
 
   // Recalculate accounting period if date changed but no explicit accounting values provided
-  // Use UTC parsing to avoid timezone shifts
   if (data.date !== undefined && data.accountingMonth === undefined && data.accountingYear === undefined) {
     const dateParsed = parseDateForAccounting(data.date);
     updates.accountingMonth = dateParsed.month;
     updates.accountingYear = dateParsed.year;
   }
 
-  // Update savingsItemId based on source/destination
-  const srcType = data.sourceAccountType ?? existing.sourceAccountType;
-  const srcId = data.sourceAccountId ?? existing.sourceAccountId;
-  const dstType = data.destinationAccountType ?? existing.destinationAccountType;
-  const dstId = data.destinationAccountId ?? existing.destinationAccountId;
-
-  if (dstType === 'savings_item') {
-    updates.savingsItemId = dstId;
-  } else if (srcType === 'savings_item') {
-    updates.savingsItemId = srcId;
-  } else {
-    updates.savingsItemId = null;
-  }
-
   const [updated] = await db.update(transfers).set(updates).where(eq(transfers.id, id)).returning();
 
-  // Fetch names for response
-  const sourceAccountName = await getAccountName(updated.sourceAccountType as AccountType, updated.sourceAccountId);
-  const destAccountName = await getAccountName(
-    updated.destinationAccountType as AccountType,
-    updated.destinationAccountId
-  );
-
-  let savingsItemName: string | null = null;
-  if (updated.savingsItemId) {
-    const item = await db.query.budgetItems.findFirst({
-      where: eq(budgetItems.id, updated.savingsItemId),
-      with: { group: true },
-    });
-    if (item?.group) {
-      savingsItemName = `${item.group.name} → ${item.name}`;
-    }
-  }
+  // Fetch account details
+  const sourceAccount = await db.query.paymentMethods.findFirst({
+    where: eq(paymentMethods.id, updated.sourceAccountId),
+  });
+  const destAccount = await db.query.paymentMethods.findFirst({
+    where: eq(paymentMethods.id, updated.destinationAccountId),
+  });
 
   return {
     id: updated.id,
@@ -337,34 +232,24 @@ export async function updateTransfer(id: number, data: Partial<CreateTransferDat
     amount: parseFloat(updated.amount),
     description: updated.description,
     sourceAccount: {
-      type: updated.sourceAccountType as AccountType,
       id: updated.sourceAccountId,
-      name: sourceAccountName,
+      name: sourceAccount?.name || UNKNOWN_ACCOUNT_NAME,
+      institution: sourceAccount?.institution || null,
+      isSavingsAccount: sourceAccount?.isSavingsAccount || false,
     },
     destinationAccount: {
-      type: updated.destinationAccountType as AccountType,
       id: updated.destinationAccountId,
-      name: destAccountName,
+      name: destAccount?.name || UNKNOWN_ACCOUNT_NAME,
+      institution: destAccount?.institution || null,
+      isSavingsAccount: destAccount?.isSavingsAccount || false,
     },
-    savingsItemId: updated.savingsItemId,
-    savingsItemName,
     accountingMonth: updated.accountingMonth,
     accountingYear: updated.accountingYear,
   };
 }
 
 // Get available accounts for transfer UI
-export async function getAvailableAccounts(year: number): Promise<AccountIdentifier[]> {
-  const budgetYear = await db.query.budgetYears.findFirst({
-    where: eq(budgetYears.year, year),
-  });
-
-  if (!budgetYear) {
-    return [];
-  }
-
-  const accounts: AccountIdentifier[] = [];
-
+export async function getAvailableAccounts(): Promise<AccountIdentifier[]> {
   // Get payment methods that are accounts
   const paymentMethodAccounts = await db
     .select()
@@ -372,33 +257,10 @@ export async function getAvailableAccounts(year: number): Promise<AccountIdentif
     .where(eq(paymentMethods.isAccount, true))
     .orderBy(paymentMethods.sortOrder);
 
-  for (const pm of paymentMethodAccounts) {
-    accounts.push({
-      type: 'payment_method',
-      id: pm.id,
-      name: pm.name,
-    });
-  }
-
-  // Get savings items
-  const savingsItems = await db
-    .select({
-      id: budgetItems.id,
-      name: budgetItems.name,
-      groupName: budgetGroups.name,
-    })
-    .from(budgetItems)
-    .innerJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
-    .where(and(eq(budgetItems.yearId, budgetYear.id), eq(budgetGroups.type, 'savings')))
-    .orderBy(budgetGroups.sortOrder, budgetItems.sortOrder);
-
-  for (const item of savingsItems) {
-    accounts.push({
-      type: 'savings_item',
-      id: item.id,
-      name: `${item.groupName} → ${item.name}`,
-    });
-  }
-
-  return accounts;
+  return paymentMethodAccounts.map((pm) => ({
+    id: pm.id,
+    name: pm.name,
+    institution: pm.institution,
+    isSavingsAccount: pm.isSavingsAccount,
+  }));
 }

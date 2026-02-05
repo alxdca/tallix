@@ -45,6 +45,7 @@ router.post(
 router.post(
   '/bulk',
   asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
     const { yearId, transactions: transactionsData } = req.body as {
       yearId: number;
       transactions: Array<{
@@ -79,7 +80,7 @@ router.post(
       );
     }
 
-    const result = await transactionsSvc.bulkCreateTransactions(yearId, transactionsData);
+    const result = await transactionsSvc.bulkCreateTransactions(userId, yearId, transactionsData);
     res.status(201).json(result);
   })
 );

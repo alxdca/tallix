@@ -2,8 +2,10 @@ import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
 import logger from './logger.js';
+import { requireAuth } from './middleware/auth.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import accountsRoutes from './routes/accounts.js';
+import authRoutes from './routes/auth.js';
 import budgetRoutes from './routes/budget.js';
 import importRoutes from './routes/import.js';
 import paymentMethodsRoutes from './routes/paymentMethods.js';
@@ -24,14 +26,17 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Routes
-app.use('/api/budget', budgetRoutes);
-app.use('/api/settings', settingsRoutes);
-app.use('/api/transactions', transactionsRoutes);
-app.use('/api/payment-methods', paymentMethodsRoutes);
-app.use('/api/import', importRoutes);
-app.use('/api/accounts', accountsRoutes);
-app.use('/api/transfers', transfersRoutes);
+// Public routes (no auth required)
+app.use('/api/auth', authRoutes);
+
+// Protected routes (auth required)
+app.use('/api/budget', requireAuth, budgetRoutes);
+app.use('/api/settings', requireAuth, settingsRoutes);
+app.use('/api/transactions', requireAuth, transactionsRoutes);
+app.use('/api/payment-methods', requireAuth, paymentMethodsRoutes);
+app.use('/api/import', requireAuth, importRoutes);
+app.use('/api/accounts', requireAuth, accountsRoutes);
+app.use('/api/transfers', requireAuth, transfersRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {

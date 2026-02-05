@@ -92,11 +92,11 @@ router.put(
 router.post(
   '/groups',
   asyncHandler(async (req, res) => {
-    const { yearId, name, slug, type = 'expense', sortOrder = 0 } = req.body;
-    if (!yearId || !name || !slug) {
-      throw new AppError(400, 'yearId, name, and slug are required');
+    const { budgetId = 1, name, slug, type = 'expense', sortOrder = 0 } = req.body;
+    if (!name || !slug) {
+      throw new AppError(400, 'name and slug are required');
     }
-    const newGroup = await budget.createGroup({ yearId, name, slug, type, sortOrder });
+    const newGroup = await budget.createGroup({ budgetId, name, slug, type, sortOrder });
     res.status(201).json(newGroup);
   })
 );
@@ -147,18 +147,7 @@ router.delete(
   })
 );
 
-// GET /api/budget/items/unassigned - Get unassigned items for current year
-router.get(
-  '/items/unassigned',
-  asyncHandler(async (_req, res) => {
-    const currentYear = new Date().getFullYear();
-    const budgetYear = await budget.getOrCreateYear(currentYear);
-    const items = await budget.getUnassignedItems(budgetYear.id, currentYear);
-    res.json(items);
-  })
-);
-
-// POST /api/budget/items - Create a new item (optionally unassigned)
+// POST /api/budget/items - Create a new item
 router.post(
   '/items',
   asyncHandler(async (req, res) => {
@@ -171,7 +160,7 @@ router.post(
   })
 );
 
-// PUT /api/budget/items/move - Move item to a group (or unassign)
+// PUT /api/budget/items/move - Move item to a different group
 router.put(
   '/items/move',
   asyncHandler(async (req, res) => {

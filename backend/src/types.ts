@@ -1,6 +1,6 @@
 // Budget Types
 
-export type GroupType = 'income' | 'expense' | 'savings';
+export type GroupType = 'income' | 'expense';
 
 export interface MonthlyValue {
   budget: number;
@@ -52,7 +52,6 @@ export interface BudgetSummary {
   initialBalance: number;
   totalIncome: AnnualTotals;
   totalExpenses: AnnualTotals;
-  totalSavings: AnnualTotals;
   remainingBalance: number;
 }
 

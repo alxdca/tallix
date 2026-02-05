@@ -20,12 +20,8 @@ router.get(
 // Get available accounts for transfer
 router.get(
   '/:year/accounts',
-  asyncHandler(async (req, res) => {
-    const year = parseInt(req.params.year, 10);
-    if (Number.isNaN(year)) {
-      throw new AppError(400, 'Invalid year');
-    }
-    const accounts = await transfersSvc.getAvailableAccounts(year);
+  asyncHandler(async (_req, res) => {
+    const accounts = await transfersSvc.getAvailableAccounts();
     res.json(accounts);
   })
 );
@@ -39,30 +35,14 @@ router.post(
       throw new AppError(400, 'Invalid year');
     }
 
-    const {
-      date,
-      amount,
-      description,
-      sourceAccountType,
-      sourceAccountId,
-      destinationAccountType,
-      destinationAccountId,
-      accountingMonth,
-      accountingYear,
-    } = req.body;
+    const { date, amount, description, sourceAccountId, destinationAccountId, accountingMonth, accountingYear } =
+      req.body;
 
-    if (
-      !date ||
-      amount === undefined ||
-      !sourceAccountType ||
-      !sourceAccountId ||
-      !destinationAccountType ||
-      !destinationAccountId
-    ) {
+    if (!date || amount === undefined || !sourceAccountId || !destinationAccountId) {
       throw new AppError(400, 'Date, amount, source and destination accounts are required');
     }
 
-    if (sourceAccountType === destinationAccountType && sourceAccountId === destinationAccountId) {
+    if (sourceAccountId === destinationAccountId) {
       throw new AppError(400, 'Source and destination accounts must be different');
     }
 
@@ -70,9 +50,7 @@ router.post(
       date,
       amount: parseFloat(amount),
       description,
-      sourceAccountType,
       sourceAccountId: parseInt(sourceAccountId, 10),
-      destinationAccountType,
       destinationAccountId: parseInt(destinationAccountId, 10),
       accountingMonth: accountingMonth ? parseInt(accountingMonth, 10) : undefined,
       accountingYear: accountingYear ? parseInt(accountingYear, 10) : undefined,
@@ -91,25 +69,14 @@ router.put(
       throw new AppError(400, 'Invalid transfer ID');
     }
 
-    const {
-      date,
-      amount,
-      description,
-      sourceAccountType,
-      sourceAccountId,
-      destinationAccountType,
-      destinationAccountId,
-      accountingMonth,
-      accountingYear,
-    } = req.body;
+    const { date, amount, description, sourceAccountId, destinationAccountId, accountingMonth, accountingYear } =
+      req.body;
 
     const transfer = await transfersSvc.updateTransfer(id, {
       date,
       amount: amount !== undefined ? parseFloat(amount) : undefined,
       description,
-      sourceAccountType,
       sourceAccountId: sourceAccountId !== undefined ? parseInt(sourceAccountId, 10) : undefined,
-      destinationAccountType,
       destinationAccountId: destinationAccountId !== undefined ? parseInt(destinationAccountId, 10) : undefined,
       accountingMonth: accountingMonth !== undefined ? parseInt(accountingMonth, 10) : undefined,
       accountingYear: accountingYear !== undefined ? parseInt(accountingYear, 10) : undefined,

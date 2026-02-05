@@ -18,14 +18,21 @@ import {
   updateTransaction,
   updateTransfer,
 } from '../api';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import type { BudgetGroup } from '../types';
 import { formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import { logger } from '../utils/logger';
 import BulkImportModal from './BulkImportModal';
+import ConfirmDialog from './ConfirmDialog';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
 
 const MONTH_NAMES = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+
+// Helper to format name with institution
+const formatWithInstitution = (name: string, institution: string | null): string => {
+  return institution ? `${name} (${institution})` : name;
+};
 
 type EntryType = 'transaction' | 'transfer';
 
@@ -68,6 +75,7 @@ interface Filters {
 
 export default function Transactions({ year, yearId, groups, onTransactionsChanged }: TransactionsProps) {
   const formatCurrency = useFormatCurrency();
+  const { dialogProps, confirm } = useConfirmDialog();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -103,7 +111,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const [newAmount, setNewAmount] = useState('');
   const [newItemId, setNewItemId] = useState<number | null>(null);
   // Transfer-specific form state
-  const [newSourceAccount, setNewSourceAccount] = useState(''); // "payment_method:1" or "savings_item:2"
+  const [newSourceAccount, setNewSourceAccount] = useState(''); // Account ID
   const [newDestAccount, setNewDestAccount] = useState('');
 
   // Edit form state
@@ -136,7 +144,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
   const incomeItems = allItems.filter((i) => i.groupType === 'income');
   const expenseItems = allItems.filter((i) => i.groupType === 'expense');
-  const savingsItems = allItems.filter((i) => i.groupType === 'savings');
+  // Note: Savings are now accounts, not categories
 
   // Get unique values for filter dropdowns (include transfer accounts)
   const uniquePaymentMethods = useMemo(() => {
@@ -412,7 +420,13 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     if (selectedIds.size === 0) return;
 
     const count = selectedIds.size;
-    if (!confirm(`Supprimer ${count} élément${count > 1 ? 's' : ''} ?`)) return;
+    const confirmed = await confirm({
+      title: 'Supprimer la sélection',
+      message: `Êtes-vous sûr de vouloir supprimer ${count} élément${count > 1 ? 's' : ''} ?`,
+      confirmLabel: 'Supprimer',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
 
     setIsSubmitting(true);
     try {
@@ -495,12 +509,12 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     filters.paymentMethods.length > 0 ||
     filters.categoryFilter;
 
-  // Parse account string like "payment_method:1" or "savings_item:2"
-  const parseAccountString = (str: string): { type: 'payment_method' | 'savings_item'; id: number } | null => {
+  // Parse account ID string
+  const parseAccountString = (str: string): { id: number } | null => {
     if (!str) return null;
-    const [type, idStr] = str.split(':');
-    if (type !== 'payment_method' && type !== 'savings_item') return null;
-    return { type, id: parseInt(idStr, 10) };
+    const id = parseInt(str, 10);
+    if (Number.isNaN(id)) return null;
+    return { id };
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -545,9 +559,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
           date: parseDateInput(newDate),
           amount: parseFloat(newAmount),
           description: newDescription.trim() || undefined,
-          sourceAccountType: source.type,
           sourceAccountId: source.id,
-          destinationAccountType: dest.type,
           destinationAccountId: dest.id,
         });
         setNewDescription('');
@@ -589,8 +601,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     setEditDate(dateDisplay);
     setEditDescription(transfer.description || '');
     setEditAmount(transfer.amount.toString());
-    setEditSourceAccount(`${transfer.sourceAccount.type}:${transfer.sourceAccount.id}`);
-    setEditDestAccount(`${transfer.destinationAccount.type}:${transfer.destinationAccount.id}`);
+    setEditSourceAccount(`${transfer.sourceAccount.id}`);
+    setEditDestAccount(`${transfer.destinationAccount.id}`);
     setEditAccountingMonth(transfer.accountingMonth);
     setEditAccountingYear(transfer.accountingYear);
     // Store original values to detect explicit changes
@@ -648,9 +660,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
           date: parseDateInput(editDate),
           amount: parseFloat(editAmount),
           description: editDescription.trim(),
-          sourceAccountType: source.type,
           sourceAccountId: source.id,
-          destinationAccountType: dest.type,
           destinationAccountId: dest.id,
         };
 
@@ -698,7 +708,16 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const handleDelete = async (entryId: string) => {
     if (isSubmitting) return;
     const isTransfer = entryId.startsWith('x_');
-    if (!confirm(isTransfer ? 'Supprimer ce transfert ?' : 'Supprimer cette transaction ?')) return;
+    
+    const confirmed = await confirm({
+      title: isTransfer ? 'Supprimer le transfert' : 'Supprimer la transaction',
+      message: isTransfer
+        ? 'Êtes-vous sûr de vouloir supprimer ce transfert ?'
+        : 'Êtes-vous sûr de vouloir supprimer cette transaction ?',
+      confirmLabel: 'Supprimer',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
 
     setIsSubmitting(true);
     try {
@@ -721,13 +740,13 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const totalIncome = filteredTx.filter((t) => t.groupType === 'income').reduce((sum, t) => sum + t.amount, 0);
   const totalExpenses = filteredTx.filter((t) => t.groupType === 'expense').reduce((sum, t) => sum + t.amount, 0);
 
-  // Calculate total moved to savings (transfers where destination is a savings item)
+  // Calculate total moved to savings accounts (transfers where destination is a savings account)
   const filteredTransfers = filteredEntries.filter((e) => e.type === 'transfer').map((e) => e.transfer!);
   const totalToSavings = filteredTransfers
-    .filter((t) => t.destinationAccount.type === 'savings_item')
+    .filter((t) => t.destinationAccount.isSavingsAccount)
     .reduce((sum, t) => sum + t.amount, 0);
   const totalFromSavings = filteredTransfers
-    .filter((t) => t.sourceAccount.type === 'savings_item')
+    .filter((t) => t.sourceAccount.isSavingsAccount)
     .reduce((sum, t) => sum + t.amount, 0);
   const netSavings = totalToSavings - totalFromSavings;
 
@@ -908,19 +927,19 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                   <option value="">Compte source</option>
                   <optgroup label="Comptes de paiement">
                     {transferAccounts
-                      .filter((a) => a.type === 'payment_method')
+                      .filter((a) => !a.isSavingsAccount)
                       .map((a) => (
-                        <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>
-                          {a.name}
+                        <option key={`pm_${a.id}`} value={`${a.id}`}>
+                          {formatWithInstitution(a.name, a.institution)}
                         </option>
                       ))}
                   </optgroup>
                   <optgroup label="Comptes d'épargne">
                     {transferAccounts
-                      .filter((a) => a.type === 'savings_item')
+                      .filter((a) => a.isSavingsAccount)
                       .map((a) => (
-                        <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>
-                          {a.name}
+                        <option key={`si_${a.id}`} value={`${a.id}`}>
+                          {formatWithInstitution(a.name, a.institution)}
                         </option>
                       ))}
                   </optgroup>
@@ -935,19 +954,19 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                   <option value="">Compte destination</option>
                   <optgroup label="Comptes de paiement">
                     {transferAccounts
-                      .filter((a) => a.type === 'payment_method')
+                      .filter((a) => !a.isSavingsAccount)
                       .map((a) => (
-                        <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>
-                          {a.name}
+                        <option key={`pm_${a.id}`} value={`${a.id}`}>
+                          {formatWithInstitution(a.name, a.institution)}
                         </option>
                       ))}
                   </optgroup>
                   <optgroup label="Comptes d'épargne">
                     {transferAccounts
-                      .filter((a) => a.type === 'savings_item')
+                      .filter((a) => a.isSavingsAccount)
                       .map((a) => (
-                        <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>
-                          {a.name}
+                        <option key={`si_${a.id}`} value={`${a.id}`}>
+                          {formatWithInstitution(a.name, a.institution)}
                         </option>
                       ))}
                   </optgroup>
@@ -974,7 +993,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 <option value="">Moyen de paiement</option>
                 {paymentMethods.map((method) => (
                   <option key={method.id} value={method.name}>
-                    {method.name}
+                    {formatWithInstitution(method.name, method.institution)}
                   </option>
                 ))}
               </select>
@@ -1007,13 +1026,6 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 </optgroup>
                 <optgroup label="Dépenses">
                   {expenseItems.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.groupName} → {item.name}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="Épargne">
-                  {savingsItems.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.groupName} → {item.name}
                     </option>
@@ -1243,26 +1255,6 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                           ))}
                       </>
                     )}
-                    {groups.filter((g) => g.type === 'savings').length > 0 && (
-                      <>
-                        <option value="section:savings">▸ ÉPARGNE</option>
-                        {groups
-                          .filter((g) => g.type === 'savings')
-                          .map((group) => (
-                            <React.Fragment key={group.id}>
-                              <option value={`group:${group.name}`}>
-                                {'\u00A0\u00A0'}▪ {group.name}
-                              </option>
-                              {group.items.map((item) => (
-                                <option key={item.id} value={`item:${group.name} → ${item.name}`}>
-                                  {'\u00A0\u00A0\u00A0\u00A0\u00A0'}
-                                  {item.name}
-                                </option>
-                              ))}
-                            </React.Fragment>
-                          ))}
-                      </>
-                    )}
                   </select>
                 </th>
                 <th></th>
@@ -1295,6 +1287,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 onChange={(e) => setEditDate(e.target.value)}
                                 placeholder="JJ/MM/AAAA"
                                 className={`edit-input ${!isValidDateFormat(editDate) && editDate ? 'invalid' : ''}`}
+                                // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
+                                autoFocus
                               />
                               <input
                                 type="date"
@@ -1362,19 +1356,19 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 <option value="">Source</option>
                                 <optgroup label="Comptes de paiement">
                                   {transferAccounts
-                                    .filter((a) => a.type === 'payment_method')
+                                    .filter((a) => !a.isSavingsAccount)
                                     .map((a) => (
-                                      <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>
-                                        {a.name}
+                                      <option key={`pm_${a.id}`} value={`${a.id}`}>
+                                        {formatWithInstitution(a.name, a.institution)}
                                       </option>
                                     ))}
                                 </optgroup>
                                 <optgroup label="Comptes d'épargne">
                                   {transferAccounts
-                                    .filter((a) => a.type === 'savings_item')
+                                    .filter((a) => a.isSavingsAccount)
                                     .map((a) => (
-                                      <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>
-                                        {a.name}
+                                      <option key={`si_${a.id}`} value={`${a.id}`}>
+                                        {formatWithInstitution(a.name, a.institution)}
                                       </option>
                                     ))}
                                 </optgroup>
@@ -1388,19 +1382,19 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 <option value="">Destination</option>
                                 <optgroup label="Comptes de paiement">
                                   {transferAccounts
-                                    .filter((a) => a.type === 'payment_method')
+                                    .filter((a) => !a.isSavingsAccount)
                                     .map((a) => (
-                                      <option key={`pm_${a.id}`} value={`payment_method:${a.id}`}>
-                                        {a.name}
+                                      <option key={`pm_${a.id}`} value={`${a.id}`}>
+                                        {formatWithInstitution(a.name, a.institution)}
                                       </option>
                                     ))}
                                 </optgroup>
                                 <optgroup label="Comptes d'épargne">
                                   {transferAccounts
-                                    .filter((a) => a.type === 'savings_item')
+                                    .filter((a) => a.isSavingsAccount)
                                     .map((a) => (
-                                      <option key={`si_${a.id}`} value={`savings_item:${a.id}`}>
-                                        {a.name}
+                                      <option key={`si_${a.id}`} value={`${a.id}`}>
+                                        {formatWithInstitution(a.name, a.institution)}
                                       </option>
                                     ))}
                                 </optgroup>
@@ -1478,6 +1472,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                                 placeholder="JJ/MM/AAAA"
                                 pattern="\d{2}/\d{2}/\d{4}"
                                 className={`edit-input ${!isValidDateFormat(editDate) && editDate ? 'invalid' : ''}`}
+                                // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
+                                autoFocus
                               />
                               <input
                                 type="date"
@@ -1571,7 +1567,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               <option value="">-</option>
                               {paymentMethods.map((method) => (
                                 <option key={method.id} value={method.name}>
-                                  {method.name}
+                                  {formatWithInstitution(method.name, method.institution)}
                                 </option>
                               ))}
                             </select>
@@ -1592,13 +1588,6 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               </optgroup>
                               <optgroup label="Dépenses">
                                 {expenseItems.map((item) => (
-                                  <option key={item.id} value={item.id}>
-                                    {item.groupName} → {item.name}
-                                  </option>
-                                ))}
-                              </optgroup>
-                              <optgroup label="Épargne">
-                                {savingsItems.map((item) => (
                                   <option key={item.id} value={item.id}>
                                     {item.groupName} → {item.name}
                                   </option>
@@ -1710,7 +1699,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                           )}
                         </td>
                         <td
-                          className={`amount-cell ${isTransfer ? (transfer?.sourceAccount.type === 'savings_item' || transfer?.destinationAccount.type === 'savings_item' ? 'savings-transfer' : 'transfer') : transaction?.groupType} ${entry.amount < 0 ? 'negative' : ''}`}
+                          className={`amount-cell ${isTransfer ? (transfer?.sourceAccount.isSavingsAccount || transfer?.destinationAccount.isSavingsAccount ? 'savings-transfer' : 'transfer') : transaction?.groupType} ${entry.amount < 0 ? 'negative' : ''}`}
                         >
                           {formatCurrency(entry.amount, true)}
                         </td>
@@ -1757,6 +1746,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
           </table>
         )}
       </div>
+
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }

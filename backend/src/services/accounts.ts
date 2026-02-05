@@ -10,19 +10,17 @@ import {
   transactions,
   transfers,
 } from '../db/index.js';
-import { ACCOUNT_TYPES, type AccountType } from '../types/accounts.js';
-
-export { ACCOUNT_TYPES, type AccountType } from '../types/accounts.js';
 
 // Configure Decimal.js for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
 export interface Account {
-  id: string; // unique identifier: "savings_item_123" or "payment_method_456"
-  type: AccountType;
-  accountId: number;
+  id: number;
   name: string;
+  institution: string | null;
   sortOrder: number;
+  isAccount: boolean;
+  isSavingsAccount: boolean;
   initialBalance: number;
   monthlyBalances: number[]; // Expected balance at end of each month (1-12)
 }
@@ -39,23 +37,8 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
   }
 
   const yearId = budgetYear.id;
-  const accounts: Account[] = [];
 
-  // 1. Get all savings items (items in savings groups), ordered by group sortOrder then item sortOrder
-  const savingsItems = await db
-    .select({
-      id: budgetItems.id,
-      name: budgetItems.name,
-      sortOrder: budgetItems.sortOrder,
-      groupName: budgetGroups.name,
-      groupSortOrder: budgetGroups.sortOrder,
-    })
-    .from(budgetItems)
-    .innerJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
-    .where(and(eq(budgetItems.yearId, yearId), eq(budgetGroups.type, 'savings')))
-    .orderBy(asc(budgetGroups.sortOrder), asc(budgetItems.sortOrder));
-
-  // 2. Get all payment methods (we need all to know which are linked)
+  // Get all payment methods (we need all to know which are linked)
   const allPaymentMethods = await db.select().from(paymentMethods).orderBy(asc(paymentMethods.sortOrder));
 
   // Filter to just accounts
@@ -71,50 +54,30 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
     }
   }
 
-  // 3. Get initial balances for all accounts
+  // Get initial balances for all accounts
   const balances = await db.select().from(accountBalances).where(eq(accountBalances.yearId, yearId));
 
   // Use Decimal for precise balance calculations
-  const balanceMap = new Map<string, Decimal>();
+  const balanceMap = new Map<number, Decimal>();
   for (const b of balances) {
-    balanceMap.set(`${b.accountType}_${b.accountId}`, new Decimal(b.initialBalance));
+    balanceMap.set(b.paymentMethodId, new Decimal(b.initialBalance));
   }
 
-  // 4. Calculate monthly transaction totals for savings items
-  // Uses accountingMonth AND accountingYear for consistency - this ensures that
-  // late-December transactions with settlement days that push them to January
-  // are correctly attributed to the next year's budget, not the current year.
-  const savingsTransactions = await db
-    .select({
-      itemId: transactions.itemId,
-      month: transactions.accountingMonth,
-      total: sql<string>`SUM(${transactions.amount})`,
-    })
-    .from(transactions)
-    .innerJoin(budgetItems, eq(transactions.itemId, budgetItems.id))
-    .innerJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
-    .where(
-      and(eq(transactions.yearId, yearId), eq(transactions.accountingYear, year), eq(budgetGroups.type, 'savings'))
-    )
-    .groupBy(transactions.itemId, transactions.accountingMonth);
-
-  // 5. Calculate monthly transaction totals for payment method accounts
+  // Calculate monthly transaction totals for payment method accounts
   // Use accountingMonth AND accountingYear (based on settlement day) instead of raw date
-  // This ensures year boundaries are handled correctly.
   // For account balance:
   // - Income transactions ADD to balance (money received)
-  // - Expense/savings transactions SUBTRACT from balance (money spent)
+  // - Expense transactions SUBTRACT from balance (money spent)
   // - If no category, treat as expense (most common case)
   const pmTransactions = await db
     .select({
       paymentMethod: transactions.paymentMethod,
       month: transactions.accountingMonth,
-      // Net effect on balance: income adds, expense/savings subtracts
-      // Amount sign matters: positive expense = spend (subtract), negative expense = refund (add)
+      // Net effect on balance: income adds, expense subtracts
       balanceChange: sql<string>`SUM(
         CASE 
           WHEN ${budgetGroups.type} = 'income' THEN ${transactions.amount}
-          WHEN ${budgetGroups.type} IN ('expense', 'savings') THEN -${transactions.amount}
+          WHEN ${budgetGroups.type} = 'expense' THEN -${transactions.amount}
           ELSE -${transactions.amount}
         END
       )`,
@@ -125,100 +88,52 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
     .where(and(eq(transactions.yearId, yearId), eq(transactions.accountingYear, year)))
     .groupBy(transactions.paymentMethod, transactions.accountingMonth);
 
-  // 6. Get all transfers for balance adjustment
-  // Filter by accountingYear to handle year boundaries correctly
+  // Get all transfers for balance adjustment
   const allTransfers = await db
     .select()
     .from(transfers)
     .where(and(eq(transfers.yearId, yearId), eq(transfers.accountingYear, year)));
 
-  // Build transfer impact maps using Decimal: accountKey -> month -> { incoming, outgoing }
-  const transferImpact = new Map<string, Map<number, { incoming: Decimal; outgoing: Decimal }>>();
+  // Build transfer impact maps: accountId -> month -> { incoming, outgoing }
+  const transferImpact = new Map<number, Map<number, { incoming: Decimal; outgoing: Decimal }>>();
 
   for (const t of allTransfers) {
     const amount = new Decimal(t.amount);
     const month = t.accountingMonth;
 
     // Source account loses money
-    const sourceKey = `${t.sourceAccountType}_${t.sourceAccountId}`;
-    if (!transferImpact.has(sourceKey)) {
-      transferImpact.set(sourceKey, new Map());
+    if (!transferImpact.has(t.sourceAccountId)) {
+      transferImpact.set(t.sourceAccountId, new Map());
     }
-    const sourceMonthMap = transferImpact.get(sourceKey)!;
+    const sourceMonthMap = transferImpact.get(t.sourceAccountId)!;
     if (!sourceMonthMap.has(month)) {
       sourceMonthMap.set(month, { incoming: new Decimal(0), outgoing: new Decimal(0) });
     }
-    const sourceEntry = sourceMonthMap.get(month)!;
-    sourceEntry.outgoing = sourceEntry.outgoing.plus(amount);
+    sourceMonthMap.get(month)!.outgoing = sourceMonthMap.get(month)!.outgoing.plus(amount);
 
     // Destination account gains money
-    const destKey = `${t.destinationAccountType}_${t.destinationAccountId}`;
-    if (!transferImpact.has(destKey)) {
-      transferImpact.set(destKey, new Map());
+    if (!transferImpact.has(t.destinationAccountId)) {
+      transferImpact.set(t.destinationAccountId, new Map());
     }
-    const destMonthMap = transferImpact.get(destKey)!;
+    const destMonthMap = transferImpact.get(t.destinationAccountId)!;
     if (!destMonthMap.has(month)) {
       destMonthMap.set(month, { incoming: new Decimal(0), outgoing: new Decimal(0) });
     }
-    const destEntry = destMonthMap.get(month)!;
-    destEntry.incoming = destEntry.incoming.plus(amount);
+    destMonthMap.get(month)!.incoming = destMonthMap.get(month)!.incoming.plus(amount);
   }
 
-  // Build savings item accounts using Decimal for precision
-  for (const item of savingsItems) {
-    const key = `savings_item_${item.id}`;
-    const initialBalance = balanceMap.get(key) || new Decimal(0);
+  // Build account list
+  const accounts: Account[] = [];
 
-    // Calculate cumulative balance per month (transactions + transfers)
-    const monthlyTotals = new Map<number, Decimal>();
-
-    // Add transactions
-    for (const t of savingsTransactions) {
-      if (t.itemId === item.id) {
-        const current = monthlyTotals.get(t.month) || new Decimal(0);
-        monthlyTotals.set(t.month, current.plus(new Decimal(t.total || '0')));
-      }
-    }
-
-    // Add transfers
-    const itemTransfers = transferImpact.get(key);
-    if (itemTransfers) {
-      for (const [month, impact] of itemTransfers) {
-        const current = monthlyTotals.get(month) || new Decimal(0);
-        monthlyTotals.set(month, current.plus(impact.incoming).minus(impact.outgoing));
-      }
-    }
-
-    const monthlyBalances: number[] = [];
-    let cumulative = initialBalance;
-    for (let m = 1; m <= 12; m++) {
-      const monthTotal = monthlyTotals.get(m) || new Decimal(0);
-      cumulative = cumulative.plus(monthTotal);
-      monthlyBalances.push(cumulative.toNumber());
-    }
-
-    accounts.push({
-      id: key,
-      type: ACCOUNT_TYPES.SAVINGS_ITEM,
-      accountId: item.id,
-      name: `${item.groupName} → ${item.name}`,
-      sortOrder: item.groupSortOrder * 1000 + item.sortOrder, // Combine group and item sort order
-      initialBalance: initialBalance.toNumber(),
-      monthlyBalances,
-    });
-  }
-
-  // Build payment method accounts using Decimal for precision
   for (const pm of paymentMethodAccounts) {
-    const key = `payment_method_${pm.id}`;
-    const initialBalance = balanceMap.get(key) || new Decimal(0);
+    const initialBalance = balanceMap.get(pm.id) || new Decimal(0);
 
     // Get list of payment method names that should affect this account's balance:
     // 1. The account's own name
     // 2. Any payment methods linked to this account
     const affectingMethods = [pm.name, ...(accountLinkedMethods.get(pm.id) || [])];
 
-    // Calculate cumulative balance per month (transactions + transfers) using Decimal
+    // Calculate cumulative balance per month
     const monthlyTotals = new Map<number, { balanceChange: Decimal; transferIn: Decimal; transferOut: Decimal }>();
 
     // Initialize
@@ -235,7 +150,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
     }
 
     // Add transfers
-    const pmTransfers = transferImpact.get(key);
+    const pmTransfers = transferImpact.get(pm.id);
     if (pmTransfers) {
       for (const [month, impact] of pmTransfers) {
         const existing = monthlyTotals.get(month)!;
@@ -253,11 +168,12 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
     }
 
     accounts.push({
-      id: key,
-      type: ACCOUNT_TYPES.PAYMENT_METHOD,
-      accountId: pm.id,
+      id: pm.id,
       name: pm.name,
+      institution: pm.institution,
       sortOrder: pm.sortOrder,
+      isAccount: pm.isAccount,
+      isSavingsAccount: pm.isSavingsAccount,
       initialBalance: initialBalance.toNumber(),
       monthlyBalances,
     });
@@ -267,13 +183,7 @@ export async function getAccountsForYear(year: number): Promise<Account[]> {
 }
 
 // Set initial balance for an account
-// Uses upsert pattern to avoid race conditions under concurrent requests
-export async function setAccountBalance(
-  year: number,
-  accountType: AccountType,
-  accountId: number,
-  initialBalance: number
-): Promise<void> {
+export async function setAccountBalance(year: number, paymentMethodId: number, initialBalance: number): Promise<void> {
   // Get year ID
   const budgetYear = await db.query.budgetYears.findFirst({
     where: eq(budgetYears.year, year),
@@ -286,17 +196,15 @@ export async function setAccountBalance(
   const yearId = budgetYear.id;
 
   // Use upsert to avoid race conditions
-  // Note: Requires unique constraint on (year_id, account_type, account_id) - see migration
   await db
     .insert(accountBalances)
     .values({
       yearId,
-      accountType,
-      accountId,
+      paymentMethodId,
       initialBalance: initialBalance.toString(),
     })
     .onConflictDoUpdate({
-      target: [accountBalances.yearId, accountBalances.accountType, accountBalances.accountId],
+      target: [accountBalances.yearId, accountBalances.paymentMethodId],
       set: {
         initialBalance: initialBalance.toString(),
         updatedAt: new Date(),
@@ -304,7 +212,7 @@ export async function setAccountBalance(
     });
 }
 
-// Get payment methods with isAccount flag
+// Get payment methods with account flags
 export async function getPaymentMethodsWithAccountFlag() {
   const methods = await db.query.paymentMethods.findMany({
     orderBy: (pm, { asc }) => [asc(pm.sortOrder)],
@@ -313,12 +221,19 @@ export async function getPaymentMethodsWithAccountFlag() {
   return methods.map((m) => ({
     id: m.id,
     name: m.name,
+    institution: m.institution,
     sortOrder: m.sortOrder,
     isAccount: m.isAccount,
+    isSavingsAccount: m.isSavingsAccount,
   }));
 }
 
 // Update payment method isAccount flag
 export async function setPaymentMethodAsAccount(id: number, isAccount: boolean): Promise<void> {
   await db.update(paymentMethods).set({ isAccount, updatedAt: new Date() }).where(eq(paymentMethods.id, id));
+}
+
+// Update payment method isSavingsAccount flag
+export async function setPaymentMethodAsSavingsAccount(id: number, isSavingsAccount: boolean): Promise<void> {
+  await db.update(paymentMethods).set({ isSavingsAccount, updatedAt: new Date() }).where(eq(paymentMethods.id, id));
 }

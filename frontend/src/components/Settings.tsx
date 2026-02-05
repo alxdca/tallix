@@ -8,20 +8,22 @@ import {
   deleteItem,
   deletePaymentMethod,
   fetchPaymentMethods,
-  fetchUnassignedItems,
   moveItem,
   type PaymentMethod,
   reorderGroups,
   reorderItems,
   reorderPaymentMethods,
+  type SavingsType,
   togglePaymentMethodAccount,
   updateGroup,
   updateItem,
   updatePaymentMethod,
 } from '../api';
 import { useSettings } from '../contexts/SettingsContext';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import type { BudgetGroup, BudgetItem } from '../types';
 import { logger } from '../utils/logger';
+import ConfirmDialog from './ConfirmDialog';
 
 interface SettingsProps {
   yearId: number;
@@ -43,18 +45,18 @@ type SettingsTab = 'categories' | 'accounts' | 'preferences';
 export default function Settings({ yearId, groups, onDataChanged }: SettingsProps) {
   const { theme, decimalSeparator, showBudgetBelowActual, toggleTheme, setDecimalSeparator, setShowBudgetBelowActual } =
     useSettings();
+  const { dialogProps, confirm } = useConfirmDialog();
   const [activeTab, setActiveTab] = useState<SettingsTab>('categories');
   const [editingGroup, setEditingGroup] = useState<number | null>(null);
   const [editingItem, setEditingItem] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [unassignedItems, setUnassignedItems] = useState<BudgetItem[]>([]);
-  const [draggedItem, setDraggedItem] = useState<{ id: number; name: string; groupId: number | null } | null>(null);
-  const [dropTarget, setDropTarget] = useState<number | 'unassigned' | null>(null);
+  const [draggedItem, setDraggedItem] = useState<{ id: number; name: string; groupId: number } | null>(null);
+  const [dropTarget, setDropTarget] = useState<number | null>(null);
   const [dropTargetItem, setDropTargetItem] = useState<number | null>(null);
 
   // Inline add states
-  const [addingGroupTo, setAddingGroupTo] = useState<'income' | 'expense' | 'savings' | null>(null);
+  const [addingGroupTo, setAddingGroupTo] = useState<'income' | 'expense' | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [addingItemTo, setAddingItemTo] = useState<number | null>(null);
   const [newItemName, setNewItemName] = useState('');
@@ -62,10 +64,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   // Payment methods state
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [newPaymentMethod, setNewPaymentMethod] = useState('');
+  const [newPaymentMethodInstitution, setNewPaymentMethodInstitution] = useState('');
   const [editingPaymentMethod, setEditingPaymentMethod] = useState<number | null>(null);
   const [editPaymentMethodName, setEditPaymentMethodName] = useState('');
+  const [editInstitution, setEditInstitution] = useState('');
   const [editSettlementDay, setEditSettlementDay] = useState<string>('');
   const [editLinkedPaymentMethodId, setEditLinkedPaymentMethodId] = useState<number | null>(null);
+  const [paymentMethodError, setPaymentMethodError] = useState<string | null>(null);
 
   // Payment methods that are accounts (for linked account selection)
   const accountPaymentMethods = paymentMethods.filter((pm) => pm.isAccount);
@@ -73,16 +78,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   // Sort groups by sortOrder within their category
   const incomeGroups = [...groups.filter((g) => g.type === 'income')].sort((a, b) => a.sortOrder - b.sortOrder);
   const expenseGroups = [...groups.filter((g) => g.type === 'expense')].sort((a, b) => a.sortOrder - b.sortOrder);
-  const savingsGroups = [...groups.filter((g) => g.type === 'savings')].sort((a, b) => a.sortOrder - b.sortOrder);
-
-  const loadUnassignedItems = useCallback(async () => {
-    try {
-      const items = await fetchUnassignedItems();
-      setUnassignedItems(items);
-    } catch (error) {
-      logger.error('Failed to load unassigned items', error);
-    }
-  }, []);
 
   const loadPaymentMethods = useCallback(async () => {
     try {
@@ -94,24 +89,42 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   }, []);
 
   useEffect(() => {
-    loadUnassignedItems();
     loadPaymentMethods();
-  }, [loadPaymentMethods, loadUnassignedItems]);
+  }, [loadPaymentMethods]);
+
+  // Translate API error messages to French
+  const translateError = (message: string): string => {
+    // Match "Payment method already exists: "Name""
+    const duplicateMatch = message.match(/^Payment method already exists: "(.+)"$/);
+    if (duplicateMatch) {
+      return `Ce compte ou moyen de paiement existe déjà : "${duplicateMatch[1]}"`;
+    }
+    // Default fallback
+    return 'Une erreur est survenue';
+  };
 
   const handleCreatePaymentMethod = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPaymentMethod.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
+    setPaymentMethodError(null);
     try {
       await createPaymentMethod({
         name: newPaymentMethod.trim(),
         sortOrder: paymentMethods.length,
+        institution: newPaymentMethodInstitution.trim() || undefined,
       });
       setNewPaymentMethod('');
+      setNewPaymentMethodInstitution('');
       await loadPaymentMethods();
     } catch (error) {
       logger.error('Failed to create payment method', error);
+      if (error instanceof Error) {
+        setPaymentMethodError(translateError(error.message));
+      } else {
+        setPaymentMethodError('Erreur lors de la création');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -129,19 +142,27 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     }
 
     setIsSubmitting(true);
+    setPaymentMethodError(null);
     try {
       await updatePaymentMethod(id, {
         name: editPaymentMethodName.trim(),
+        institution: editInstitution.trim() || null,
         settlementDay,
         linkedPaymentMethodId: editLinkedPaymentMethodId,
       });
       setEditingPaymentMethod(null);
       setEditPaymentMethodName('');
+      setEditInstitution('');
       setEditSettlementDay('');
       setEditLinkedPaymentMethodId(null);
       await loadPaymentMethods();
     } catch (error) {
       logger.error('Failed to update payment method', error);
+      if (error instanceof Error) {
+        setPaymentMethodError(translateError(error.message));
+      } else {
+        setPaymentMethodError('Erreur lors de la mise à jour');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -149,7 +170,14 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
   const handleDeletePaymentMethod = async (id: number) => {
     if (isSubmitting) return;
-    if (!confirm('Supprimer ce moyen de paiement ?')) return;
+    
+    const confirmed = await confirm({
+      title: 'Supprimer le moyen de paiement',
+      message: 'Êtes-vous sûr de vouloir supprimer ce moyen de paiement ?',
+      confirmLabel: 'Supprimer',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
 
     setIsSubmitting(true);
     try {
@@ -172,6 +200,40 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       onDataChanged();
     } catch (error) {
       logger.error('Failed to toggle payment method account', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleToggleSavingsAccount = async (id: number, currentIsSavings: boolean) => {
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      await updatePaymentMethod(id, {
+        isSavingsAccount: !currentIsSavings,
+        // Clear savings type if unchecking savings
+        savingsType: !currentIsSavings ? null : undefined,
+      });
+      await loadPaymentMethods();
+      onDataChanged();
+    } catch (error) {
+      logger.error('Failed to toggle savings account', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleChangeSavingsType = async (id: number, savingsType: SavingsType | null) => {
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      await updatePaymentMethod(id, { savingsType });
+      await loadPaymentMethods();
+      onDataChanged();
+    } catch (error) {
+      logger.error('Failed to update savings type', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -205,6 +267,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   const startEditPaymentMethod = (method: PaymentMethod) => {
     setEditingPaymentMethod(method.id);
     setEditPaymentMethodName(method.name);
+    setEditInstitution(method.institution || '');
     setEditSettlementDay(method.settlementDay?.toString() || '');
     setEditLinkedPaymentMethodId(method.linkedPaymentMethodId);
     setEditingGroup(null);
@@ -214,15 +277,15 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   const cancelEditPaymentMethod = () => {
     setEditingPaymentMethod(null);
     setEditPaymentMethodName('');
+    setEditInstitution('');
     setEditSettlementDay('');
     setEditLinkedPaymentMethodId(null);
   };
 
-  const handleCreateGroup = async (groupType: 'income' | 'expense' | 'savings') => {
+  const handleCreateGroup = async (groupType: 'income' | 'expense') => {
     if (!newGroupName.trim() || isSubmitting) return;
 
-    const sectionGroups =
-      groupType === 'income' ? incomeGroups : groupType === 'expense' ? expenseGroups : savingsGroups;
+    const sectionGroups = groupType === 'income' ? incomeGroups : expenseGroups;
     const maxSortOrder = sectionGroups.length > 0 ? Math.max(...sectionGroups.map((g) => g.sortOrder)) + 1 : 0;
 
     setIsSubmitting(true);
@@ -261,7 +324,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       });
       setNewItemName('');
       setAddingItemTo(null);
-      await loadUnassignedItems();
       onDataChanged();
     } catch (error) {
       logger.error('Failed to create item', error);
@@ -291,12 +353,18 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
   const handleDeleteGroup = async (groupId: number) => {
     if (isSubmitting) return;
-    if (!confirm('Supprimer ce groupe ? Les éléments seront déplacés vers "Non assignés".')) return;
+    
+    const confirmed = await confirm({
+      title: 'Supprimer le groupe',
+      message: 'Êtes-vous sûr de vouloir supprimer ce groupe et tous ses éléments ?',
+      confirmLabel: 'Supprimer',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
 
     setIsSubmitting(true);
     try {
       await deleteGroup(groupId);
-      await loadUnassignedItems();
       onDataChanged();
     } catch (error) {
       logger.error('Failed to delete group', error);
@@ -341,7 +409,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       });
       setEditingItem(null);
       setEditName('');
-      await loadUnassignedItems();
       onDataChanged();
     } catch (error) {
       logger.error('Failed to update item', error);
@@ -352,12 +419,18 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
 
   const handleDeleteItem = async (itemId: number) => {
     if (isSubmitting) return;
-    if (!confirm('Supprimer cet élément ?')) return;
+    
+    const confirmed = await confirm({
+      title: 'Supprimer l\'élément',
+      message: 'Êtes-vous sûr de vouloir supprimer cet élément ?',
+      confirmLabel: 'Supprimer',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
 
     setIsSubmitting(true);
     try {
       await deleteItem(itemId);
-      await loadUnassignedItems();
       onDataChanged();
     } catch (error) {
       logger.error('Failed to delete item', error);
@@ -367,7 +440,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   };
 
   // Drag and drop handlers
-  const handleDragStart = (e: DragEvent, item: { id: number; name: string }, groupId: number | null) => {
+  const handleDragStart = (e: DragEvent, item: { id: number; name: string }, groupId: number) => {
     setDraggedItem({ ...item, groupId });
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', item.id.toString());
@@ -379,7 +452,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     setDropTargetItem(null);
   };
 
-  const handleDragOver = (e: DragEvent, target: number | 'unassigned') => {
+  const handleDragOver = (e: DragEvent, target: number) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     setDropTarget(target);
@@ -389,19 +462,19 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     setDropTarget(null);
   };
 
-  const handleItemDragOver = (e: DragEvent, targetItemId: number, groupId: number | null) => {
+  const handleItemDragOver = (e: DragEvent, targetItemId: number, groupId: number) => {
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
     setDropTargetItem(targetItemId);
-    setDropTarget(groupId ?? 'unassigned');
+    setDropTarget(groupId);
   };
 
   const handleItemDragLeave = () => {
     setDropTargetItem(null);
   };
 
-  const handleDrop = async (e: DragEvent, targetGroupId: number | null, targetItemId?: number) => {
+  const handleDrop = async (e: DragEvent, targetGroupId: number, targetItemId?: number) => {
     e.preventDefault();
     setDropTarget(null);
     setDropTargetItem(null);
@@ -413,14 +486,9 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     // If dropping on the same group, handle reordering
     if (sourceGroupId === targetGroupId && targetItemId !== undefined && targetItemId !== draggedItem.id) {
       // Find the group's items
-      let groupItems: BudgetItem[];
-      if (targetGroupId === null) {
-        groupItems = unassignedItems;
-      } else {
-        const group = groups.find((g) => g.id === targetGroupId);
-        if (!group) return;
-        groupItems = group.items;
-      }
+      const group = groups.find((g) => g.id === targetGroupId);
+      if (!group) return;
+      const groupItems = group.items;
 
       const draggedIndex = groupItems.findIndex((item) => item.id === draggedItem.id);
       const targetIndex = groupItems.findIndex((item) => item.id === targetItemId);
@@ -440,9 +508,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       setIsSubmitting(true);
       try {
         await reorderItems(updates);
-        if (targetGroupId === null) {
-          await loadUnassignedItems();
-        }
         onDataChanged();
       } catch (error) {
         logger.error('Failed to reorder items', error);
@@ -455,7 +520,6 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       setIsSubmitting(true);
       try {
         await moveItem(draggedItem.id, targetGroupId);
-        await loadUnassignedItems();
         onDataChanged();
       } catch (error) {
         logger.error('Failed to move item', error);
@@ -490,7 +554,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     setEditName('');
   };
 
-  const startAddGroup = (type: 'income' | 'expense' | 'savings') => {
+  const startAddGroup = (type: 'income' | 'expense') => {
     setAddingGroupTo(type);
     setNewGroupName('');
     setAddingItemTo(null);
@@ -543,7 +607,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     item: { id: number; name: string; slug: string },
     groupItems: BudgetItem[],
     itemIndex: number,
-    groupId: number | null
+    groupId: number
   ) => (
     <div
       key={item.id}
@@ -565,6 +629,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
               if (e.key === 'Enter') handleUpdateItem(item.id);
               if (e.key === 'Escape') cancelEdit();
             }}
+            // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
+            autoFocus
           />
           <button className="btn-icon save" onClick={() => handleUpdateItem(item.id)} title="Sauvegarder">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -632,7 +698,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     </div>
   );
 
-  const renderGroupSection = (title: string, sectionGroups: BudgetGroup[], type: 'income' | 'expense' | 'savings') => (
+  const renderGroupSection = (title: string, sectionGroups: BudgetGroup[], type: 'income' | 'expense') => (
     <div className={`settings-section ${type}`}>
       <div className="section-header">
         <h3 className="section-title">
@@ -700,6 +766,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                       if (e.key === 'Enter') handleUpdateGroup(group.id);
                       if (e.key === 'Escape') cancelEdit();
                     }}
+                    // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
+                    autoFocus
                   />
                   <button className="btn-icon save" onClick={() => handleUpdateGroup(group.id)} title="Sauvegarder">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -812,27 +880,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
       <div className="settings-grid">
         {renderGroupSection('Revenus', incomeGroups, 'income')}
         {renderGroupSection('Dépenses', expenseGroups, 'expense')}
-        {renderGroupSection('Épargne', savingsGroups, 'savings')}
       </div>
 
-      {/* Unassigned Items */}
-      {unassignedItems.length > 0 && (
-        <div
-          className={`unassigned-section ${dropTarget === 'unassigned' ? 'drop-target' : ''}`}
-          onDragOver={(e) => handleDragOver(e, 'unassigned')}
-          onDragLeave={handleDragLeave}
-          onDrop={(e) => handleDrop(e, null)}
-        >
-          <h3 className="section-title">
-            <span className="section-indicator unassigned"></span>
-            Éléments non assignés
-            <span className="item-count">{unassignedItems.length}</span>
-          </h3>
-          <div className="unassigned-items">
-            {unassignedItems.map((item, itemIndex) => renderItem(item, unassignedItems, itemIndex, null))}
-          </div>
-        </div>
-      )}
     </>
   );
 
@@ -840,7 +889,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     <div className="payment-methods-section">
       <h3 className="section-title">
         <span className="section-indicator payment"></span>
-        Moyens de paiement
+        Comptes & Moyens de paiement
       </h3>
 
       <div className="payment-methods-list">
@@ -862,6 +911,21 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                         if (e.key === 'Escape') cancelEditPaymentMethod();
                       }}
                       placeholder="Nom"
+                      // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
+                      autoFocus
+                    />
+                  </div>
+                  <div className="edit-field-group institution-field">
+                    <label className="edit-field-label">Institution</label>
+                    <input
+                      type="text"
+                      value={editInstitution}
+                      onChange={(e) => setEditInstitution(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleUpdatePaymentMethod(method.id);
+                        if (e.key === 'Escape') cancelEditPaymentMethod();
+                      }}
+                      placeholder="Banque, émetteur..."
                     />
                   </div>
                   <div className="edit-field-group">
@@ -943,6 +1007,11 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                   </div>
                   <span className="payment-method-name">
                     {method.name}
+                    {method.institution && (
+                      <span className="institution-badge" title={`Institution: ${method.institution}`}>
+                        {method.institution}
+                      </span>
+                    )}
                     {method.settlementDay && (
                       <span className="settlement-day-badge" title={`Clôture le ${method.settlementDay} du mois`}>
                         J{method.settlementDay}
@@ -967,6 +1036,27 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
                     <span className="toggle-slider"></span>
                     <span className="toggle-label">Compte</span>
                   </label>
+                  <label className="account-toggle" title="Activer comme compte épargne">
+                    <input
+                      type="checkbox"
+                      checked={method.isSavingsAccount}
+                      onChange={() => handleToggleSavingsAccount(method.id, method.isSavingsAccount)}
+                      disabled={isSubmitting}
+                    />
+                    <span className="toggle-slider"></span>
+                    <span className="toggle-label">Épargne</span>
+                  </label>
+                  <select
+                    className="savings-type-select"
+                    value={method.savingsType || ''}
+                    onChange={(e) => handleChangeSavingsType(method.id, (e.target.value || null) as SavingsType | null)}
+                    disabled={isSubmitting || !method.isSavingsAccount}
+                  >
+                    <option value="">Type...</option>
+                    <option value="epargne">Épargne</option>
+                    <option value="prevoyance">Prévoyance</option>
+                    <option value="investissements">Investissements</option>
+                  </select>
                   <div className="payment-method-actions">
                     <button className="btn-icon edit" onClick={() => startEditPaymentMethod(method)} title="Modifier">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -996,10 +1086,23 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
         <div className="form-row">
           <input
             type="text"
-            placeholder="Ajouter un moyen de paiement..."
+            placeholder="Nom du moyen de paiement..."
             value={newPaymentMethod}
-            onChange={(e) => setNewPaymentMethod(e.target.value)}
+            onChange={(e) => {
+              setNewPaymentMethod(e.target.value);
+              setPaymentMethodError(null);
+            }}
             className="form-input"
+          />
+          <input
+            type="text"
+            placeholder="Institution (optionnel)"
+            value={newPaymentMethodInstitution}
+            onChange={(e) => {
+              setNewPaymentMethodInstitution(e.target.value);
+              setPaymentMethodError(null);
+            }}
+            className="form-input institution-input"
           />
           <button type="submit" className="btn-primary" disabled={!newPaymentMethod.trim() || isSubmitting}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1009,6 +1112,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
             Ajouter
           </button>
         </div>
+        {paymentMethodError && <div className="form-error">{paymentMethodError}</div>}
       </form>
     </div>
   );
@@ -1114,7 +1218,7 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
             <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
             <line x1="1" y1="10" x2="23" y2="10" />
           </svg>
-          Comptes
+          Comptes & Moyens de paiement
         </button>
         <button
           type="button"
@@ -1134,6 +1238,8 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
         {activeTab === 'accounts' && renderAccountsTab()}
         {activeTab === 'preferences' && renderPreferencesTab()}
       </div>
+
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }

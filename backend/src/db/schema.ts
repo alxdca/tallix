@@ -9,26 +9,83 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
 
-// Budget Years
-export const budgetYears = pgTable('budget_years', {
-  id: serial('id').primaryKey(),
-  year: integer('year').notNull().unique(),
-  initialBalance: decimal('initial_balance', { precision: 12, scale: 2 }).notNull().default('0'),
+// Users
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  name: varchar('name', { length: 255 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Budgets (the main container for multi-year accounting)
+export const budgets = pgTable('budgets', {
+  id: serial('id').primaryKey(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  name: varchar('name', { length: 100 }).notNull(),
+  description: varchar('description', { length: 500 }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Budget Shares (grant access to other users)
+// role: 'reader' (view only) | 'writer' (add transactions) | 'admin' (edit categories)
+// The budget owner (budgets.user_id) always has full access
+export const budgetShares = pgTable(
+  'budget_shares',
+  {
+    id: serial('id').primaryKey(),
+    budgetId: integer('budget_id')
+      .references(() => budgets.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    role: varchar('role', { length: 20 }).notNull(), // 'reader' | 'writer' | 'admin'
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Each user can only have one share per budget
+    budgetUserUnique: uniqueIndex('budget_shares_budget_user_unique').on(table.budgetId, table.userId),
+  })
+);
+
+// Budget Years (individual years within a budget)
+export const budgetYears = pgTable(
+  'budget_years',
+  {
+    id: serial('id').primaryKey(),
+    budgetId: integer('budget_id')
+      .references(() => budgets.id, { onDelete: 'cascade' })
+      .notNull(),
+    year: integer('year').notNull(),
+    initialBalance: decimal('initial_balance', { precision: 12, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Unique constraint on (budget_id, year) - each budget can have one entry per year
+    budgetYearUnique: uniqueIndex('budget_years_budget_year_unique').on(table.budgetId, table.year),
+  })
+);
+
 // Budget Groups (categories like REVENUS, MAISON, etc.)
-// type: 'income' | 'expense' | 'savings'
+// type: 'income' | 'expense'
+// Groups are per-budget and shared across all years within that budget
 export const budgetGroups = pgTable(
   'budget_groups',
   {
     id: serial('id').primaryKey(),
-    yearId: integer('year_id')
-      .references(() => budgetYears.id, { onDelete: 'cascade' })
+    budgetId: integer('budget_id')
+      .references(() => budgets.id, { onDelete: 'cascade' })
       .notNull(),
     name: varchar('name', { length: 100 }).notNull(),
     slug: varchar('slug', { length: 100 }).notNull(),
@@ -38,8 +95,8 @@ export const budgetGroups = pgTable(
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (table) => ({
-    // Unique constraint on (year_id, slug) to prevent duplicate slugs within a year
-    yearSlugUnique: uniqueIndex('budget_groups_year_slug_unique').on(table.yearId, table.slug),
+    // Unique constraint on (budget_id, slug) to prevent duplicate slugs within a budget
+    budgetSlugUnique: uniqueIndex('budget_groups_budget_slug_unique').on(table.budgetId, table.slug),
   })
 );
 
@@ -112,9 +169,19 @@ export const transactions = pgTable('transactions', {
 // Payment Methods
 export const paymentMethods = pgTable('payment_methods', {
   id: serial('id').primaryKey(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
   name: varchar('name', { length: 100 }).notNull(),
+  // Institution name (e.g., bank name, card issuer)
+  institution: varchar('institution', { length: 100 }),
   sortOrder: integer('sort_order').notNull().default(0),
+  // Is this payment method a trackable account (shows in Accounts view)
   isAccount: boolean('is_account').notNull().default(false),
+  // Is this a savings account (Livret A, PEL, etc.)
+  isSavingsAccount: boolean('is_savings_account').notNull().default(false),
+  // Savings type: 'epargne' | 'prevoyance' | 'investissements' | null
+  savingsType: varchar('savings_type', { length: 20 }),
   // Settlement day: day of month when billing cycle starts (1-31)
   // null means no threshold - use transaction date's month
   // e.g., settlementDay=18 means transactions from 18th of month N to 17th of month N+1 are billed in month N+1
@@ -127,7 +194,7 @@ export const paymentMethods = pgTable('payment_methods', {
 });
 
 // Account Balances (initial balance per account per year)
-// accountType: 'savings_item' (budget item in savings group) | 'payment_method'
+// Accounts are payment methods with isAccount=true
 export const accountBalances = pgTable(
   'account_balances',
   {
@@ -135,24 +202,24 @@ export const accountBalances = pgTable(
     yearId: integer('year_id')
       .references(() => budgetYears.id, { onDelete: 'cascade' })
       .notNull(),
-    accountType: varchar('account_type', { length: 20 }).notNull(), // 'savings_item' | 'payment_method'
-    accountId: integer('account_id').notNull(), // references budget_items or payment_methods
+    paymentMethodId: integer('payment_method_id')
+      .references(() => paymentMethods.id, { onDelete: 'cascade' })
+      .notNull(),
     initialBalance: decimal('initial_balance', { precision: 12, scale: 2 }).notNull().default('0'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (table) => ({
-    // Unique constraint on (year_id, account_type, account_id) to prevent duplicates and enable upsert
-    yearAccountUnique: uniqueIndex('account_balances_year_account_unique').on(
+    // Unique constraint on (year_id, payment_method_id) to prevent duplicates and enable upsert
+    yearAccountUnique: uniqueIndex('account_balances_year_payment_method_unique').on(
       table.yearId,
-      table.accountType,
-      table.accountId
+      table.paymentMethodId
     ),
   })
 );
 
 // Transfers (between accounts)
-// sourceAccountType/destinationAccountType: 'payment_method' or 'savings_item'
+// Accounts are payment methods with isAccount=true
 export const transfers = pgTable('transfers', {
   id: serial('id').primaryKey(),
   yearId: integer('year_id')
@@ -161,16 +228,14 @@ export const transfers = pgTable('transfers', {
   date: date('date').notNull(),
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
   description: varchar('description', { length: 500 }),
-  // Source account
-  sourceAccountType: varchar('source_account_type', { length: 20 }).notNull(), // 'payment_method' | 'savings_item'
-  sourceAccountId: integer('source_account_id').notNull(),
-  // Destination account
-  destinationAccountType: varchar('destination_account_type', { length: 20 }).notNull(), // 'payment_method' | 'savings_item'
-  destinationAccountId: integer('destination_account_id').notNull(),
-  // Optional: link to a savings item for budget tracking
-  // If destination is a savings item, this defaults to that item
-  // If source is a savings item (withdrawal), this links to that item
-  savingsItemId: integer('savings_item_id').references(() => budgetItems.id, { onDelete: 'set null' }),
+  // Source account (payment method with isAccount=true)
+  sourceAccountId: integer('source_account_id')
+    .references(() => paymentMethods.id, { onDelete: 'cascade' })
+    .notNull(),
+  // Destination account (payment method with isAccount=true)
+  destinationAccountId: integer('destination_account_id')
+    .references(() => paymentMethods.id, { onDelete: 'cascade' })
+    .notNull(),
   // Accounting period
   accountingMonth: integer('accounting_month').notNull(),
   accountingYear: integer('accounting_year').notNull(),
@@ -178,18 +243,59 @@ export const transfers = pgTable('transfers', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-// Settings
-export const settings = pgTable('settings', {
-  id: serial('id').primaryKey(),
-  key: varchar('key', { length: 100 }).notNull().unique(),
-  value: text('value'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+// Settings (per-user)
+export const settings = pgTable(
+  'settings',
+  {
+    id: serial('id').primaryKey(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    key: varchar('key', { length: 100 }).notNull(),
+    value: text('value'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Unique constraint on (user_id, key) - each user can have one value per setting key
+    userKeyUnique: uniqueIndex('settings_user_key_unique').on(table.userId, table.key),
+  })
+);
 
 // Relations
-export const budgetYearsRelations = relations(budgetYears, ({ many }) => ({
+export const usersRelations = relations(users, ({ many }) => ({
+  budgets: many(budgets),
+  budgetShares: many(budgetShares),
+  paymentMethods: many(paymentMethods),
+  settings: many(settings),
+}));
+
+export const budgetsRelations = relations(budgets, ({ one, many }) => ({
+  user: one(users, {
+    fields: [budgets.userId],
+    references: [users.id],
+  }),
+  shares: many(budgetShares),
+  years: many(budgetYears),
   groups: many(budgetGroups),
+}));
+
+export const budgetSharesRelations = relations(budgetShares, ({ one }) => ({
+  budget: one(budgets, {
+    fields: [budgetShares.budgetId],
+    references: [budgets.id],
+  }),
+  user: one(users, {
+    fields: [budgetShares.userId],
+    references: [users.id],
+  }),
+}));
+
+export const budgetYearsRelations = relations(budgetYears, ({ one, many }) => ({
+  budget: one(budgets, {
+    fields: [budgetYears.budgetId],
+    references: [budgets.id],
+  }),
   items: many(budgetItems),
   transactions: many(transactions),
   transfers: many(transfers),
@@ -201,12 +307,16 @@ export const accountBalancesRelations = relations(accountBalances, ({ one }) => 
     fields: [accountBalances.yearId],
     references: [budgetYears.id],
   }),
+  paymentMethod: one(paymentMethods, {
+    fields: [accountBalances.paymentMethodId],
+    references: [paymentMethods.id],
+  }),
 }));
 
 export const budgetGroupsRelations = relations(budgetGroups, ({ one, many }) => ({
-  year: one(budgetYears, {
-    fields: [budgetGroups.yearId],
-    references: [budgetYears.id],
+  budget: one(budgets, {
+    fields: [budgetGroups.budgetId],
+    references: [budgets.id],
   }),
   items: many(budgetItems),
 }));
@@ -247,8 +357,28 @@ export const transfersRelations = relations(transfers, ({ one }) => ({
     fields: [transfers.yearId],
     references: [budgetYears.id],
   }),
-  savingsItem: one(budgetItems, {
-    fields: [transfers.savingsItemId],
-    references: [budgetItems.id],
+  sourceAccount: one(paymentMethods, {
+    fields: [transfers.sourceAccountId],
+    references: [paymentMethods.id],
+    relationName: 'sourceAccount',
+  }),
+  destinationAccount: one(paymentMethods, {
+    fields: [transfers.destinationAccountId],
+    references: [paymentMethods.id],
+    relationName: 'destinationAccount',
+  }),
+}));
+
+export const paymentMethodsRelations = relations(paymentMethods, ({ one }) => ({
+  user: one(users, {
+    fields: [paymentMethods.userId],
+    references: [users.id],
+  }),
+}));
+
+export const settingsRelations = relations(settings, ({ one }) => ({
+  user: one(users, {
+    fields: [settings.userId],
+    references: [users.id],
   }),
 }));

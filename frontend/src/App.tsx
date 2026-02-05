@@ -5,9 +5,12 @@ import BudgetPlanning from './components/BudgetPlanning';
 import BudgetSpreadsheet from './components/BudgetSpreadsheet';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import Header from './components/Header';
+import Login from './components/Login';
 import Settings from './components/Settings';
 import Sidebar from './components/Sidebar';
 import Transactions from './components/Transactions';
+import UserSettings from './components/UserSettings';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import type { BudgetData, BudgetSummary } from './types';
 import { organizeBudgetData } from './utils';
@@ -27,9 +30,9 @@ function AppContent() {
     return budgetData ? organizeBudgetData(budgetData) : null;
   }, [budgetData]);
 
-  // Calculate total initial balance of payment method accounts (excluding savings)
+  // Calculate total initial balance of all accounts
   const paymentAccountsInitialBalance = useMemo(() => {
-    return accounts.filter((a) => a.type === 'payment_method').reduce((sum, a) => sum + a.initialBalance, 0);
+    return accounts.reduce((sum, a) => sum + a.initialBalance, 0);
   }, [accounts]);
 
   const loadData = useCallback(async () => {
@@ -168,6 +171,8 @@ function AppContent() {
             onDataChanged={refreshData}
           />
         );
+      case 'user-settings':
+        return <UserSettings />;
       default:
         return null;
     }
@@ -183,7 +188,6 @@ function AppContent() {
             initialBalance={summary?.initialBalance || 0}
             totalIncome={summary?.totalIncome || { budget: 0, actual: 0 }}
             totalExpenses={summary?.totalExpenses || { budget: 0, actual: 0 }}
-            totalSavings={summary?.totalSavings || { budget: 0, actual: 0 }}
             remainingBalance={summary?.remainingBalance || 0}
           />
         )}
@@ -193,12 +197,37 @@ function AppContent() {
   );
 }
 
+function AuthenticatedApp() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="login-container">
+        <div className="content-loading">
+          <div className="loading-spinner" />
+          <p>Chargement...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
+
+  return (
+    <SettingsProvider>
+      <AppContent />
+    </SettingsProvider>
+  );
+}
+
 function App() {
   return (
     <ErrorBoundary>
-      <SettingsProvider>
-        <AppContent />
-      </SettingsProvider>
+      <AuthProvider>
+        <AuthenticatedApp />
+      </AuthProvider>
     </ErrorBoundary>
   );
 }

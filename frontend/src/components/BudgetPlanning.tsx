@@ -21,7 +21,6 @@ function organizeSections(groups: BudgetGroup[]): Section[] {
   const sections: Section[] = [
     { type: 'income', name: 'Revenus', groups: [] },
     { type: 'expense', name: 'Dépenses', groups: [] },
-    { type: 'savings', name: 'Épargne', groups: [] },
   ];
 
   groups.forEach((group) => {
@@ -40,7 +39,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   const [editingYearlyBudget, setEditingYearlyBudget] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<Set<GroupType>>(new Set(['income', 'expense', 'savings']));
+  const [expandedSections, setExpandedSections] = useState<Set<GroupType>>(new Set(['income', 'expense']));
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set(groups.map((g) => g.id)));
   const [quickFillItemId, setQuickFillItemId] = useState<number | null>(null);
   const [quickFillValue, setQuickFillValue] = useState('');
@@ -192,8 +191,8 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
         return '#10b981';
       case 'expense':
         return '#ef4444';
-      case 'savings':
-        return '#3b82f6';
+      default:
+        return '#6b7280';
     }
   };
 
@@ -430,6 +429,8 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                                           onBlur={handleSave}
                                           onKeyDown={handleKeyDown}
                                           disabled={saving}
+                                          // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
+                                          autoFocus
                                         />
                                       ) : (
                                         <span
@@ -466,6 +467,8 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
                                               onBlur={handleSave}
                                               onKeyDown={handleKeyDown}
                                               disabled={saving}
+                                              // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
+                                              autoFocus
                                             />
                                           ) : (
                                             <span

@@ -113,11 +113,9 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     // Get section totals
     const incomeSection = sections.find((s) => s.type === 'income');
     const expenseSection = sections.find((s) => s.type === 'expense');
-    const savingsSection = sections.find((s) => s.type === 'savings');
 
     const incomeTotals = incomeSection ? calculateSectionTotals(incomeSection.groups) : null;
     const expenseTotals = expenseSection ? calculateSectionTotals(expenseSection.groups) : null;
-    const savingsTotals = savingsSection ? calculateSectionTotals(savingsSection.groups) : null;
 
     // Calculate remaining yearly budgets (variable spending) for each section
     // This is: yearlyBudget - actual spent so far (but not less than 0)
@@ -140,7 +138,6 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     };
     const incomeRemainingYearlyBudget = calculateRemainingYearlyBudget(incomeSection);
     const expenseRemainingYearlyBudget = calculateRemainingYearlyBudget(expenseSection);
-    const savingsRemainingYearlyBudget = calculateRemainingYearlyBudget(savingsSection);
 
     // Calculate expected totals for projection
     // If category has actual spending, use actual. Otherwise use budget.
@@ -167,13 +164,11 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
     let cumulativeActual = paymentAccountsInitialBalance;
 
     for (let i = 0; i < 12; i++) {
-      // Monthly cash flow = Income - Expenses - Savings
+      // Monthly cash flow = Income - Expenses
       const monthIncomeBudget = incomeTotals?.months[i]?.budget || 0;
       const monthIncomeActual = incomeTotals?.months[i]?.actual || 0;
       const monthExpenseBudget = expenseTotals?.months[i]?.budget || 0;
       const monthExpenseActual = expenseTotals?.months[i]?.actual || 0;
-      const monthSavingsBudget = savingsTotals?.months[i]?.budget || 0;
-      const monthSavingsActual = savingsTotals?.months[i]?.actual || 0;
 
       // For budget start of month:
       // - If previous month has actual data (i-1 <= maxActualMonth), use previous month's actual end balance
@@ -191,15 +186,15 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
       });
 
       // Calculate end of month
-      cumulativeActual += monthIncomeActual - monthExpenseActual - monthSavingsActual;
+      cumulativeActual += monthIncomeActual - monthExpenseActual;
 
       // Budget end = budget start + planned cash flow for this month
-      let budgetEndOfMonth = budgetStartOfMonth + monthIncomeBudget - monthExpenseBudget - monthSavingsBudget;
+      let budgetEndOfMonth = budgetStartOfMonth + monthIncomeBudget - monthExpenseBudget;
 
       // In December (last month), add remaining yearly budgets to the projection
       // This accounts for variable spending that hasn't happened yet
       if (i === 11) {
-        budgetEndOfMonth += incomeRemainingYearlyBudget - expenseRemainingYearlyBudget - savingsRemainingYearlyBudget;
+        budgetEndOfMonth += incomeRemainingYearlyBudget - expenseRemainingYearlyBudget;
       }
 
       endOfMonth.push({
@@ -212,10 +207,9 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
       // If we've overspent, use the actual amount
       const expectedIncome = calculateExpectedSectionTotal(incomeSection, i);
       const expectedExpense = calculateExpectedSectionTotal(expenseSection, i);
-      const expectedSavings = calculateExpectedSectionTotal(savingsSection, i);
 
-      // Expected = start of month actual + expected income - expected expenses - expected savings
-      const expected = startOfMonth[i].actual + expectedIncome - expectedExpense - expectedSavings;
+      // Expected = start of month actual + expected income - expected expenses
+      const expected = startOfMonth[i].actual + expectedIncome - expectedExpense;
       expectedEndOfMonth.push(expected);
     }
 
@@ -252,8 +246,6 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
         return '#10b981';
       case 'expense':
         return '#ef4444';
-      case 'savings':
-        return '#3b82f6';
       default:
         return '#64748b';
     }
@@ -351,8 +343,8 @@ export default function BudgetSpreadsheet({ sections, months, paymentAccountsIni
               const sectionTotals = calculateSectionTotals(section.groups);
               const isCollapsed = collapsedSections.has(section.type);
               const color = getSectionColor(section.type);
-              // For income and savings: more is good. For expenses: less is good.
-              const moreIsGood = section.type === 'income' || section.type === 'savings';
+              // For income: more is good. For expenses: less is good.
+              const moreIsGood = section.type === 'income';
 
               return (
                 <React.Fragment key={section.type}>

@@ -1,9 +1,11 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, settings } from '../db/index.js';
 
-// Get all settings as a key-value map
-export async function getAllSettings(): Promise<Record<string, string | null>> {
-  const allSettings = await db.query.settings.findMany();
+// Get all settings for a user as a key-value map
+export async function getAllSettings(userId: string): Promise<Record<string, string | null>> {
+  const allSettings = await db.query.settings.findMany({
+    where: eq(settings.userId, userId),
+  });
   return allSettings.reduce(
     (acc, s) => {
       acc[s.key] = s.value;
@@ -13,10 +15,10 @@ export async function getAllSettings(): Promise<Record<string, string | null>> {
   );
 }
 
-// Get a specific setting by key
-export async function getSetting(key: string): Promise<{ key: string; value: string | null } | null> {
+// Get a specific setting by key for a user
+export async function getSetting(userId: string, key: string): Promise<{ key: string; value: string | null } | null> {
   const setting = await db.query.settings.findFirst({
-    where: eq(settings.key, key),
+    where: and(eq(settings.userId, userId), eq(settings.key, key)),
   });
 
   if (!setting) return null;
@@ -24,18 +26,19 @@ export async function getSetting(key: string): Promise<{ key: string; value: str
   return { key: setting.key, value: setting.value };
 }
 
-// Update or create a setting
+// Update or create a setting for a user
 // Uses upsert pattern to avoid race conditions under concurrent requests
 export async function upsertSetting(
+  userId: string,
   key: string,
   value: string | null
 ): Promise<{ key: string; value: string | null; created: boolean }> {
-  // Try to insert, on conflict (unique key) update the existing row
+  // Try to insert, on conflict (unique userId + key) update the existing row
   const [result] = await db
     .insert(settings)
-    .values({ key, value })
+    .values({ userId, key, value })
     .onConflictDoUpdate({
-      target: settings.key,
+      target: [settings.userId, settings.key],
       set: { value, updatedAt: new Date() },
     })
     .returning();
@@ -49,7 +52,7 @@ export async function upsertSetting(
   return { key: result.key, value: result.value, created: wasCreated };
 }
 
-// Delete a setting
-export async function deleteSetting(key: string) {
-  await db.delete(settings).where(eq(settings.key, key));
+// Delete a setting for a user
+export async function deleteSetting(userId: string, key: string) {
+  await db.delete(settings).where(and(eq(settings.userId, userId), eq(settings.key, key)));
 }

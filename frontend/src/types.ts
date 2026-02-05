@@ -1,6 +1,6 @@
 // Budget Types (shared with backend)
 
-export type GroupType = 'income' | 'expense' | 'savings';
+export type GroupType = 'income' | 'expense';
 
 export interface MonthlyValue {
   budget: number;
@@ -24,7 +24,7 @@ export interface BudgetGroup {
   items: BudgetItem[];
 }
 
-// Layer 1: Fixed sections (Revenue / Spending / Savings)
+// Layer 1: Fixed sections (Revenue / Spending)
 export interface BudgetSection {
   type: GroupType;
   name: string;
@@ -38,7 +38,7 @@ export interface BudgetData {
   groups: BudgetGroup[];
 }
 
-// Organized budget data with 3 layers
+// Organized budget data with 2 layers
 export interface OrganizedBudgetData {
   year: number;
   initialBalance: number;
@@ -59,6 +59,5 @@ export interface BudgetSummary {
   initialBalance: number;
   totalIncome: AnnualTotals;
   totalExpenses: AnnualTotals;
-  totalSavings: AnnualTotals;
   remainingBalance: number;
 }

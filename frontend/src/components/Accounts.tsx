@@ -52,7 +52,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
   const formatCurrency = useFormatCurrency();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editingBalance, setEditingBalance] = useState<string | null>(null);
+  const [editingBalance, setEditingBalance] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<AccountsTab>('table');
@@ -94,7 +94,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
 
     setIsSubmitting(true);
     try {
-      await setAccountBalance(year, account.type, account.accountId, newBalance);
+      await setAccountBalance(year, account.id, newBalance);
       await loadAccounts();
       onDataChanged();
       cancelEdit();
@@ -105,8 +105,8 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
     }
   };
 
-  const savingsAccounts = accounts.filter((a) => a.type === 'savings_item');
-  const paymentAccounts = accounts.filter((a) => a.type === 'payment_method');
+  const savingsAccounts = accounts.filter((a) => a.isSavingsAccount);
+  const paymentAccounts = accounts.filter((a) => !a.isSavingsAccount);
 
   // Calculate totals
   const paymentTotals = useMemo(() => calculateTotals(paymentAccounts), [paymentAccounts]);
@@ -266,6 +266,8 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                               if (e.key === 'Escape') cancelEdit();
                             }}
                             className="balance-input"
+                            // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
+                            autoFocus
                           />
                           <button
                             className="btn-icon save"

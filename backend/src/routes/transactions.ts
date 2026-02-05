@@ -17,7 +17,7 @@ router.get(
 // GET /api/transactions - Get all transactions for current year
 router.get(
   '/',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const currentYear = new Date().getFullYear();
     const transactions = await transactionsSvc.getTransactionsForYear(currentYear);
     res.json(transactions);
@@ -41,6 +41,7 @@ router.get(
 router.post(
   '/',
   asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
     const {
       yearId,
       itemId,
@@ -58,7 +59,7 @@ router.post(
       throw new AppError(400, 'yearId, date, paymentMethod, and amount are required');
     }
 
-    const newTransaction = await transactionsSvc.createTransaction({
+    const newTransaction = await transactionsSvc.createTransaction(userId, {
       yearId,
       itemId,
       date,
@@ -79,6 +80,7 @@ router.post(
 router.put(
   '/:id',
   asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) {
       throw new AppError(400, 'Invalid transaction ID');
@@ -97,7 +99,7 @@ router.put(
       recalculateAccounting,
     } = req.body;
 
-    const updated = await transactionsSvc.updateTransaction(id, {
+    const updated = await transactionsSvc.updateTransaction(userId, id, {
       itemId,
       date,
       description,

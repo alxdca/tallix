@@ -1,3 +1,6 @@
+import { useEffect, useRef, useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+
 interface SidebarProps {
   activeView: string;
   onViewChange: (view: string) => void;
@@ -5,6 +8,26 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ activeView, onViewChange, currentYear }: SidebarProps) {
+  const { user, logout } = useAuth();
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+
+    if (showUserMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showUserMenu]);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -108,6 +131,62 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
       </nav>
 
       <div className="sidebar-footer">
+        {user && (
+          <div className="user-menu-container" ref={menuRef}>
+            <button
+              className="user-info"
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              type="button"
+            >
+              <span className="user-avatar">
+                {(user.name || user.email).charAt(0).toUpperCase()}
+              </span>
+              <span className="user-name">{user.name || user.email}</span>
+              <svg
+                className={`user-menu-chevron ${showUserMenu ? 'open' : ''}`}
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {showUserMenu && (
+              <div className="user-menu">
+                <button
+                  className="user-menu-item"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    onViewChange('user-settings');
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                  Mon compte
+                </button>
+                <button
+                  className="user-menu-item danger"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    logout();
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                  Se déconnecter
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <div className="version">v1.0.0</div>
       </div>
     </aside>

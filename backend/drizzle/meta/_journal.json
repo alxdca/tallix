@@ -36,6 +36,34 @@
       "when": 1738447200000,
       "tag": "0004_add_yearly_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1738533600000,
+      "tag": "0005_add_multi_user",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1738620000000,
+      "tag": "0006_add_institution",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1738706400000,
+      "tag": "0007_savings_as_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1738792800000,
+      "tag": "0008_add_savings_type",
+      "breakpoints": true
     }
   ]
 }

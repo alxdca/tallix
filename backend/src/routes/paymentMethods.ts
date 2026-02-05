@@ -1,14 +1,16 @@
 import { Router, type Router as RouterType } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import * as paymentMethods from '../services/paymentMethods.js';
+import { DuplicatePaymentMethodError } from '../services/paymentMethods.js';
 
 const router: RouterType = Router();
 
-// GET /api/payment-methods - Get all payment methods
+// GET /api/payment-methods - Get all payment methods for the current user
 router.get(
   '/',
-  asyncHandler(async (_req, res) => {
-    const methods = await paymentMethods.getAllPaymentMethods();
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const methods = await paymentMethods.getAllPaymentMethods(userId);
     res.json(methods);
   })
 );
@@ -17,12 +19,20 @@ router.get(
 router.post(
   '/',
   asyncHandler(async (req, res) => {
-    const { name, sortOrder = 0 } = req.body;
+    const userId = req.user!.id;
+    const { name, sortOrder = 0, institution } = req.body;
     if (!name) {
       throw new AppError(400, 'name is required');
     }
-    const newMethod = await paymentMethods.createPaymentMethod(name, sortOrder);
-    res.status(201).json(newMethod);
+    try {
+      const newMethod = await paymentMethods.createPaymentMethod(name, sortOrder, userId, institution);
+      res.status(201).json(newMethod);
+    } catch (error) {
+      if (error instanceof DuplicatePaymentMethodError) {
+        throw new AppError(409, error.message);
+      }
+      throw error;
+    }
   })
 );
 
@@ -43,25 +53,37 @@ router.put(
 router.put(
   '/:id',
   asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) {
       throw new AppError(400, 'Invalid payment method ID');
     }
 
-    const { name, sortOrder, isAccount, settlementDay, linkedPaymentMethodId } = req.body;
+    const { name, institution, sortOrder, isAccount, isSavingsAccount, savingsType, settlementDay, linkedPaymentMethodId } =
+      req.body;
 
-    const updated = await paymentMethods.updatePaymentMethod(id, {
-      name,
-      sortOrder,
-      isAccount,
-      settlementDay: settlementDay !== undefined ? settlementDay : undefined,
-      linkedPaymentMethodId: linkedPaymentMethodId !== undefined ? linkedPaymentMethodId : undefined,
-    });
+    try {
+      const updated = await paymentMethods.updatePaymentMethod(id, userId, {
+        name,
+        institution,
+        sortOrder,
+        isAccount,
+        isSavingsAccount,
+        savingsType: savingsType !== undefined ? savingsType : undefined,
+        settlementDay: settlementDay !== undefined ? settlementDay : undefined,
+        linkedPaymentMethodId: linkedPaymentMethodId !== undefined ? linkedPaymentMethodId : undefined,
+      });
 
-    if (!updated) {
-      throw new AppError(404, 'Payment method not found');
+      if (!updated) {
+        throw new AppError(404, 'Payment method not found');
+      }
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof DuplicatePaymentMethodError) {
+        throw new AppError(409, error.message);
+      }
+      throw error;
     }
-    res.json(updated);
   })
 );
 

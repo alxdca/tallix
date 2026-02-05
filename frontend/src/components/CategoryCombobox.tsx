@@ -69,7 +69,6 @@ export default function CategoryCombobox({
   // Group filtered items by type
   const incomeItems = filteredItems.filter((i) => i.groupType === 'income');
   const expenseItems = filteredItems.filter((i) => i.groupType === 'expense');
-  const savingsItems = filteredItems.filter((i) => i.groupType === 'savings');
 
   // Check if search matches exactly any existing item
   const exactMatch = allItems.some((item) => item.name.toLowerCase() === search.toLowerCase());
@@ -162,8 +161,8 @@ export default function CategoryCombobox({
         return 'Revenu';
       case 'expense':
         return 'Dépense';
-      case 'savings':
-        return 'Épargne';
+      default:
+        return '';
     }
   };
 
@@ -275,24 +274,6 @@ export default function CategoryCombobox({
                 <div className="combobox-group">
                   <div className="combobox-group-label">Dépenses</div>
                   {expenseItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className={`combobox-option ${item.id === value ? 'selected' : ''}`}
-                      onClick={() => handleSelectItem(item.id)}
-                    >
-                      <span className="option-group">{item.groupName}</span>
-                      <span className="option-arrow">→</span>
-                      <span className="option-name">{item.name}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Savings items */}
-              {savingsItems.length > 0 && (
-                <div className="combobox-group">
-                  <div className="combobox-group-label">Épargne</div>
-                  {savingsItems.map((item) => (
                     <div
                       key={item.id}
                       className={`combobox-option ${item.id === value ? 'selected' : ''}`}

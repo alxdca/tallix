@@ -6,7 +6,6 @@ interface HeaderProps {
   initialBalance: number;
   totalIncome: AnnualTotals;
   totalExpenses: AnnualTotals;
-  totalSavings: AnnualTotals;
   remainingBalance: number;
 }
 
@@ -15,7 +14,6 @@ export default function Header({
   initialBalance,
   totalIncome,
   totalExpenses,
-  totalSavings,
   remainingBalance,
 }: HeaderProps) {
   const formatCurrency = useFormatCurrency();
@@ -42,13 +40,6 @@ export default function Header({
           <span className="balance-amounts">
             <span className="balance-value">{formatCurrency(totalExpenses.actual, true)}</span>
             <span className="balance-budget">/ {formatCurrency(totalExpenses.budget, true)}</span>
-          </span>
-        </div>
-        <div className="balance-card savings">
-          <span className="balance-label">Épargne</span>
-          <span className="balance-amounts">
-            <span className="balance-value">{formatCurrency(totalSavings.actual, true)}</span>
-            <span className="balance-budget">/ {formatCurrency(totalSavings.budget, true)}</span>
           </span>
         </div>
         <div className={`balance-card total ${remainingBalance >= 0 ? 'positive' : 'negative'}`}>
