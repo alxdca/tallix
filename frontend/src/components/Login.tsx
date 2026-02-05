@@ -19,7 +19,8 @@ export default function Login() {
   useEffect(() => {
     const fetchSetupStatus = async () => {
       try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+        // Use relative URL in production (proxied by nginx) or VITE_API_URL in dev
+        const apiUrl = import.meta.env.VITE_API_URL || '';
         const response = await fetch(`${apiUrl}/api/auth/setup`);
         if (!response.ok) {
           setNeedsSetup(false);

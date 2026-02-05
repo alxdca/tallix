@@ -21,7 +21,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Use relative URL in production (proxied by nginx) or VITE_API_URL in dev
+const API_URL = import.meta.env.VITE_API_URL || '';
 const TOKEN_KEY = 'tallix_token';
 
 export function AuthProvider({ children }: { children: ReactNode }) {

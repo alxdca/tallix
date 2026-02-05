@@ -47,5 +47,6 @@ WORKDIR /app/backend
 
 EXPOSE 3001
 
-# Run migrations and start the server
-CMD ["sh", "-c", "pnpm db:migrate && node dist/index.js"]
+# Run migrations with superuser, then start server with app user
+# Assumes tallix_app user was created by postgres init-db.sh script
+CMD ["sh", "-c", "DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME pnpm db:migrate && node dist/index.js"]

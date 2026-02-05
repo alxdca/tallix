@@ -1,9 +1,9 @@
-import 'dotenv/config';
 import cors from 'cors';
 import { sql, eq } from 'drizzle-orm';
 import express from 'express';
 import bcrypt from 'bcrypt';
 import { rawDb as db } from './db/index.js';
+import { withUserContext } from './db/context.js';
 import { users, budgets } from './db/schema.js';
 import logger from './logger.js';
 import { requireAuth } from './middleware/auth.js';
@@ -54,10 +54,12 @@ async function seedDemoUser() {
       })
       .returning();
 
-    // Create default budget for demo user
-    await db.insert(budgets).values({
-      userId: demoUser.id,
-      description: 'Demo Budget',
+    // Create default budget for demo user (with user context for RLS)
+    await withUserContext(demoUser.id, async (tx) => {
+      await tx.insert(budgets).values({
+        userId: demoUser.id,
+        description: 'Demo Budget',
+      });
     });
 
     logger.info({ email: DEMO_EMAIL }, '✨ Demo user created successfully');

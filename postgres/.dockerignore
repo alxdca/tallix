@@ -1,0 +1,3 @@
+# Ignore everything except the init script
+*
+!init-db.sh

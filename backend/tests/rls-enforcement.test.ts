@@ -12,8 +12,8 @@
  * Requires: running PostgreSQL with migrations applied
  */
 
-// CRITICAL: Load .env BEFORE importing db (otherwise falls back to hardcoded superuser)
-import 'dotenv/config';
+// CRITICAL: Environment variables must be loaded via dotenv-cli before running this test
+// Run with: pnpm test:rls (which uses dotenv-cli)
 
 import { sql, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -35,8 +35,9 @@ const {
 
 // Create a separate connection with superuser for fixture setup
 // This bypasses RLS and avoids infinite recursion with FK constraints
-const superuserUrl = process.env.DATABASE_URL?.replace(/tallix_app:tallix_app_secret/, 'tallix:tallix_secret') || 
-                     'postgresql://tallix:tallix_secret@localhost:5432/tallix';
+const superuserUrl = process.env.DATABASE_URL
+  ? process.env.DATABASE_URL.replace(/tallix_app:tallix_app_secret/, 'tallix:tallix_secret')
+  : `postgresql://${process.env.POSTGRES_USER || 'tallix'}:${process.env.POSTGRES_PASSWORD || 'tallix_secret'}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME || 'tallix'}`;
 const superuserClient = postgres(superuserUrl);
 const superuserDb = drizzle(superuserClient, { schema });
 

@@ -1,12 +1,14 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ghcr.io/${GITHUB_REPOSITORY:-alxdca/tallix}/postgres:${IMAGE_TAG:-latest}
     container_name: tallix-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tallix}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-tallix}
+      APP_DB_USER: ${APP_DB_USER:-tallix_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,10 +24,28 @@ services:
     container_name: tallix-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-tallix}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tallix}
+      # Database connection details
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-tallix}
+      # Database users
+      POSTGRES_USER: ${POSTGRES_USER:-tallix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      APP_DB_USER: ${APP_DB_USER:-tallix_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}
+      # Runtime database URL (app user)
+      DATABASE_URL: postgres://${APP_DB_USER:-tallix_app}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-tallix}
+      # Application config
       NODE_ENV: production
       PORT: 3001
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+      # Features
+      MODE: ${MODE:-}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ALLOW_UNSAFE_DB_ROLE: ${ALLOW_UNSAFE_DB_ROLE:-false}
+      # Optional: LLM features
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_API_URL: ${DEEPSEEK_API_URL:-https://api.deepseek.com/v1}
     depends_on:
       postgres:
         condition: service_healthy

@@ -2,7 +2,9 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema.js';
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://tallix:tallix_secret@localhost:5432/tallix';
+// Construct DATABASE_URL from components if not provided
+const connectionString = process.env.DATABASE_URL || 
+  `postgresql://${process.env.APP_DB_USER || 'tallix_app'}:${process.env.APP_DB_PASSWORD || 'tallix_app_secret'}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME || 'tallix'}`;
 
 // Create postgres client
 const client = postgres(connectionString);

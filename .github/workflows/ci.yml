@@ -10,6 +10,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
   IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
+  IMAGE_NAME_POSTGRES: ${{ github.repository }}/postgres
 
 jobs:
   lint:
@@ -73,7 +74,26 @@ jobs:
       - name: Apply database migrations
         run: cd backend && pnpm db:migrate
         env:
+          # Connection components (for drizzle.config.ts)
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: tallix
+          POSTGRES_USER: tallix
+          POSTGRES_PASSWORD: tallix_secret
+          # Direct URL (fallback)
           DATABASE_URL: postgresql://tallix:tallix_secret@localhost:5432/tallix
+
+      - name: Create application user
+        run: |
+          PGPASSWORD=tallix_secret psql -h localhost -U tallix -d tallix -c "
+            CREATE USER tallix_app WITH PASSWORD 'tallix_app_secret' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+            GRANT CONNECT ON DATABASE tallix TO tallix_app;
+            GRANT USAGE ON SCHEMA public TO tallix_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tallix_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO tallix_app;
+            ALTER DEFAULT PRIVILEGES FOR ROLE tallix IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO tallix_app;
+            ALTER DEFAULT PRIVILEGES FOR ROLE tallix IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO tallix_app;
+          "
 
       - name: Check RLS service imports
         run: cd backend && pnpm check:rls
@@ -84,7 +104,17 @@ jobs:
       - name: Run RLS enforcement tests
         run: cd backend && pnpm test:rls
         env:
+          # Connection components
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: tallix
+          POSTGRES_USER: tallix
+          POSTGRES_PASSWORD: tallix_secret
+          APP_DB_USER: tallix_app
+          APP_DB_PASSWORD: tallix_app_secret
+          # Direct URL (for app runtime)
           DATABASE_URL: postgresql://tallix_app:tallix_app_secret@localhost:5432/tallix
+          # Security
           ALLOW_UNSAFE_DB_ROLE: false
 
   build:
@@ -155,6 +185,27 @@ jobs:
             type=ref,event=branch
             type=sha,prefix=
             type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Extract metadata for postgres
+        id: meta-postgres
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_POSTGRES }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push postgres image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./postgres
+          file: postgres/Dockerfile
+          push: true
+          tags: ${{ steps.meta-postgres.outputs.tags }}
+          labels: ${{ steps.meta-postgres.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v6

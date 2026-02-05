@@ -1,12 +1,17 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    image: ghcr.io/${GITHUB_REPOSITORY:-alxdca/tallix}/postgres:${IMAGE_TAG:-latest}
     container_name: tallix-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: tallix
       POSTGRES_PASSWORD: tallix_secret
       POSTGRES_DB: tallix
+      APP_DB_USER: tallix_app
+      APP_DB_PASSWORD: tallix_app_secret
     ports:
       - "5432:5432"
     volumes:
@@ -24,7 +29,18 @@ services:
     container_name: tallix-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://tallix:tallix_secret@postgres:5432/tallix
+      # Database connection details
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: tallix
+      # Database users
+      POSTGRES_USER: tallix
+      POSTGRES_PASSWORD: tallix_secret
+      APP_DB_USER: tallix_app
+      APP_DB_PASSWORD: tallix_app_secret
+      # Runtime database URL (app user)
+      DATABASE_URL: postgres://tallix_app:tallix_app_secret@postgres:5432/tallix
+      # Application config
       NODE_ENV: production
       PORT: 3001
       CORS_ORIGIN: http://localhost

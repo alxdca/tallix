@@ -4,17 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "dotenv -e ../.env -e .env -- tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio",
+    "db:generate": "dotenv -e ../.env -e .env -- drizzle-kit generate",
+    "db:migrate": "dotenv -e ../.env -e .env -- drizzle-kit migrate",
+    "db:push": "dotenv -e ../.env -e .env -- drizzle-kit push",
+    "db:studio": "dotenv -e ../.env -e .env -- drizzle-kit studio",
     "check:rls": "bash scripts/check-rls-imports.sh",
     "rls:guard": "bash scripts/guard-rawdb-usage.sh",
     "test": "bash scripts/run-tests.sh",
-    "test:rls": "tsx tests/rls-enforcement.test.ts"
+    "test:rls": "dotenv -e ../.env -e .env -- tsx tests/rls-enforcement.test.ts"
   },
   "dependencies": {
     "axios": "^1.13.4",
@@ -40,6 +40,7 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^20.11.0",
     "@types/pino": "^7.0.5",
+    "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.8",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
