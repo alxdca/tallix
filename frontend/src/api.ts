@@ -351,7 +351,6 @@ export interface PaymentMethod {
   name: string;
   institution: string | null;
   sortOrder: number;
-  isAccount: boolean;
   isSavingsAccount: boolean;
   savingsType: SavingsType | null;
   settlementDay: number | null;
@@ -383,7 +382,6 @@ export async function updatePaymentMethod(
     name?: string;
     institution?: string | null;
     sortOrder?: number;
-    isAccount?: boolean;
     isSavingsAccount?: boolean;
     savingsType?: SavingsType | null;
     settlementDay?: number | null;
@@ -534,7 +532,6 @@ export interface Account {
   name: string;
   institution: string | null;
   sortOrder: number;
-  isAccount: boolean;
   isSavingsAccount: boolean;
   initialBalance: number;
   monthlyBalances: number[]; // Expected balance at end of each month (1-12)

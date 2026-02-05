@@ -23,7 +23,6 @@ interface PaymentMethodRecord {
   name: string;
   institution: string | null;
   sortOrder: number;
-  isAccount: boolean;
   isSavingsAccount: boolean;
   savingsType: string | null;
   settlementDay: number | null;
@@ -37,7 +36,6 @@ function formatPaymentMethod(m: PaymentMethodRecord) {
     name: m.name,
     institution: m.institution,
     sortOrder: m.sortOrder,
-    isAccount: m.isAccount,
     isSavingsAccount: m.isSavingsAccount,
     savingsType: m.savingsType as SavingsType | null,
     settlementDay: m.settlementDay,
@@ -98,7 +96,6 @@ export async function createPaymentMethod(
       sortOrder,
       userId,
       institution: normalizedInstitution,
-      isAccount: true,
     })
     .returning();
 
@@ -114,7 +111,6 @@ export async function updatePaymentMethod(
     name?: string;
     institution?: string | null;
     sortOrder?: number;
-    isAccount?: boolean;
     isSavingsAccount?: boolean;
     savingsType?: SavingsType | null;
     settlementDay?: number | null;
@@ -146,7 +142,6 @@ export async function updatePaymentMethod(
     name: string;
     institution: string | null;
     sortOrder: number;
-    isAccount: boolean;
     isSavingsAccount: boolean;
     savingsType: string | null;
     settlementDay: number | null;
@@ -157,7 +152,6 @@ export async function updatePaymentMethod(
   if (data.name !== undefined) updateData.name = data.name;
   if (data.institution !== undefined) updateData.institution = data.institution?.trim() || null;
   if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
-  if (data.isAccount !== undefined) updateData.isAccount = data.isAccount;
   if (data.isSavingsAccount !== undefined) updateData.isSavingsAccount = data.isSavingsAccount;
   if (data.savingsType !== undefined) updateData.savingsType = data.savingsType;
   if (data.settlementDay !== undefined) updateData.settlementDay = data.settlementDay;

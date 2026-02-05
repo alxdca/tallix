@@ -163,8 +163,6 @@ export const transactions = pgTable('transactions', {
   paymentMethodId: integer('payment_method_id')
     .references(() => paymentMethods.id, { onDelete: 'restrict' })
     .notNull(),
-  // Legacy payment method string (deprecated, kept for backwards compatibility)
-  paymentMethod: varchar('payment_method', { length: 100 }),
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
   // Accounting month/year: when the transaction is accounted for (based on payment method's settlement day)
   // Can be manually overridden by user
@@ -184,8 +182,6 @@ export const paymentMethods = pgTable('payment_methods', {
   // Institution name (e.g., bank name, card issuer)
   institution: varchar('institution', { length: 100 }),
   sortOrder: integer('sort_order').notNull().default(0),
-  // Is this payment method a trackable account (shows in Accounts view)
-  isAccount: boolean('is_account').notNull().default(false),
   // Is this a savings account (e.g., money market, term deposit)
   isSavingsAccount: boolean('is_savings_account').notNull().default(false),
   // Savings type stored in the database
@@ -202,7 +198,7 @@ export const paymentMethods = pgTable('payment_methods', {
 });
 
 // Account Balances (initial balance per account per year)
-// Accounts are payment methods with isAccount=true
+// Accounts are payment methods (excluding linked methods)
 export const accountBalances = pgTable(
   'account_balances',
   {
@@ -227,7 +223,7 @@ export const accountBalances = pgTable(
 );
 
 // Transfers (between accounts)
-// Accounts are payment methods with isAccount=true
+// Accounts are payment methods (excluding linked methods)
 export const transfers = pgTable('transfers', {
   id: serial('id').primaryKey(),
   yearId: integer('year_id')
@@ -236,11 +232,11 @@ export const transfers = pgTable('transfers', {
   date: date('date').notNull(),
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
   description: varchar('description', { length: 500 }),
-  // Source account (payment method with isAccount=true)
+  // Source account (payment method)
   sourceAccountId: integer('source_account_id')
     .references(() => paymentMethods.id, { onDelete: 'cascade' })
     .notNull(),
-  // Destination account (payment method with isAccount=true)
+  // Destination account (payment method)
   destinationAccountId: integer('destination_account_id')
     .references(() => paymentMethods.id, { onDelete: 'cascade' })
     .notNull(),

@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import {
   accountBalances,
   budgetGroups,
@@ -513,9 +513,9 @@ export async function getBudgetSummary(tx: DbClient, year: number, budgetId: num
     .from(paymentMethods)
     .where(
       and(
-        eq(paymentMethods.isAccount, true),
         eq(paymentMethods.isSavingsAccount, false),
-        eq(paymentMethods.userId, userId)
+        eq(paymentMethods.userId, userId),
+        isNull(paymentMethods.linkedPaymentMethodId)
       )
     );
 

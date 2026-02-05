@@ -209,7 +209,6 @@ export async function createTransaction(
       comment: data.comment || null,
       thirdParty: data.thirdParty || null,
       paymentMethodId: data.paymentMethodId,
-      paymentMethod: null, // Legacy field, no longer used
       amount: data.amount.toString(),
       accountingMonth,
       accountingYear,
@@ -521,7 +520,6 @@ export async function bulkCreateTransactions(
           comment: t.comment || null,
           thirdParty: t.thirdParty || null,
           paymentMethodId: t.paymentMethodId,
-          paymentMethod: null, // Legacy field
           amount: t.amount.toString(),
           accountingMonth,
           accountingYear,

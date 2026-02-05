@@ -71,14 +71,14 @@ router.put(
     }
 
     const {
-      name, institution, sortOrder, isAccount, isSavingsAccount,
+      name, institution, sortOrder, isSavingsAccount,
       savingsType, settlementDay, linkedPaymentMethodId,
     } = req.body;
 
     try {
       const updated = await withUserContext(userId, (tx) =>
         paymentMethods.updatePaymentMethod(tx, id, userId, {
-          name, institution, sortOrder, isAccount, isSavingsAccount,
+          name, institution, sortOrder, isSavingsAccount,
           savingsType: savingsType !== undefined ? savingsType : undefined,
           settlementDay: settlementDay !== undefined ? settlementDay : undefined,
           linkedPaymentMethodId: linkedPaymentMethodId !== undefined ? linkedPaymentMethodId : undefined,

@@ -19,7 +19,6 @@ export interface Account {
   name: string;
   institution: string | null;
   sortOrder: number;
-  isAccount: boolean;
   isSavingsAccount: boolean;
   initialBalance: number;
   monthlyBalances: number[]; // Expected balance at end of each month (1-12)
@@ -229,7 +228,6 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
       name: displayName,
       institution: pm.institution,
       sortOrder: pm.sortOrder,
-      isAccount: pm.isAccount,
       isSavingsAccount: pm.isSavingsAccount,
       initialBalance: initialBalance.toNumber(),
       monthlyBalances,
@@ -313,13 +311,10 @@ export async function setPaymentMethodAsSavingsAccount(
   }
 
   // Update the flag
-  const updateData: { isSavingsAccount: boolean; isAccount?: boolean; updatedAt: Date; savingsType?: null } = {
+  const updateData: { isSavingsAccount: boolean; updatedAt: Date; savingsType?: null } = {
     isSavingsAccount,
     updatedAt: new Date(),
   };
-  if (isSavingsAccount) {
-    updateData.isAccount = true;
-  }
   if (!isSavingsAccount) {
     updateData.savingsType = null;
   }

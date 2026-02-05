@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { budgetYears, paymentMethods, transfers } from '../db/schema.js';
 import type { DbClient } from '../db/index.js';
 
@@ -289,7 +289,7 @@ export async function getAvailableAccounts(tx: DbClient, userId: string): Promis
   const paymentMethodAccounts = await tx
     .select()
     .from(paymentMethods)
-    .where(and(eq(paymentMethods.isAccount, true), eq(paymentMethods.userId, userId)))
+    .where(and(eq(paymentMethods.userId, userId), isNull(paymentMethods.linkedPaymentMethodId)))
     .orderBy(paymentMethods.sortOrder);
 
   return paymentMethodAccounts.map((pm) => ({

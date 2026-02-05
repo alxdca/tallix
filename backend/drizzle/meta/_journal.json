@@ -134,6 +134,13 @@
       "when": 1738646400000,
       "tag": "0019_use_payment_method_id",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1770157232000,
+      "tag": "0020_remove_legacy_fields",
+      "breakpoints": true
     }
   ]
 }
