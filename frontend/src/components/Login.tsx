@@ -8,6 +8,7 @@ export default function Login() {
   const { t } = useI18n();
   const [isRegister, setIsRegister] = useState(false);
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -24,8 +25,16 @@ export default function Login() {
           setNeedsSetup(false);
           return;
         }
-        const data = (await response.json()) as { needsSetup: boolean };
+        const data = (await response.json()) as { needsSetup: boolean; demoMode: boolean };
         setNeedsSetup(data.needsSetup);
+        setDemoMode(data.demoMode);
+        
+        // Prefill credentials in demo mode
+        if (data.demoMode) {
+          setEmail('demo@tallix.org');
+          setPassword('demo');
+        }
+        
         if (data.needsSetup) {
           setIsRegister(true);
         }
@@ -95,6 +104,7 @@ export default function Login() {
               placeholder={t('login.emailPlaceholder')}
               required
               autoComplete="email"
+              readOnly={demoMode && !isRegister}
             />
           </div>
 
@@ -109,6 +119,7 @@ export default function Login() {
               required
               minLength={isRegister ? 8 : undefined}
               autoComplete={isRegister ? 'new-password' : 'current-password'}
+              readOnly={demoMode && !isRegister}
             />
           </div>
 
@@ -133,9 +144,21 @@ export default function Login() {
           <button type="submit" className="login-button" disabled={isLoading}>
             {isLoading ? t('login.loading') : isRegister ? t('login.signUp') : t('login.signInAction')}
           </button>
+
+          {demoMode && !isRegister && (
+            <div className="demo-info">
+              <p className="demo-info-title">Demo Mode</p>
+              <p className="demo-info-text">
+                Username: <strong>demo@tallix.org</strong>
+              </p>
+              <p className="demo-info-text">
+                Password: <strong>demo</strong>
+              </p>
+            </div>
+          )}
         </form>
 
-        {needsSetup ? null : (
+        {needsSetup || demoMode ? null : (
           <div className="login-footer">
             <button
               type="button"

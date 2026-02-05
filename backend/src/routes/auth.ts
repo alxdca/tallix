@@ -1,5 +1,13 @@
 import { Router, type Router as RouterType } from 'express';
-import { login, register, verifyToken, getUserById, changePassword, updateUser, getSetupStatus } from '../services/auth';
+import {
+  login,
+  register,
+  verifyToken,
+  getUserById,
+  changePassword,
+  updateUser,
+  getSetupStatus,
+} from '../services/auth.js';
 import logger from '../logger.js';
 import { VALID_LANGUAGE_CODES } from '../constants/languages.js';
 

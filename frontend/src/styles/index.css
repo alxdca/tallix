@@ -4574,6 +4574,10 @@ td.zero {
   text-overflow: ellipsis;
 }
 
+.accounts-table .account-name .institution-badge {
+  margin-left: 8px;
+}
+
 .account-initial-col,
 .accounts-table .account-initial {
   width: 100px;
@@ -6413,6 +6417,32 @@ td.zero {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.25);
   border-radius: 10px;
+}
+
+.demo-info {
+  padding: 16px 18px;
+  margin-top: 20px;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 10px;
+}
+
+.demo-info-title {
+  margin: 0 0 8px 0;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.demo-info-text {
+  margin: 4px 0;
+  font-family: var(--font-mono);
+}
+
+.demo-info-text strong {
+  color: var(--accent-primary);
+  font-weight: 600;
 }
 
 .login-button {

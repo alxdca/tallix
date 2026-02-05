@@ -130,8 +130,9 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
 
     const datasets = accounts.map((account, index) => {
       const color = chartColors[index % chartColors.length];
+      const label = account.institution ? `${account.name} (${account.institution})` : account.name;
       return {
-        label: account.name,
+        label,
         data: [account.initialBalance, ...account.monthlyBalances],
         borderColor: color.border,
         backgroundColor: color.background,
@@ -254,7 +255,10 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                 const movements = calculateMonthlyMovements(account.initialBalance, account.monthlyBalances);
                 return (
                   <tr key={account.id}>
-                    <td className="account-name">{account.name}</td>
+                    <td className="account-name">
+                      {account.name}
+                      {account.institution && <span className="institution-badge">{account.institution}</span>}
+                    </td>
                     <td className="account-initial">
                       {editingBalance === account.id ? (
                         <div className="inline-edit">
@@ -507,12 +511,8 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
           <h3>{t('accounts.noAccountsTitle')}</h3>
           <p>{t('accounts.noAccountsSubtitle')}</p>
           <ul>
-            <li>
-              {t('accounts.noAccountsBulletSavings')}
-            </li>
-            <li>
-              {t('accounts.noAccountsBulletMethods')}
-            </li>
+            <li>{t('accounts.noAccountsBulletSavings')}</li>
+            <li>{t('accounts.noAccountsBulletMethods')}</li>
           </ul>
         </div>
       ) : (

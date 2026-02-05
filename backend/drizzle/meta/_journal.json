@@ -127,6 +127,13 @@
       "when": 1739570400000,
       "tag": "0017_restrict_shared_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1738532400000,
+      "tag": "0018_fix_rls_circular_dependency",
+      "breakpoints": true
     }
   ]
 }

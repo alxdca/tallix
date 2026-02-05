@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import cors from 'cors';
-import { sql } from 'drizzle-orm';
+import { sql, eq } from 'drizzle-orm';
 import express from 'express';
+import bcrypt from 'bcrypt';
 import { rawDb as db } from './db/index.js';
+import { users, budgets } from './db/schema.js';
 import logger from './logger.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireBudget } from './middleware/budget.js';
@@ -15,6 +17,56 @@ import paymentMethodsRoutes from './routes/paymentMethods.js';
 import settingsRoutes from './routes/settings.js';
 import transactionsRoutes from './routes/transactions.js';
 import transfersRoutes from './routes/transfers.js';
+
+/**
+ * Seed demo user when MODE=demo
+ * Creates a demo user with known credentials for testing/demo purposes
+ * Only runs when MODE environment variable is set to 'demo'
+ */
+async function seedDemoUser() {
+  if (process.env.MODE !== 'demo') {
+    return;
+  }
+
+  try {
+    const DEMO_EMAIL = 'demo@tallix.org';
+    const DEMO_PASSWORD = 'demo';
+
+    // Check if demo user already exists
+    const existingUser = await db.query.users.findFirst({
+      where: eq(users.email, DEMO_EMAIL),
+    });
+
+    if (existingUser) {
+      logger.info('Demo user already exists');
+      return;
+    }
+
+    // Create demo user with hashed password
+    const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+    const [demoUser] = await db
+      .insert(users)
+      .values({
+        email: DEMO_EMAIL,
+        passwordHash,
+        name: 'Demo User',
+        language: 'en',
+      })
+      .returning();
+
+    // Create default budget for demo user
+    await db.insert(budgets).values({
+      userId: demoUser.id,
+      description: 'Demo Budget',
+    });
+
+    logger.info({ email: DEMO_EMAIL }, '✨ Demo user created successfully');
+    logger.info('Demo credentials: demo@tallix.org / demo');
+  } catch (err) {
+    logger.error({ err }, 'Failed to seed demo user');
+    // Don't fail startup, just log the error
+  }
+}
 
 /**
  * Check that the DB role cannot bypass RLS.
@@ -110,6 +162,7 @@ app.use(errorHandler);
 // Start server after verifying database role safety
 async function startServer() {
   await checkDbRole();
+  await seedDemoUser();
   
   app.listen(PORT, () => {
     logger.info({ port: PORT }, '🚀 Backend server running');

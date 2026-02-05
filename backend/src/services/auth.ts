@@ -1,9 +1,9 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
-import { rawDb as db } from '../db';
+import { rawDb as db } from '../db/index.js';
 import { withUserContext } from '../db/context.js';
-import { budgets, users } from '../db/schema';
+import { budgets, users } from '../db/schema.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const JWT_EXPIRES_IN = '7d';
@@ -23,10 +23,10 @@ export interface LoginResult {
   token: string;
 }
 
-export async function getSetupStatus(): Promise<{ needsSetup: boolean }> {
+export async function getSetupStatus(): Promise<{ needsSetup: boolean; demoMode: boolean }> {
   const existingUsers = await db.select({ id: users.id, email: users.email }).from(users);
   if (existingUsers.length === 0) {
-    return { needsSetup: true };
+    return { needsSetup: true, demoMode: process.env.MODE === 'demo' };
   }
 
   const onlyDefaultUser =
@@ -34,7 +34,7 @@ export async function getSetupStatus(): Promise<{ needsSetup: boolean }> {
     existingUsers[0].id === DEFAULT_USER_ID &&
     existingUsers[0].email === DEFAULT_USER_EMAIL;
 
-  return { needsSetup: onlyDefaultUser };
+  return { needsSetup: onlyDefaultUser, demoMode: process.env.MODE === 'demo' };
 }
 
 async function ensureDefaultBudget(userId: string): Promise<void> {
@@ -118,6 +118,7 @@ export async function register(email: string, password: string, name?: string): 
           email: normalizedEmail,
           passwordHash,
           name: name || null,
+          language: 'en',
           updatedAt: new Date(),
         })
         .where(eq(users.id, DEFAULT_USER_ID))
@@ -132,6 +133,7 @@ export async function register(email: string, password: string, name?: string): 
         email: normalizedEmail,
         passwordHash,
         name: name || null,
+        language: 'en',
       })
       .returning();
     newUser = createdUser;
