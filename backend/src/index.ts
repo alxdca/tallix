@@ -13,6 +13,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import accountsRoutes from './routes/accounts.js';
 import assetsRoutes from './routes/assets.js';
 import authRoutes from './routes/auth.js';
+import backupRoutes from './routes/backup.js';
 import budgetRoutes from './routes/budget.js';
 import copilotRoutes from './routes/copilot.js';
 import importRoutes from './routes/import.js';
@@ -142,7 +143,7 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Public routes (no auth required)
 app.use('/api/auth', authRoutes);
@@ -156,6 +157,7 @@ app.use('/api/payment-methods', requireAuth, paymentMethodsRoutes);
 app.use('/api/import', requireAuth, requireBudget, importRoutes);
 app.use('/api/accounts', requireAuth, requireBudget, accountsRoutes);
 app.use('/api/assets', requireAuth, requireBudget, assetsRoutes);
+app.use('/api/backup', requireAuth, requireBudget, backupRoutes);
 app.use('/api/transfers', requireAuth, requireBudget, transfersRoutes);
 
 // Health check

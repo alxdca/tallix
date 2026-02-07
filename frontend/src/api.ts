@@ -857,3 +857,32 @@ export async function askCopilot(
   await ensureOk(response, 'Failed to ask copilot');
   return response.json();
 }
+
+// Backup
+export interface BackupImportSummary {
+  paymentMethods: number;
+  budgetYears: number;
+  budgetGroups: number;
+  budgetItems: number;
+  monthlyValues: number;
+  transactions: number;
+  assets: number;
+  assetValues: number;
+  transfers: number;
+  accountBalances: number;
+}
+
+export async function exportBackup(): Promise<any> {
+  const response = await authFetch(`${API_BASE}/backup/export`);
+  await ensureOk(response, 'Failed to export backup');
+  return response.json();
+}
+
+export async function importBackup(payload: any): Promise<BackupImportSummary> {
+  const response = await authFetch(`${API_BASE}/backup/import`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response, 'Failed to import backup');
+  return response.json();
+}

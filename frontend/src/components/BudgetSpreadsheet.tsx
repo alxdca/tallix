@@ -159,8 +159,8 @@ export default function BudgetSpreadsheet({
             if (yearlyBudget === 0) return itemTotal;
             // Sum up actual spending for this item across all months
             const actualSpent = item.months.reduce((sum, m) => sum + m.actual, 0);
-            // Remaining budget = yearly budget - actual spent (can be negative if overspent)
-            const remaining = yearlyBudget - actualSpent;
+            // Remaining budget = yearly budget - actual spent (clamped to 0 when overspent)
+            const remaining = Math.max(0, yearlyBudget - actualSpent);
             return itemTotal + remaining;
           }, 0),
         0

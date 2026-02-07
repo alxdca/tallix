@@ -24,6 +24,9 @@ Demo: https://www.tallix.org
 - **Payment Method Management** - Add institutions, reorder methods, and manage account/savings flags
 - **Savings Accounts** - Mark payment methods as savings and categorize by type (e.g., epargne, prevoyance, investissements)
 - **User Preferences** - Theme toggle, decimal separator, and budget display options
+- **Data Backup & Restore** - Export and import full budget data as JSON from Settings
+  - Includes categories, payment methods, transactions, and planned spending
+  - Covers all available budget years
 - **Spreadsheet Import** - Paste data from Excel/Sheets with configurable column mapping
 - **PDF Import** - Import transactions from bank statement PDFs with optional category suggestions
 - **AI-Powered Import (optional)** - DeepSeek LLM integration for intelligent transaction processing:

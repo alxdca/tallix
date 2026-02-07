@@ -1,5 +1,5 @@
 import type React from 'react';
-import { type DragEvent, useCallback, useEffect, useState } from 'react';
+import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react';
 import {
   createGroup,
   createItem,
@@ -7,8 +7,10 @@ import {
   deleteGroup,
   deleteItem,
   deletePaymentMethod,
+  exportBackup,
   fetchPaymentMethods,
   fetchStartYear,
+  importBackup,
   moveItem,
   type PaymentMethod,
   reorderGroups,
@@ -44,7 +46,7 @@ function slugify(text: string): string {
     .replace(/(^-|-$)/g, '');
 }
 
-type SettingsTab = 'categories' | 'accounts' | 'preferences';
+type SettingsTab = 'categories' | 'accounts' | 'preferences' | 'backup';
 
 export default function Settings({ yearId, groups, onDataChanged }: SettingsProps) {
   const { t } = useI18n();
@@ -83,6 +85,13 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   const [startYearError, setStartYearError] = useState<string | null>(null);
   const [startYearSuccess, setStartYearSuccess] = useState<string | null>(null);
 
+  // Backup state
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [backupSuccess, setBackupSuccess] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Sort groups by sortOrder within their category
   const incomeGroups = [...groups.filter((g) => g.type === 'income')].sort((a, b) => a.sortOrder - b.sortOrder);
   const expenseGroups = [...groups.filter((g) => g.type === 'expense')].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -113,6 +122,85 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   useEffect(() => {
     loadStartYear();
   }, [loadStartYear]);
+
+  const handleExportBackup = async () => {
+    if (isExporting || isSubmitting) return;
+    setIsExporting(true);
+    setBackupError(null);
+    setBackupSuccess(null);
+    try {
+      const data = await exportBackup();
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `tallix-backup-${date}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBackupSuccess(t('settings.exportSuccess'));
+    } catch (error) {
+      logger.error('Failed to export backup', error);
+      setBackupError(getErrorMessage(error, t));
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || isImporting || isSubmitting) return;
+
+    // Reset file input so user can re-select the same file
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    // Read and parse file
+    let payload: unknown;
+    try {
+      const text = await file.text();
+      payload = JSON.parse(text);
+    } catch {
+      setBackupError(t('settings.importInvalidJson'));
+      return;
+    }
+
+    // Confirm before importing (destructive action)
+    const confirmed = await confirm({
+      title: t('settings.importConfirmTitle'),
+      message: t('settings.importConfirmMessage'),
+      confirmLabel: t('settings.importConfirmLabel'),
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+
+    setIsImporting(true);
+    setBackupError(null);
+    setBackupSuccess(null);
+    try {
+      const summary = await importBackup(payload);
+      const total =
+        summary.paymentMethods +
+        summary.budgetYears +
+        summary.budgetGroups +
+        summary.budgetItems +
+        summary.monthlyValues +
+        summary.transactions +
+        summary.assets +
+        summary.assetValues +
+        summary.transfers +
+        summary.accountBalances;
+      setBackupSuccess(t('settings.importSuccess', { count: total }));
+      onDataChanged();
+    } catch (error) {
+      logger.error('Failed to import backup', error);
+      setBackupError(getErrorMessage(error, t));
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   const handleUpdateStartYear = async () => {
     if (isSubmitting) return;
@@ -1290,6 +1378,59 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     </>
   );
 
+  const renderBackupTab = () => (
+    <div className="appearance-section">
+      <h3 className="section-title">
+        <span className="section-indicator appearance"></span>
+        {t('settings.dataBackup')}
+      </h3>
+      <div className="appearance-options">
+        <div className="setting-row">
+          <span className="setting-label">{t('settings.exportLabel')}</span>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ width: '180px', justifyContent: 'center' }}
+            onClick={handleExportBackup}
+            disabled={isExporting || isSubmitting}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            {isExporting ? t('common.loading') : t('settings.exportButton')}
+          </button>
+        </div>
+        <div className="setting-help-text">{t('settings.exportHelp')}</div>
+
+        <div className="setting-row">
+          <span className="setting-label">{t('settings.importLabel')}</span>
+          <label className={`btn-primary ${isImporting || isSubmitting ? 'disabled' : ''}`} style={{ width: '180px', justifyContent: 'center', cursor: isImporting || isSubmitting ? 'not-allowed' : 'pointer' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            {isImporting ? t('common.loading') : t('settings.importButton')}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleImportBackup}
+              style={{ display: 'none' }}
+              disabled={isImporting || isSubmitting}
+            />
+          </label>
+        </div>
+        <div className="setting-help-text">{t('settings.importHelp')}</div>
+
+        {backupError && <div className="form-error">{backupError}</div>}
+        {backupSuccess && <div className="form-success">{backupSuccess}</div>}
+      </div>
+    </div>
+  );
+
   return (
     <div className="settings-container">
       <div className="settings-header">
@@ -1330,12 +1471,25 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
           </svg>
           {t('settings.preferences')}
         </button>
+        <button
+          type="button"
+          className={`settings-tab ${activeTab === 'backup' ? 'active' : ''}`}
+          onClick={() => setActiveTab('backup')}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          {t('settings.dataBackup')}
+        </button>
       </div>
 
       <div className="settings-content">
         {activeTab === 'categories' && renderCategoriesTab()}
         {activeTab === 'accounts' && renderAccountsTab()}
         {activeTab === 'preferences' && renderPreferencesTab()}
+        {activeTab === 'backup' && renderBackupTab()}
       </div>
 
       <ConfirmDialog {...dialogProps} />
