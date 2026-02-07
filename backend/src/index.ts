@@ -2,6 +2,7 @@ import cors from 'cors';
 import { sql, eq } from 'drizzle-orm';
 import express from 'express';
 import bcrypt from 'bcrypt';
+import { validateJwtSecretAtStartup } from './config/security.js';
 import { rawDb as db } from './db/index.js';
 import { withUserContext } from './db/context.js';
 import { users, budgets } from './db/schema.js';
@@ -13,6 +14,7 @@ import accountsRoutes from './routes/accounts.js';
 import assetsRoutes from './routes/assets.js';
 import authRoutes from './routes/auth.js';
 import budgetRoutes from './routes/budget.js';
+import copilotRoutes from './routes/copilot.js';
 import importRoutes from './routes/import.js';
 import paymentMethodsRoutes from './routes/paymentMethods.js';
 import settingsRoutes from './routes/settings.js';
@@ -147,6 +149,7 @@ app.use('/api/auth', authRoutes);
 
 // Protected routes (auth required)
 app.use('/api/budget', requireAuth, requireBudget, budgetRoutes);
+app.use('/api/copilot', requireAuth, requireBudget, copilotRoutes);
 app.use('/api/settings', requireAuth, settingsRoutes);
 app.use('/api/transactions', requireAuth, requireBudget, transactionsRoutes);
 app.use('/api/payment-methods', requireAuth, paymentMethodsRoutes);
@@ -164,8 +167,9 @@ app.get('/api/health', (_req, res) => {
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-// Start server after verifying database role safety
+// Start server after security startup checks
 async function startServer() {
+  validateJwtSecretAtStartup();
   await checkDbRole();
   await seedDemoUser();
   

@@ -63,12 +63,13 @@ interface TransactionsProps {
   yearId: number;
   groups: BudgetGroup[];
   onTransactionsChanged?: () => void;
+  initialFilters?: Partial<TransactionsFilters>;
 }
 
 type SortField = 'date' | 'thirdParty' | 'description' | 'paymentMethod' | 'category' | 'amount';
 type SortDirection = 'asc' | 'desc';
 
-interface Filters {
+export interface TransactionsFilters {
   dateFrom: Date | null;
   dateTo: Date | null;
   thirdParty: string;
@@ -77,7 +78,9 @@ interface Filters {
   categoryFilter: string; // Combined: "section:income", "group:Salaires"
 }
 
-export default function Transactions({ year, yearId, groups, onTransactionsChanged }: TransactionsProps) {
+type Filters = TransactionsFilters;
+
+export default function Transactions({ year, yearId, groups, onTransactionsChanged, initialFilters }: TransactionsProps) {
   const formatCurrency = useFormatCurrency();
   const { dialogProps, confirm } = useConfirmDialog();
   const { t, monthNames } = useI18n();
@@ -102,6 +105,11 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     paymentMethods: [],
     categoryFilter: '',
   });
+
+  useEffect(() => {
+    if (!initialFilters) return;
+    setFilters((prev) => ({ ...prev, ...initialFilters }));
+  }, [initialFilters]);
 
   // Sort state
   const [sortField, setSortField] = useState<SortField>('date');
@@ -1768,9 +1776,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               <span className="transfer-dest">{transfer?.destinationAccount.name}</span>
                             </span>
                           ) : (
-                            <>
-                              {transaction?.thirdParty || <span className="empty-field">-</span>}
-                            </>
+                            transaction?.thirdParty || <span className="empty-field">-</span>
                           )}
                         </td>
                         <td className="description-cell">

@@ -8,6 +8,7 @@
     "build": "pnpm --filter backend build && pnpm --filter frontend build",
     "backend": "pnpm --filter backend dev",
     "frontend": "pnpm --filter frontend dev",
+    "mobile": "pnpm --filter mobile start",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",

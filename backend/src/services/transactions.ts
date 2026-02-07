@@ -3,6 +3,8 @@ import { budgetItems, budgetYears, paymentMethods, transactions } from '../db/sc
 import type { DbClient } from '../db/index.js';
 import { getOrCreateUnclassifiedItem } from './budget.js';
 
+export const PAYMENT_METHOD_OWNERSHIP_ERROR = 'Payment method not found or does not belong to you';
+
 // Types for database query results
 interface TransactionWithRelations {
   id: number;
@@ -183,6 +185,18 @@ async function getYearId(tx: DbClient, year: number, budgetId: number): Promise<
   return budgetYear?.id ?? null;
 }
 
+async function getOwnedPaymentMethodOrThrow(tx: DbClient, userId: string, paymentMethodId: number) {
+  const paymentMethod = await tx.query.paymentMethods.findFirst({
+    where: and(eq(paymentMethods.id, paymentMethodId), eq(paymentMethods.userId, userId)),
+  });
+
+  if (!paymentMethod) {
+    throw new Error(PAYMENT_METHOD_OWNERSHIP_ERROR);
+  }
+
+  return paymentMethod;
+}
+
 // Get all transactions for a year
 export async function getTransactionsForYear(tx: DbClient, year: number, budgetId: number) {
   const yearId = await getYearId(tx, year, budgetId);
@@ -244,17 +258,13 @@ export async function createTransaction(
     }
   }
 
+  const paymentMethod = await getOwnedPaymentMethodOrThrow(tx, userId, data.paymentMethodId);
+
   let accountingMonth = data.accountingMonth;
   let accountingYear = data.accountingYear;
 
   if (accountingMonth === undefined || accountingYear === undefined) {
-    const pm = await tx.query.paymentMethods.findFirst({
-      where: and(eq(paymentMethods.id, data.paymentMethodId), eq(paymentMethods.userId, userId)),
-    });
-    if (!pm) {
-      throw new Error('Payment method not found or does not belong to you');
-    }
-    const settlementDay = pm.settlementDay ?? null;
+    const settlementDay = paymentMethod.settlementDay ?? null;
     const accounting = calculateAccountingPeriod(data.date, settlementDay);
     accountingMonth = accountingMonth ?? accounting.accountingMonth;
     accountingYear = accountingYear ?? accounting.accountingYear;
@@ -341,6 +351,9 @@ export async function updateTransaction(
     }
   }
 
+  const requestedPaymentMethod =
+    data.paymentMethodId !== undefined ? await getOwnedPaymentMethodOrThrow(tx, userId, data.paymentMethodId) : null;
+
   const updateData: Partial<{
     itemId: number | null;
     date: string;
@@ -378,11 +391,9 @@ export async function updateTransaction(
     });
     if (current) {
       const date = data.date ?? current.date;
-      const paymentMethodId = data.paymentMethodId ?? current.paymentMethodId;
-      const pm = await tx.query.paymentMethods.findFirst({
-        where: and(eq(paymentMethods.id, paymentMethodId), eq(paymentMethods.userId, userId)),
-      });
-      const settlementDay = pm?.settlementDay ?? null;
+      const paymentMethod =
+        requestedPaymentMethod ?? (await getOwnedPaymentMethodOrThrow(tx, userId, current.paymentMethodId));
+      const settlementDay = paymentMethod.settlementDay ?? null;
       const accounting = calculateAccountingPeriod(date, settlementDay);
       updateData.accountingMonth = accounting.accountingMonth;
       updateData.accountingYear = accounting.accountingYear;

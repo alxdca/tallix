@@ -34,8 +34,15 @@ Then create `backend/.env` with at least:
 ```env
 NODE_ENV=development
 DATABASE_URL=postgresql://user:password@localhost:5432/tallix
-JWT_SECRET=dev-secret-change-in-production
+# Local dev only; production/staging must use a random 32+ char secret
+JWT_SECRET=local-dev-jwt-secret
 CORS_ORIGIN=http://localhost:5173
+```
+
+Generate a production secret with:
+
+```bash
+openssl rand -base64 48
 ```
 
 Optional:

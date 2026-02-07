@@ -155,6 +155,7 @@ export async function fetchAvailableYears(): Promise<{ years: number[] }> {
   return response.json();
 }
 
+// Copilot
 // Groups
 export async function createGroup(data: {
   yearId: number;
@@ -819,4 +820,40 @@ export async function classifyTransactionsWithLLM(
   await ensureOk(response, 'Failed to classify transactions');
   const data = await response.json();
   return data.classifications;
+}
+
+// Copilot / Ask Tallix
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface CopilotAnswer {
+  summary: string;
+  why: Array<{
+    reason: string;
+    metric?: string;
+    value?: number;
+  }>;
+  drilldownFilters?: {
+    categoryName?: string;
+    groupName?: string;
+    startDate?: string;
+    endDate?: string;
+  };
+  confidence: 'high' | 'medium' | 'low';
+  isFallback: boolean;
+  latencyMs: number;
+}
+
+export async function askCopilot(
+  question: string,
+  conversationHistory?: ConversationMessage[]
+): Promise<CopilotAnswer> {
+  const response = await authFetch(`${API_BASE}/copilot/ask`, {
+    method: 'POST',
+    body: JSON.stringify({ question, conversationHistory }),
+  });
+  await ensureOk(response, 'Failed to ask copilot');
+  return response.json();
 }

@@ -176,6 +176,13 @@
       "when": 1770365200000,
       "tag": "0025_add_asset_debt_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1770371200000,
+      "tag": "0026_enforce_transactions_payment_method_ownership",
+      "breakpoints": true
     }
   ]
 }

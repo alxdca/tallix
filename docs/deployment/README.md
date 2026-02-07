@@ -16,7 +16,7 @@ pnpm -C frontend build
 Provide required env vars:
 
 - `DATABASE_URL` (or DB host/user/password vars in `.env`)
-- `JWT_SECRET`
+- `JWT_SECRET` (random secret, minimum 32 characters in production/staging)
 - `CORS_ORIGIN`
 - `MODE=demo` (optional)
 - `DEEPSEEK_API_KEY` (optional)

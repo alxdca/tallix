@@ -1,11 +1,11 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
+import { getJwtSecret } from '../config/security.js';
 import { rawDb as db } from '../db/index.js';
 import { withUserContext } from '../db/context.js';
 import { budgets, users } from '../db/schema.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const JWT_EXPIRES_IN = '7d';
 const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
 const DEFAULT_USER_EMAIL = 'default@tallix.local';
@@ -71,7 +71,7 @@ export async function login(email: string, password: string): Promise<LoginResul
     throw new Error('Invalid email or password');
   }
 
-  const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const token = jwt.sign({ userId: user.id, email: user.email }, getJwtSecret(), { expiresIn: JWT_EXPIRES_IN });
 
   return {
     user: {
@@ -142,7 +142,7 @@ export async function register(email: string, password: string, name?: string): 
 
   await ensureDefaultBudget(newUser.id);
 
-  const token = jwt.sign({ userId: newUser.id, email: newUser.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const token = jwt.sign({ userId: newUser.id, email: newUser.email }, getJwtSecret(), { expiresIn: JWT_EXPIRES_IN });
 
   return {
     user: {
@@ -158,7 +158,7 @@ export async function register(email: string, password: string, name?: string): 
 
 export function verifyToken(token: string): { userId: string; email: string } {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
+    const decoded = jwt.verify(token, getJwtSecret()) as { userId: string; email: string };
     return decoded;
   } catch {
     throw new Error('Invalid token');

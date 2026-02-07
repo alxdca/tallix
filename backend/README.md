@@ -85,7 +85,7 @@ See the root `.env.example` for all available configuration options.
 - `DB_HOST`, `DB_PORT`, `DB_NAME` - Database connection details
 - `POSTGRES_USER`, `POSTGRES_PASSWORD` - Superuser credentials (for migrations)
 - `APP_DB_USER`, `APP_DB_PASSWORD` - Application user credentials (for runtime)
-- `JWT_SECRET` - Secret key for JWT token generation
+- `JWT_SECRET` - Secret key for JWT token generation (required; use at least 32 random characters outside local dev)
 - `MODE` - Set to `demo` to enable demo user (demo@tallix.org / demo)
 - `ALLOW_UNSAFE_DB_ROLE` - Set to `true` for local dev to allow superuser connections
 

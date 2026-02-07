@@ -13,6 +13,8 @@
     "db:studio": "dotenv -e ../.env -e .env -- drizzle-kit studio",
     "check:rls": "bash scripts/check-rls-imports.sh",
     "rls:guard": "bash scripts/guard-rawdb-usage.sh",
+    "test:rls": "vitest --run tests/rls-enforcement.test.ts",
+    "test:jwt": "SKIP_TESTCONTAINERS=true vitest --run tests/jwt-secret-validation.test.ts",
     "test": "vitest --run"
   },
   "dependencies": {
@@ -39,8 +41,10 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^20.11.0",
     "@types/pino": "^7.0.5",
+    "@testcontainers/postgresql": "^11.8.1",
     "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.8",
+    "testcontainers": "^11.8.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^1.6.0"

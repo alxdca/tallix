@@ -21,7 +21,7 @@ Serve the frontend build with a static server and run the backend with the prope
 Ensure the following are set:
 
 - `DATABASE_URL` (or DB host/user/password vars in `.env`)
-- `JWT_SECRET`
+- `JWT_SECRET` (random secret, minimum 32 characters in production/staging)
 - `CORS_ORIGIN`
 - `MODE=demo` (optional)
 - `DEEPSEEK_API_KEY` (optional)

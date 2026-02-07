@@ -8,12 +8,10 @@
  * 4. Handle shared budgets correctly
  * 5. Runtime guard on `db` proxy throws without context
  *
- * Run: pnpm test (vitest)
- * Requires: running PostgreSQL with migrations applied
+ * Run: pnpm test:rls
+ * The test database is provisioned by Vitest global setup (Testcontainers)
+ * and migrations are applied automatically.
  */
-
-// CRITICAL: Environment variables must be loaded via dotenv-cli before running this test
-// Run with: pnpm test:rls (which uses dotenv-cli)
 
 import { test } from 'vitest';
 import { sql, eq } from 'drizzle-orm';
@@ -22,6 +20,7 @@ import postgres from 'postgres';
 import { db, rawDb } from '../src/db/index.js';
 import { withTenantContext, withUserContext } from '../src/db/context.js';
 import * as schema from '../src/db/schema.js';
+import * as transactionsSvc from '../src/services/transactions.js';
 const {
   users,
   budgets,
@@ -95,6 +94,7 @@ let groupAId: number;
 let itemAId: number;
 let paymentMethodAId: number;
 let paymentMethodBId: number;
+let transactionAId: number;
 
 // ---------------------------------------------------------------------------
 // Setup: create fixtures using rawDb (bypasses guard + RLS since we're the db owner)
@@ -167,16 +167,19 @@ async function setup() {
   paymentMethodBId = pmB.id;
 
   // Create a transaction in budget A
-  await superuserDb.insert(transactions).values({
-    yearId: yearAId,
-    itemId: itemAId,
-    date: '2099-01-15',
-    amount: '100.00',
-    paymentMethodId: paymentMethodAId,
-    paymentMethod: 'Card A',
-    accountingMonth: 1,
-    accountingYear: 9901,
-  });
+  const [tA] = await superuserDb
+    .insert(transactions)
+    .values({
+      yearId: yearAId,
+      itemId: itemAId,
+      date: '2099-01-15',
+      amount: '100.00',
+      paymentMethodId: paymentMethodAId,
+      accountingMonth: 1,
+      accountingYear: 9901,
+    })
+    .returning();
+  transactionAId = tA.id;
 
   // Settings for user A
   await superuserDb.insert(settings).values({ userId: userAId, key: 'theme', value: 'dark' });
@@ -340,7 +343,6 @@ async function testCrossTenantWriteBlocked() {
           date: '2099-06-01',
           amount: '999.00',
           paymentMethodId: paymentMethodBId,
-          paymentMethod: 'Hack',
           accountingMonth: 6,
           accountingYear: 9901,
         });
@@ -355,6 +357,69 @@ async function testCrossTenantWriteBlocked() {
         await tx.insert(settings).values({ userId: userAId, key: 'hacked', value: 'yes' });
       }),
     'User B cannot insert setting for User A'
+  );
+}
+
+async function testApiLevelPaymentMethodOwnershipEnforced() {
+  console.log('Test: API-layer service rejects foreign payment method IDs');
+
+  await assertThrows(
+    () =>
+      withTenantContext(userAId, budgetAId, async (tx) => {
+        await transactionsSvc.createTransaction(tx, userAId, budgetAId, {
+          yearId: yearAId,
+          itemId: itemAId,
+          date: '2099-08-10',
+          amount: 42,
+          paymentMethodId: paymentMethodBId,
+          accountingMonth: 8,
+          accountingYear: 9901,
+        });
+      }),
+    'createTransaction rejects explicit accounting payload with foreign payment method'
+  );
+
+  await assertThrows(
+    () =>
+      withTenantContext(userAId, budgetAId, async (tx) => {
+        await transactionsSvc.updateTransaction(tx, userAId, budgetAId, transactionAId, {
+          paymentMethodId: paymentMethodBId,
+          accountingMonth: 8,
+          accountingYear: 9901,
+        });
+      }),
+    'updateTransaction rejects explicit accounting payload with foreign payment method'
+  );
+}
+
+async function testDbLevelPaymentMethodOwnershipEnforced() {
+  console.log('Test: DB RLS rejects foreign payment method references');
+
+  await assertThrows(
+    () =>
+      withTenantContext(userAId, budgetAId, async (tx) => {
+        await tx.insert(transactions).values({
+          yearId: yearAId,
+          itemId: itemAId,
+          date: '2099-08-11',
+          amount: '12.34',
+          paymentMethodId: paymentMethodBId,
+          accountingMonth: 8,
+          accountingYear: 9901,
+        });
+      }),
+    'RLS blocks insert with foreign payment method ID'
+  );
+
+  await assertThrows(
+    () =>
+      withTenantContext(userAId, budgetAId, async (tx) => {
+        await tx
+          .update(transactions)
+          .set({ paymentMethodId: paymentMethodBId, updatedAt: new Date() })
+          .where(eq(transactions.id, transactionAId));
+      }),
+    'RLS blocks update that switches to foreign payment method ID'
   );
 }
 
@@ -433,7 +498,6 @@ async function testBudgetSharingReadOnly() {
             date: '2099-07-01',
             amount: '50.00',
             paymentMethodId: paymentMethodBId,
-            paymentMethod: 'Card B',
             accountingMonth: 7,
             accountingYear: 9901,
           });
@@ -464,6 +528,8 @@ test('RLS enforcement', async () => {
     await testSameTenantAccess();
     await testCrossTenantReadBlocked();
     await testCrossTenantWriteBlocked();
+    await testApiLevelPaymentMethodOwnershipEnforced();
+    await testDbLevelPaymentMethodOwnershipEnforced();
     await testMissingContextFailsClosed();
     await testDbProxyGuard();
     await testBudgetSharingReadOnly();

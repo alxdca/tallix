@@ -112,13 +112,20 @@ Create `backend/.env`:
 ```env
 NODE_ENV=development
 DATABASE_URL=postgresql://tallix:tallix_secret@localhost:5432/tallix
-JWT_SECRET=dev-secret-change-in-production
+# Local dev only; production/staging must use a random 32+ char secret
+JWT_SECRET=local-dev-jwt-secret
 CORS_ORIGIN=http://localhost:5173
 DEEPSEEK_API_KEY=your_key_here
 # Optional overrides
 DEEPSEEK_API_URL=https://api.deepseek.com/v1
 LOG_LEVEL=info
 DEBUG_LOG_BODY=false
+```
+
+Generate a production secret with:
+
+```bash
+openssl rand -base64 48
 ```
 
 ### 4. Run database migrations

@@ -5,6 +5,13 @@ import * as transactionsSvc from '../services/transactions.js';
 
 const router: RouterType = Router();
 
+function mapTransactionWriteError(error: unknown): never {
+  if (error instanceof Error && error.message === transactionsSvc.PAYMENT_METHOD_OWNERSHIP_ERROR) {
+    throw new AppError(400, error.message);
+  }
+  throw error;
+}
+
 // GET /api/transactions/third-parties - Get distinct third parties for autocomplete
 router.get(
   '/third-parties',
@@ -65,12 +72,17 @@ router.post(
     }
 
     const budgetId = req.budget!.id;
-    const newTransaction = await withTenantContext(userId, budgetId, (tx) =>
-      transactionsSvc.createTransaction(tx, userId, budgetId, {
-        yearId, itemId, date, description, comment, thirdParty,
-        paymentMethodId, amount, accountingMonth, accountingYear,
-      })
-    );
+    let newTransaction: Awaited<ReturnType<typeof transactionsSvc.createTransaction>>;
+    try {
+      newTransaction = await withTenantContext(userId, budgetId, (tx) =>
+        transactionsSvc.createTransaction(tx, userId, budgetId, {
+          yearId, itemId, date, description, comment, thirdParty,
+          paymentMethodId, amount, accountingMonth, accountingYear,
+        })
+      );
+    } catch (error) {
+      mapTransactionWriteError(error);
+    }
 
     res.status(201).json(newTransaction);
   })
@@ -92,12 +104,17 @@ router.put(
     } = req.body;
 
     const budgetId = req.budget!.id;
-    const updated = await withTenantContext(userId, budgetId, (tx) =>
-      transactionsSvc.updateTransaction(tx, userId, budgetId, id, {
-        itemId, date, description, comment, thirdParty, paymentMethodId,
-        amount, accountingMonth, accountingYear, recalculateAccounting,
-      })
-    );
+    let updated: Awaited<ReturnType<typeof transactionsSvc.updateTransaction>>;
+    try {
+      updated = await withTenantContext(userId, budgetId, (tx) =>
+        transactionsSvc.updateTransaction(tx, userId, budgetId, id, {
+          itemId, date, description, comment, thirdParty, paymentMethodId,
+          amount, accountingMonth, accountingYear, recalculateAccounting,
+        })
+      );
+    } catch (error) {
+      mapTransactionWriteError(error);
+    }
 
     if (!updated) {
       throw new AppError(404, 'Transaction not found');

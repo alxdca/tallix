@@ -342,7 +342,9 @@ function calculateExpectedTotals(
       const yearlyBudget = item.yearlyBudget || 0;
       if (yearlyBudget !== 0) {
         const actualSpent = item.months.reduce((sum, m) => sum + (m?.actual || 0), 0);
-        const remaining = yearlyBudget - actualSpent;
+        const pastBudgets = item.months.reduce((sum, m, i) => sum + (i <= currentMonthIndex ? (m?.budget || 0) : 0), 0);
+        const yearlyUsed = Math.max(0, actualSpent - pastBudgets);
+        const remaining = Math.max(0, yearlyBudget - yearlyUsed);
         if (group.type === 'income') {
           totals.income = totals.income.plus(remaining);
         } else if (group.type === 'expense') {
@@ -475,7 +477,9 @@ function calculateProjectedEndOfYear(
       const yearlyBudget = item.yearlyBudget || 0;
       if (yearlyBudget > 0) {
         const actualSpent = item.months.reduce((sum, m) => sum + (m?.actual || 0), 0);
-        const remaining = yearlyBudget - actualSpent;
+        const pastBudgets = item.months.reduce((sum, m, i) => sum + (i <= currentMonthIndex ? (m?.budget || 0) : 0), 0);
+        const yearlyUsed = Math.max(0, actualSpent - pastBudgets);
+        const remaining = Math.max(0, yearlyBudget - yearlyUsed);
 
         if (group.type === 'income') {
           incomeRemainingYearly += remaining;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type Account, fetchAccounts, fetchBudgetData, fetchBudgetSummary } from './api';
 import Accounts from './components/Accounts';
 import Archive from './components/Archive';
+import CopilotWidget from './components/CopilotWidget';
 import Assets from './components/Assets';
 import BudgetPlanning from './components/BudgetPlanning';
 import BudgetSpreadsheet from './components/BudgetSpreadsheet';
@@ -296,6 +297,7 @@ function AppContent() {
         )}
         {renderContent()}
       </main>
+      <CopilotWidget />
     </div>
   );
 }
