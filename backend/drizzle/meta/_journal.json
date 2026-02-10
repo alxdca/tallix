@@ -183,6 +183,13 @@
       "when": 1770371200000,
       "tag": "0026_enforce_transactions_payment_method_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1770457600000,
+      "tag": "0027_asset_name_unique_per_debt",
+      "breakpoints": true
     }
   ]
 }

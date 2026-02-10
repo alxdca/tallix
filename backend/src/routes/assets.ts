@@ -22,7 +22,7 @@ router.get(
 router.post(
   '/',
   asyncHandler(async (req, res) => {
-    const { name, isDebt } = req.body;
+    const { name, isDebt, parentAssetId } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       throw new AppError(400, 'Asset name is required');
@@ -32,11 +32,15 @@ router.post(
       throw new AppError(400, 'isDebt must be a boolean');
     }
 
+    if (parentAssetId !== undefined && parentAssetId !== null && (typeof parentAssetId !== 'number' || !Number.isInteger(parentAssetId))) {
+      throw new AppError(400, 'parentAssetId must be an integer or null');
+    }
+
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
 
     const asset = await withTenantContext(userId, budgetId, (tx) =>
-      assetsSvc.createAsset(tx, budgetId, name.trim(), isDebt ?? false)
+      assetsSvc.createAsset(tx, budgetId, name.trim(), isDebt ?? false, parentAssetId ?? null)
     );
 
     res.status(201).json(asset);
@@ -71,6 +75,29 @@ router.put(
   })
 );
 
+// PUT /api/assets/:id/name - Rename asset
+router.put(
+  '/:id/name',
+  asyncHandler(async (req, res) => {
+    const assetId = parseInt(req.params.id, 10);
+    if (Number.isNaN(assetId)) {
+      throw new AppError(400, 'Invalid asset ID');
+    }
+
+    const { name } = req.body;
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      throw new AppError(400, 'Name is required');
+    }
+
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+
+    await withTenantContext(userId, budgetId, (tx) => assetsSvc.renameAsset(tx, assetId, budgetId, name.trim()));
+
+    res.json({ success: true });
+  })
+);
+
 // DELETE /api/assets/:id - Delete custom asset
 router.delete(
   '/:id',
@@ -93,20 +120,22 @@ router.delete(
 router.put(
   '/reorder',
   asyncHandler(async (req, res) => {
-    const { assetIds } = req.body;
+    const { assets: assetOrders } = req.body as { assets: { id: number; sortOrder: number }[] };
 
-    if (!Array.isArray(assetIds) || assetIds.length === 0) {
-      throw new AppError(400, 'assetIds must be a non-empty array');
+    if (!Array.isArray(assetOrders) || assetOrders.length === 0) {
+      throw new AppError(400, 'assets must be a non-empty array');
     }
 
-    if (!assetIds.every((id) => typeof id === 'number')) {
-      throw new AppError(400, 'All assetIds must be numbers');
+    for (const item of assetOrders) {
+      if (typeof item.id !== 'number' || typeof item.sortOrder !== 'number') {
+        throw new AppError(400, 'Each item must have numeric id and sortOrder');
+      }
     }
 
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
 
-    await withTenantContext(userId, budgetId, (tx) => assetsSvc.reorderAssets(tx, budgetId, assetIds));
+    await withTenantContext(userId, budgetId, (tx) => assetsSvc.reorderAssets(tx, budgetId, assetOrders));
 
     res.json({ success: true });
   })

@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, max } from 'drizzle-orm';
 import type { DbClient } from '../db/index.js';
 import { assets, assetValues, budgetYears, paymentMethods } from '../db/schema.js';
 import * as accountsSvc from './accounts.js';
@@ -292,20 +292,23 @@ async function ensureSystemAssets(tx: DbClient, budgetId: number): Promise<void>
 }
 
 // Create a new custom asset
-export async function createAsset(tx: DbClient, budgetId: number, name: string, isDebt = false): Promise<Asset> {
-  // Check if asset with this name already exists
+export async function createAsset(tx: DbClient, budgetId: number, name: string, isDebt = false, parentAssetId: number | null = null): Promise<Asset> {
+  // Check if asset with this name already exists (scoped by isDebt)
   const existing = await tx.query.assets.findFirst({
-    where: and(eq(assets.budgetId, budgetId), eq(assets.name, name)),
+    where: and(eq(assets.budgetId, budgetId), eq(assets.name, name), eq(assets.isDebt, isDebt)),
   });
 
   if (existing) {
     throw new Error('An asset with this name already exists');
   }
 
-  // Get max sort order
-  const maxSortOrder = await tx.select({ max: assets.sortOrder }).from(assets).where(eq(assets.budgetId, budgetId));
+  // Get max sort order among siblings (same parentAssetId)
+  const siblingCondition = parentAssetId !== null
+    ? and(eq(assets.budgetId, budgetId), eq(assets.parentAssetId, parentAssetId))
+    : and(eq(assets.budgetId, budgetId));
+  const [maxResult] = await tx.select({ max: max(assets.sortOrder) }).from(assets).where(siblingCondition);
 
-  const sortOrder = (maxSortOrder[0]?.max ?? 1) + 1;
+  const sortOrder = (maxResult?.max ?? -1) + 1;
 
   // Insert new asset
   const [newAsset] = await tx
@@ -316,6 +319,7 @@ export async function createAsset(tx: DbClient, budgetId: number, name: string, 
       sortOrder,
       isSystem: false,
       isDebt,
+      parentAssetId,
     })
     .returning();
 
@@ -382,6 +386,34 @@ export async function updateAssetValue(
     });
 }
 
+// Rename an asset
+export async function renameAsset(tx: DbClient, assetId: number, budgetId: number, name: string): Promise<void> {
+  const asset = await tx.query.assets.findFirst({
+    where: and(eq(assets.id, assetId), eq(assets.budgetId, budgetId)),
+  });
+
+  if (!asset) {
+    throw new Error('Asset not found or does not belong to this budget');
+  }
+
+  if (asset.isSystem) {
+    throw new Error('Cannot rename system assets');
+  }
+
+  // Check for duplicate name (scoped by isDebt)
+  const duplicate = await tx.query.assets.findFirst({
+    where: and(eq(assets.budgetId, budgetId), eq(assets.name, name), eq(assets.isDebt, asset.isDebt)),
+  });
+  if (duplicate && duplicate.id !== assetId) {
+    throw new Error('An asset with this name already exists');
+  }
+
+  await tx
+    .update(assets)
+    .set({ name, updatedAt: new Date() })
+    .where(eq(assets.id, assetId));
+}
+
 // Delete a custom asset
 export async function deleteAsset(tx: DbClient, assetId: number, budgetId: number): Promise<void> {
   // Verify asset exists and belongs to this budget
@@ -403,19 +435,19 @@ export async function deleteAsset(tx: DbClient, assetId: number, budgetId: numbe
 }
 
 // Reorder assets
-export async function reorderAssets(tx: DbClient, budgetId: number, assetIds: number[]): Promise<void> {
+export async function reorderAssets(tx: DbClient, budgetId: number, assetOrders: { id: number; sortOrder: number }[]): Promise<void> {
   // Verify all assets belong to this budget
   const budgetAssets = await tx.select().from(assets).where(eq(assets.budgetId, budgetId));
 
   const budgetAssetIds = new Set(budgetAssets.map((a) => a.id));
-  for (const id of assetIds) {
-    if (!budgetAssetIds.has(id)) {
+  for (const item of assetOrders) {
+    if (!budgetAssetIds.has(item.id)) {
       throw new Error('One or more assets do not belong to this budget');
     }
   }
 
   // Update sort order for each asset
-  for (let i = 0; i < assetIds.length; i++) {
-    await tx.update(assets).set({ sortOrder: i, updatedAt: new Date() }).where(eq(assets.id, assetIds[i]));
+  for (const item of assetOrders) {
+    await tx.update(assets).set({ sortOrder: item.sortOrder, updatedAt: new Date() }).where(eq(assets.id, item.id));
   }
 }

@@ -2190,8 +2190,8 @@ td.zero {
 }
 
 .transactions-header h2 {
-  font-size: 1.75rem;
-  font-weight: 700;
+  font-size: 1.5rem;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
@@ -4806,6 +4806,12 @@ td.zero {
   margin-left: 8px;
 }
 
+.accounts-table tr.asset-section-header td {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-color);
+}
+
 .accounts-table tr.asset-child td {
   background: rgba(255, 255, 255, 0.015);
 }
@@ -4823,6 +4829,68 @@ td.zero {
   font-weight: 400;
   color: var(--text-secondary);
   position: relative;
+}
+
+.asset-name-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.editable-name {
+  cursor: text;
+  border-bottom: 1px dashed transparent;
+}
+
+.editable-name:hover {
+  border-bottom-color: var(--text-muted);
+}
+
+.asset-name-input {
+  font-size: inherit;
+  font-weight: inherit;
+  padding: 1px 4px;
+  min-width: 120px;
+  flex: 1;
+}
+
+.asset-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--text-muted);
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.section-toggle {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.section-toggle .chevron {
+  transition: transform 0.2s ease;
+}
+
+.section-toggle .chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.asset-drag-handle:active {
+  cursor: grabbing;
+}
+
+.accounts-table tr.dragging {
+  opacity: 0.5;
+}
+
+.accounts-table tr.drop-target-item {
+  background: rgba(59, 130, 246, 0.15);
+  outline: 2px solid #3b82f6;
 }
 
 .accounts-table .asset-child-name::before {
@@ -4907,9 +4975,27 @@ td.zero {
 
 .assets-table .account-month-col,
 .assets-table .account-month-cell {
-  min-width: 110px;
-  width: 110px;
-  max-width: 110px;
+  min-width: 120px;
+  width: 120px;
+  max-width: 120px;
+}
+
+.variation-badge {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  margin-top: 2px;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--text-muted);
+}
+
+.variation-badge.positive {
+  color: #10b981;
+}
+
+.variation-badge.negative {
+  color: #ef4444;
 }
 
 .account-actions-col {
@@ -6119,6 +6205,7 @@ td.zero {
 
 .budget-planning-table thead th.col-yearly {
   min-width: 95px;
+  border-right: 2px solid var(--border-color);
 }
 
 .budget-planning-table thead th.col-remaining {
@@ -6139,6 +6226,97 @@ td.zero {
   position: sticky;
   left: 0;
   z-index: 20;
+}
+
+/* Funds Available rows (Playground) — mirrors .spreadsheet .funds-summary-* */
+.budget-planning-table .funds-header-row {
+  background: var(--bg-tertiary);
+}
+
+.budget-planning-table .funds-header-row td {
+  padding: 16px;
+  font-weight: 700;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent-purple);
+  background: var(--bg-tertiary);
+  border-bottom: 2px solid var(--border-color);
+}
+
+.budget-planning-table .funds-row td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  background: var(--bg-secondary);
+}
+
+.budget-planning-table .funds-row td.funds-label {
+  text-align: left;
+  padding-left: 16px;
+  font-weight: 500;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.budget-planning-table .funds-row td.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+}
+
+.budget-planning-table .funds-row td.funds-dash {
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.budget-planning-table .funds-row td.funds-value {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.budget-planning-table .funds-row td.funds-value.negative {
+  color: var(--accent-negative);
+}
+
+.budget-planning-table .funds-row.funds-start {
+  background: rgba(139, 92, 246, 0.03);
+}
+
+.budget-planning-table .funds-row.funds-start td {
+  background: rgba(139, 92, 246, 0.03);
+}
+
+.budget-planning-table .funds-row.funds-start td.sticky-col {
+  background: rgba(139, 92, 246, 0.05);
+}
+
+.budget-planning-table .funds-row.funds-end {
+  background: rgba(139, 92, 246, 0.06);
+}
+
+.budget-planning-table .funds-row.funds-end td {
+  background: rgba(139, 92, 246, 0.06);
+  border-bottom: 2px solid var(--border-color);
+}
+
+.budget-planning-table .funds-row.funds-end td.sticky-col {
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.budget-planning-table .funds-row.funds-end td.funds-value {
+  font-weight: 600;
+}
+
+.budget-planning-table .funds-spacer-row td {
+  height: 20px;
+  background: var(--bg-secondary);
+  border: none;
 }
 
 /* Section rows */
@@ -6194,6 +6372,7 @@ td.zero {
   font-weight: 600;
   color: var(--section-color);
   text-align: right;
+  border-right: 2px solid var(--border-color);
 }
 
 .budget-planning-table .section-row td.remaining-budget-total {
@@ -6246,6 +6425,7 @@ td.zero {
 
 .budget-planning-table .group-row td.yearly-budget-total {
   text-align: right;
+  border-right: 2px solid var(--border-color);
 }
 
 .budget-planning-table .group-row td.remaining-budget-total {
@@ -6294,6 +6474,7 @@ td.zero {
 
 .budget-planning-table .item-row td.yearly-budget-cell {
   text-align: right;
+  border-right: 2px solid var(--border-color);
 }
 
 .budget-planning-table .item-row td.remaining-budget-cell {
@@ -6445,6 +6626,27 @@ td.zero {
   color: var(--accent-budget);
   border-color: var(--accent-budget);
   background: rgba(59, 130, 246, 0.1);
+}
+
+.budget-planning-table .btn-icon.clear-row {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.budget-planning-table .btn-icon.clear-row:hover {
+  color: var(--accent-negative);
+  border-color: var(--accent-negative);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .budget-planning-table .btn-icon.cancel {

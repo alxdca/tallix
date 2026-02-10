@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type Account, fetchAccounts, fetchBudgetData, fetchBudgetSummary } from './api';
 import Accounts from './components/Accounts';
 import Archive from './components/Archive';
-import CopilotWidget from './components/CopilotWidget';
 import Assets from './components/Assets';
 import BudgetPlanning from './components/BudgetPlanning';
+import BudgetPlayground from './components/BudgetPlayground';
 import BudgetSpreadsheet from './components/BudgetSpreadsheet';
+import CopilotWidget from './components/CopilotWidget';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import Header from './components/Header';
 import Login from './components/Login';
@@ -17,8 +18,8 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { I18nProvider, useI18n } from './contexts/I18nContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import type { BudgetData, BudgetSummary } from './types';
-import { getErrorMessage } from './utils/errorMessages';
 import { organizeBudgetData } from './utils';
+import { getErrorMessage } from './utils/errorMessages';
 import { logger } from './utils/logger';
 
 function AppContent() {
@@ -163,7 +164,7 @@ function AppContent() {
   }, []);
 
   // Views that should show the budget header with balance boxes
-  const budgetViews = ['current', 'budget-planning', 'transactions', 'accounts', 'assets'];
+  const budgetViews = ['current', 'budget-planning', 'playground', 'transactions', 'accounts', 'assets'];
   const isArchiveView = activeView.startsWith('archive-');
   const showBudgetHeader = (budgetViews.includes(activeView) || isArchiveView) && !loading && !error;
 
@@ -269,6 +270,15 @@ function AppContent() {
             groups={budgetData?.groups || []}
             months={months}
             onDataChanged={refreshData}
+          />
+        );
+      case 'playground':
+        return (
+          <BudgetPlayground
+            year={currentYear}
+            groups={budgetData?.groups || []}
+            months={months}
+            paymentAccountsInitialBalance={paymentAccountsInitialBalance}
           />
         );
       case 'user-settings':

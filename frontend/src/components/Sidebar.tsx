@@ -132,6 +132,20 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
             </span>
             <span className="nav-label">{t('nav.planning')}</span>
           </button>
+
+          {/* Sub-item: Playground */}
+          <button
+            className={`nav-item nav-sub-item ${activeView === 'playground' ? 'active' : ''}`}
+            onClick={() => onViewChange('playground')}
+          >
+            <span className="nav-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 3h6v2H9zM10 5v6l-4 8h12l-4-8V5" />
+                <path d="M7 19h10" />
+              </svg>
+            </span>
+            <span className="nav-label">{t('nav.playground')}</span>
+          </button>
         </div>
 
         {/* Assets (multi-year) */}
@@ -180,35 +194,37 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
           </button>
 
           {/* Past year sub-items */}
-          {showArchiveDropdown && pastYears.length > 0 && pastYears.map((year) => (
-            <div key={year} className="nav-sub-group">
-              <div className="nav-year-label">{year}</div>
-              <button
-                className={`nav-item nav-sub-item ${activeView === `archive-${year}-transactions` ? 'active' : ''}`}
-                onClick={() => onViewChange(`archive-${year}-transactions`)}
-              >
-                <span className="nav-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="12" y1="1" x2="12" y2="23" />
-                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                  </svg>
-                </span>
-                <span className="nav-label">{t('nav.transactions')}</span>
-              </button>
-              <button
-                className={`nav-item nav-sub-item ${activeView === `archive-${year}-accounts` ? 'active' : ''}`}
-                onClick={() => onViewChange(`archive-${year}-accounts`)}
-              >
-                <span className="nav-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="2" y="5" width="20" height="14" rx="2" />
-                    <line x1="2" y1="10" x2="22" y2="10" />
-                  </svg>
-                </span>
-                <span className="nav-label">{t('nav.accounts')}</span>
-              </button>
-            </div>
-          ))}
+          {showArchiveDropdown &&
+            pastYears.length > 0 &&
+            pastYears.map((year) => (
+              <div key={year} className="nav-sub-group">
+                <div className="nav-year-label">{year}</div>
+                <button
+                  className={`nav-item nav-sub-item ${activeView === `archive-${year}-transactions` ? 'active' : ''}`}
+                  onClick={() => onViewChange(`archive-${year}-transactions`)}
+                >
+                  <span className="nav-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="12" y1="1" x2="12" y2="23" />
+                      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                    </svg>
+                  </span>
+                  <span className="nav-label">{t('nav.transactions')}</span>
+                </button>
+                <button
+                  className={`nav-item nav-sub-item ${activeView === `archive-${year}-accounts` ? 'active' : ''}`}
+                  onClick={() => onViewChange(`archive-${year}-accounts`)}
+                >
+                  <span className="nav-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="2" y="5" width="20" height="14" rx="2" />
+                      <line x1="2" y1="10" x2="22" y2="10" />
+                    </svg>
+                  </span>
+                  <span className="nav-label">{t('nav.accounts')}</span>
+                </button>
+              </div>
+            ))}
         </div>
 
         {/* Settings */}

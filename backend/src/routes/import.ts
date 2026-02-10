@@ -131,7 +131,8 @@ router.post(
         description?: string;
         comment?: string;
         thirdParty: string;
-        paymentMethod: string;
+        paymentMethod?: string;
+        paymentMethodId?: number;
         amount: number;
         itemId?: number | null;
         accountingMonth?: number;
@@ -145,7 +146,7 @@ router.post(
 
     const invalidTransactions: number[] = [];
     transactionsData.forEach((t, index) => {
-      if (!t.date || !t.paymentMethod || t.amount === undefined) {
+      if (!t.date || (!t.paymentMethod && !t.paymentMethodId) || t.amount === undefined) {
         invalidTransactions.push(index + 1);
       }
     });
@@ -162,10 +163,30 @@ router.post(
     }
 
     const budgetId = req.budget!.id;
-    // Convert payment method names to IDs before creating transactions
     const result = await withTenantContext(userId, budgetId, async (tx) => {
+      // If transactions already have paymentMethodId, use them directly
+      // Otherwise convert payment method names to IDs
+      const hasIds = transactionsData.every((t) => t.paymentMethodId);
+      if (hasIds) {
+        const transactionsWithIds = transactionsData.map((t) => ({
+          date: t.date,
+          description: t.description,
+          comment: t.comment,
+          thirdParty: t.thirdParty,
+          paymentMethodId: t.paymentMethodId!,
+          amount: t.amount,
+          itemId: t.itemId,
+          accountingMonth: t.accountingMonth,
+          accountingYear: t.accountingYear,
+        }));
+        return transactionsSvc.bulkCreateTransactions(tx, userId, budgetId, yearId, transactionsWithIds);
+      }
+      const transactionsWithNames = transactionsData.map((t) => ({
+        ...t,
+        paymentMethod: t.paymentMethod!,
+      }));
       const transactionsWithIds = await importSvc.convertPaymentMethodNamesToIds(
-        tx, userId, transactionsData
+        tx, userId, transactionsWithNames
       );
       return transactionsSvc.bulkCreateTransactions(tx, userId, budgetId, yearId, transactionsWithIds);
     });

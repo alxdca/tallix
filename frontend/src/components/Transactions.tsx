@@ -839,7 +839,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     <div className="transactions-container">
       <div className="transactions-header">
         <div className="transactions-title-row">
-          <h2>{t('transactions.title')}</h2>
+          <h2>{t('transactions.title', { year })}</h2>
           <div className="transactions-actions">
             {selectedIds.size > 0 && (
               <button className="btn-danger" onClick={handleBulkDelete} disabled={isSubmitting}>

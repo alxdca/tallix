@@ -548,6 +548,7 @@ export async function bulkCreateTransactions(
     comment?: string;
     thirdParty?: string;
     paymentMethod?: string;
+    paymentMethodId?: number;
     amount: number;
     itemId?: number | null;
     accountingMonth?: number;
@@ -623,10 +624,10 @@ export async function fetchAssets(): Promise<AssetsResponse> {
   return response.json();
 }
 
-export async function createAsset(name: string, isDebt = false): Promise<Asset> {
+export async function createAsset(name: string, isDebt = false, parentAssetId: number | null = null): Promise<Asset> {
   const response = await authFetch(`${API_BASE}/assets`, {
     method: 'POST',
-    body: JSON.stringify({ name, isDebt }),
+    body: JSON.stringify({ name, isDebt, parentAssetId }),
   });
   await ensureOk(response, 'Failed to create asset');
   return response.json();
@@ -640,6 +641,14 @@ export async function updateAssetValue(assetId: number, year: number, value: num
   await ensureOk(response, 'Failed to update asset value');
 }
 
+export async function renameAsset(assetId: number, name: string): Promise<void> {
+  const response = await authFetch(`${API_BASE}/assets/${assetId}/name`, {
+    method: 'PUT',
+    body: JSON.stringify({ name }),
+  });
+  await ensureOk(response, 'Failed to rename asset');
+}
+
 export async function deleteAsset(assetId: number): Promise<void> {
   const response = await authFetch(`${API_BASE}/assets/${assetId}`, {
     method: 'DELETE',
@@ -647,10 +656,10 @@ export async function deleteAsset(assetId: number): Promise<void> {
   await ensureOk(response, 'Failed to delete asset');
 }
 
-export async function reorderAssets(assetIds: number[]): Promise<void> {
+export async function reorderAssets(assetOrders: { id: number; sortOrder: number }[]): Promise<void> {
   const response = await authFetch(`${API_BASE}/assets/reorder`, {
     method: 'PUT',
-    body: JSON.stringify({ assetIds }),
+    body: JSON.stringify({ assets: assetOrders }),
   });
   await ensureOk(response, 'Failed to reorder assets');
 }

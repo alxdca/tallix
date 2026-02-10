@@ -268,8 +268,8 @@ export const assets = pgTable(
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (table) => ({
-    // Unique constraint on (budget_id, name) - one asset name per budget
-    budgetNameUnique: uniqueIndex('assets_budget_name_unique').on(table.budgetId, table.name),
+    // Unique constraint on (budget_id, name, is_debt) - asset and debt can share names
+    budgetNameDebtUnique: uniqueIndex('assets_budget_name_debt_unique').on(table.budgetId, table.name, table.isDebt),
   })
 );
 
