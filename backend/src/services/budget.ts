@@ -46,6 +46,14 @@ export const SAVINGS_GROUP_SLUG = 'epargne';
 export const SAVINGS_GROUP_TYPE = 'savings';
 export const SAVINGS_SORT_ORDER = 998;
 
+function itemInBudgetScope(budgetId: number) {
+  return sql`${budgetItems.yearId} IN (
+    SELECT ${budgetYears.id}
+    FROM ${budgetYears}
+    WHERE ${budgetYears.budgetId} = ${budgetId}
+  )`;
+}
+
 async function getActiveSavingsAccountIds(tx: DbClient, userId: string): Promise<Set<number>> {
   const accounts = await tx.query.paymentMethods.findMany({
     where: and(eq(paymentMethods.isSavingsAccount, true), eq(paymentMethods.userId, userId)),
@@ -442,21 +450,20 @@ export async function getBudgetDataForYear(
   };
 }
 
-// Calculate projected end of year balance
+// Calculate projected end of year balance using blended expected amounts
+// (actual if available per item, otherwise budget) for months after current
 function calculateProjectedEndOfYear(
   groups: BudgetGroup[],
   initialBalance: number,
   actualBalanceThroughMonth?: number
 ): number {
   const currentMonthIndex = new Date().getMonth();
-  const maxActualMonth = currentMonthIndex;
 
-  let cumulativeActual = initialBalance;
-
-  const sectionTotals = {
-    income: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
-    expense: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
-    savings: { monthlyBudgets: Array(12).fill(0), monthlyActuals: Array(12).fill(0), yearlyBudget: 0, totalActual: 0 },
+  // Compute per-month expected totals (actual if non-zero, else budget) per section
+  const monthlyExpected = {
+    income: Array(12).fill(0),
+    expense: Array(12).fill(0),
+    savings: Array(12).fill(0),
   };
 
   let incomeRemainingYearly = 0;
@@ -464,14 +471,15 @@ function calculateProjectedEndOfYear(
   let savingsRemainingYearly = 0;
 
   for (const group of groups) {
-    const section = sectionTotals[group.type as keyof typeof sectionTotals];
+    const section = monthlyExpected[group.type as keyof typeof monthlyExpected];
     if (!section) continue;
 
     for (const item of group.items) {
       for (let i = 0; i < 12; i++) {
         const monthData = item.months[i];
-        section.monthlyBudgets[i] += monthData?.budget || 0;
-        section.monthlyActuals[i] += monthData?.actual || 0;
+        const budget = monthData?.budget || 0;
+        const actual = monthData?.actual || 0;
+        section[i] += actual !== 0 ? actual : budget;
       }
 
       const yearlyBudget = item.yearlyBudget || 0;
@@ -492,25 +500,14 @@ function calculateProjectedEndOfYear(
     }
   }
 
-  if (actualBalanceThroughMonth !== undefined) {
-    cumulativeActual = actualBalanceThroughMonth;
-  } else {
-    for (let i = 0; i <= Math.min(maxActualMonth, 11); i++) {
-      cumulativeActual +=
-        sectionTotals.income.monthlyActuals[i] -
-        sectionTotals.expense.monthlyActuals[i] -
-        sectionTotals.savings.monthlyActuals[i];
-    }
-  }
+  let projectedEnd = actualBalanceThroughMonth ?? initialBalance;
 
-  let projectedEnd = cumulativeActual;
-
-  const budgetStartMonth = actualBalanceThroughMonth !== undefined ? currentMonthIndex + 1 : maxActualMonth + 1;
-  for (let i = budgetStartMonth; i < 12; i++) {
+  // Add expected flows for months after current
+  for (let i = currentMonthIndex + 1; i < 12; i++) {
     projectedEnd +=
-      sectionTotals.income.monthlyBudgets[i] -
-      sectionTotals.expense.monthlyBudgets[i] -
-      sectionTotals.savings.monthlyBudgets[i];
+      monthlyExpected.income[i] -
+      monthlyExpected.expense[i] -
+      monthlyExpected.savings[i];
   }
 
   projectedEnd += incomeRemainingYearly - expenseRemainingYearly - savingsRemainingYearly;
@@ -637,7 +634,7 @@ export async function updateYear(tx: DbClient, id: number, initialBalance: numbe
   const [updated] = await tx
     .update(budgetYears)
     .set({ initialBalance: initialBalance.toString(), updatedAt: new Date() })
-    .where(eq(budgetYears.id, id))
+    .where(and(eq(budgetYears.id, id), eq(budgetYears.budgetId, budgetId)))
     .returning();
 
   if (!updated) return null;
@@ -695,7 +692,7 @@ export async function updateGroup(
   const [updated] = await tx
     .update(budgetGroups)
     .set({ ...data, updatedAt: new Date() })
-    .where(eq(budgetGroups.id, id))
+    .where(and(eq(budgetGroups.id, id), eq(budgetGroups.budgetId, budgetId)))
     .returning();
 
   return updated || null;
@@ -713,7 +710,10 @@ export async function reorderGroups(tx: DbClient, groups: { id: number; sortOrde
   }
 
   for (const { id, sortOrder } of groups) {
-    await tx.update(budgetGroups).set({ sortOrder, updatedAt: new Date() }).where(eq(budgetGroups.id, id));
+    await tx
+      .update(budgetGroups)
+      .set({ sortOrder, updatedAt: new Date() })
+      .where(and(eq(budgetGroups.id, id), eq(budgetGroups.budgetId, budgetId)));
   }
 }
 
@@ -733,7 +733,10 @@ export async function reorderItems(tx: DbClient, items: { id: number; sortOrder:
   }
 
   for (const { id, sortOrder } of items) {
-    await tx.update(budgetItems).set({ sortOrder, updatedAt: new Date() }).where(eq(budgetItems.id, id));
+    await tx
+      .update(budgetItems)
+      .set({ sortOrder, updatedAt: new Date() })
+      .where(and(eq(budgetItems.id, id), itemInBudgetScope(budgetId)));
   }
 }
 
@@ -755,8 +758,10 @@ export async function deleteGroup(tx: DbClient, id: number, budgetId: number): P
     await tx.delete(monthlyValues).where(eq(monthlyValues.itemId, item.id));
   }
 
-  await tx.delete(budgetItems).where(eq(budgetItems.groupId, id));
-  await tx.delete(budgetGroups).where(eq(budgetGroups.id, id));
+  await tx
+    .delete(budgetItems)
+    .where(and(eq(budgetItems.groupId, id), itemInBudgetScope(budgetId)));
+  await tx.delete(budgetGroups).where(and(eq(budgetGroups.id, id), eq(budgetGroups.budgetId, budgetId)));
 
   return true;
 }
@@ -913,7 +918,11 @@ export async function updateItem(
   if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
   if (data.yearlyBudget !== undefined) updateData.yearlyBudget = data.yearlyBudget.toString();
 
-  const [updated] = await tx.update(budgetItems).set(updateData).where(eq(budgetItems.id, id)).returning();
+  const [updated] = await tx
+    .update(budgetItems)
+    .set(updateData)
+    .where(and(eq(budgetItems.id, id), itemInBudgetScope(budgetId)))
+    .returning();
 
   return updated || null;
 }
@@ -952,7 +961,7 @@ export async function moveItem(tx: DbClient, itemId: number, groupId: number | n
   const [updated] = await tx
     .update(budgetItems)
     .set({ groupId: groupId || null, updatedAt: new Date() })
-    .where(eq(budgetItems.id, itemId))
+    .where(and(eq(budgetItems.id, itemId), itemInBudgetScope(budgetId)))
     .returning();
 
   return updated || null;
@@ -971,7 +980,7 @@ export async function deleteItem(tx: DbClient, id: number, budgetId: number): Pr
     return false;
   }
 
-  await tx.delete(budgetItems).where(eq(budgetItems.id, id));
+  await tx.delete(budgetItems).where(and(eq(budgetItems.id, id), itemInBudgetScope(budgetId)));
   return true;
 }
 

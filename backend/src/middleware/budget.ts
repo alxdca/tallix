@@ -1,7 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { withUserContext } from '../db/context.js';
-import { budgets } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { getOrCreateDefaultBudget } from '../services/budgets.js';
 
 // Extend Express Request to include budget
 declare global {
@@ -33,23 +32,7 @@ export async function requireBudget(req: Request, res: Response, next: NextFunct
     const userId = req.user.id;
 
     const budget = await withUserContext(userId, async (tx) => {
-      let found = await tx.query.budgets.findFirst({
-        where: eq(budgets.userId, userId),
-      });
-
-      if (!found) {
-        const [newBudget] = await tx
-          .insert(budgets)
-          .values({
-            userId,
-            description: null,
-            startYear: new Date().getFullYear(),
-          })
-          .returning();
-        found = newBudget;
-      }
-
-      return found;
+      return await getOrCreateDefaultBudget(tx, userId);
     });
 
     req.budget = {

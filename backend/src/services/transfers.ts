@@ -196,7 +196,10 @@ export async function deleteTransfer(tx: DbClient, id: number, budgetId: number)
     return false;
   }
 
-  const result = await tx.delete(transfers).where(eq(transfers.id, id)).returning();
+  const result = await tx
+    .delete(transfers)
+    .where(and(eq(transfers.id, id), eq(transfers.yearId, transfer.yearId)))
+    .returning();
   return result.length > 0;
 }
 
@@ -252,14 +255,18 @@ export async function updateTransfer(tx: DbClient, id: number, data: Partial<Cre
     updates.accountingYear = dateParsed.year;
   }
 
-  const [updated] = await tx.update(transfers).set(updates).where(eq(transfers.id, id)).returning();
+  const [updated] = await tx
+    .update(transfers)
+    .set(updates)
+    .where(and(eq(transfers.id, id), eq(transfers.yearId, existing.yearId)))
+    .returning();
 
   // Fetch account details
   const sourceAccount = await tx.query.paymentMethods.findFirst({
-    where: eq(paymentMethods.id, updated.sourceAccountId),
+    where: and(eq(paymentMethods.id, updated.sourceAccountId), eq(paymentMethods.userId, userId)),
   });
   const destAccount = await tx.query.paymentMethods.findFirst({
-    where: eq(paymentMethods.id, updated.destinationAccountId),
+    where: and(eq(paymentMethods.id, updated.destinationAccountId), eq(paymentMethods.userId, userId)),
   });
 
   return {

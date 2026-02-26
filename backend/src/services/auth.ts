@@ -4,7 +4,8 @@ import { eq } from 'drizzle-orm';
 import { getJwtSecret } from '../config/security.js';
 import { rawDb as db } from '../db/index.js';
 import { withUserContext } from '../db/context.js';
-import { budgets, users } from '../db/schema.js';
+import { users } from '../db/schema.js';
+import { getOrCreateDefaultBudget } from './budgets.js';
 
 const JWT_EXPIRES_IN = '7d';
 const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -39,17 +40,7 @@ export async function getSetupStatus(): Promise<{ needsSetup: boolean; demoMode:
 
 async function ensureDefaultBudget(userId: string): Promise<void> {
   await withUserContext(userId, async (tx) => {
-    // Check if budget already exists (RLS automatically filters to user's budgets)
-    const existingBudget = await tx.query.budgets.findFirst({
-      where: eq(budgets.userId, userId),
-    });
-    if (existingBudget) return;
-
-    // Create budget with RLS protection
-    await tx.insert(budgets).values({
-      userId,
-      startYear: new Date().getFullYear(),
-    });
+    await getOrCreateDefaultBudget(tx, userId);
   });
 }
 

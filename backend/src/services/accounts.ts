@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { and, asc, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import {
   accountBalances,
   budgetGroups,
@@ -41,6 +41,11 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
   }
 
   const yearId = budgetYear.id;
+  const budgetYearIds = await tx
+    .select({ id: budgetYears.id })
+    .from(budgetYears)
+    .where(eq(budgetYears.budgetId, budgetId));
+  const budgetYearIdValues = budgetYearIds.map((row) => row.id);
 
   // Get all payment methods for this user (we need all to know which are linked)
   // All payment methods are now treated as accounts
@@ -92,7 +97,7 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
     .from(transactions)
     .leftJoin(budgetItems, eq(transactions.itemId, budgetItems.id))
     .leftJoin(budgetGroups, eq(budgetItems.groupId, budgetGroups.id))
-    .where(eq(transactions.accountingYear, year))
+    .where(and(eq(transactions.accountingYear, year), inArray(transactions.yearId, budgetYearIdValues)))
     .groupBy(transactions.paymentMethodId, transactions.accountingMonth);
 
   // Savings-category transactions should also increase/decrease the linked savings account
@@ -109,6 +114,7 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
     .where(
       and(
         eq(transactions.accountingYear, year),
+        inArray(transactions.yearId, budgetYearIdValues),
         eq(budgetGroups.type, 'savings'),
         isNotNull(budgetItems.savingsAccountId),
         sql`${transactions.paymentMethodId} <> ${budgetItems.savingsAccountId}`
@@ -133,7 +139,7 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
   const allTransfers = await tx
     .select()
     .from(transfers)
-    .where(eq(transfers.accountingYear, year));
+    .where(and(eq(transfers.accountingYear, year), inArray(transfers.yearId, budgetYearIdValues)));
 
   // Build transfer impact maps: accountId -> month -> { incoming, outgoing }
   const transferImpact = new Map<number, Map<number, { incoming: Decimal; outgoing: Decimal }>>();
@@ -318,7 +324,10 @@ export async function setPaymentMethodAsSavingsAccount(
   if (!isSavingsAccount) {
     updateData.savingsType = null;
   }
-  await tx.update(paymentMethods).set(updateData).where(eq(paymentMethods.id, id));
+  await tx
+    .update(paymentMethods)
+    .set(updateData)
+    .where(and(eq(paymentMethods.id, id), eq(paymentMethods.userId, userId)));
 
   if (isSavingsAccount) {
     // Create budget items for this savings account across all years

@@ -1,5 +1,6 @@
 export * as accounts from './accounts.js';
 export * as budget from './budget.js';
+export * as budgets from './budgets.js';
 export * as import_ from './import.js';
 export * as paymentMethods from './paymentMethods.js';
 export * as settings from './settings.js';

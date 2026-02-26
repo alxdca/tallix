@@ -386,27 +386,25 @@ export async function updateTransaction(
       data.accountingMonth === undefined &&
       data.accountingYear === undefined)
   ) {
-    const current = await tx.query.transactions.findFirst({
-      where: eq(transactions.id, id),
-    });
-    if (current) {
-      const date = data.date ?? current.date;
-      const paymentMethod =
-        requestedPaymentMethod ?? (await getOwnedPaymentMethodOrThrow(tx, userId, current.paymentMethodId));
-      const settlementDay = paymentMethod.settlementDay ?? null;
-      const accounting = calculateAccountingPeriod(date, settlementDay);
-      updateData.accountingMonth = accounting.accountingMonth;
-      updateData.accountingYear = accounting.accountingYear;
-    }
+    const date = data.date ?? transaction.date;
+    const paymentMethod = requestedPaymentMethod ?? (await getOwnedPaymentMethodOrThrow(tx, userId, transaction.paymentMethodId));
+    const settlementDay = paymentMethod.settlementDay ?? null;
+    const accounting = calculateAccountingPeriod(date, settlementDay);
+    updateData.accountingMonth = accounting.accountingMonth;
+    updateData.accountingYear = accounting.accountingYear;
   }
 
-  const [updated] = await tx.update(transactions).set(updateData).where(eq(transactions.id, id)).returning();
+  const [updated] = await tx
+    .update(transactions)
+    .set(updateData)
+    .where(and(eq(transactions.id, id), eq(transactions.yearId, transaction.yearId)))
+    .returning();
 
   if (!updated) return null;
 
   // Get payment method for display name
   const pm = await tx.query.paymentMethods.findFirst({
-    where: eq(paymentMethods.id, updated.paymentMethodId),
+    where: and(eq(paymentMethods.id, updated.paymentMethodId), eq(paymentMethods.userId, userId)),
   });
   const paymentMethodName = pm 
     ? (pm.institution ? `${pm.name} (${pm.institution})` : pm.name)
@@ -438,7 +436,10 @@ export async function deleteTransaction(tx: DbClient, id: number, budgetId: numb
     return false;
   }
 
-  const result = await tx.delete(transactions).where(eq(transactions.id, id)).returning({ id: transactions.id });
+  const result = await tx
+    .delete(transactions)
+    .where(and(eq(transactions.id, id), eq(transactions.yearId, transaction.yearId)))
+    .returning({ id: transactions.id });
   return result.length > 0;
 }
 

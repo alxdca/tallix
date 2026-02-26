@@ -21,6 +21,10 @@ import { db, rawDb } from '../src/db/index.js';
 import { withTenantContext, withUserContext } from '../src/db/context.js';
 import * as schema from '../src/db/schema.js';
 import * as transactionsSvc from '../src/services/transactions.js';
+import * as transfersSvc from '../src/services/transfers.js';
+import * as accountsSvc from '../src/services/accounts.js';
+import * as budgetSvc from '../src/services/budget.js';
+import { getOrCreateDefaultBudget } from '../src/services/budgets.js';
 const {
   users,
   budgets,
@@ -87,14 +91,17 @@ function assertThrowsSync(fn: () => unknown, message: string) {
 // Fixture IDs
 let userAId: string;
 let userBId: string;
+let userNoBudgetId: string;
 let budgetAId: number;
 let budgetBId: number;
 let yearAId: number;
 let groupAId: number;
 let itemAId: number;
 let paymentMethodAId: number;
+let paymentMethodA2Id: number;
 let paymentMethodBId: number;
 let transactionAId: number;
+let transferAId: number;
 
 // ---------------------------------------------------------------------------
 // Setup: create fixtures using rawDb (bypasses guard + RLS since we're the db owner)
@@ -118,6 +125,11 @@ async function setup() {
 
   userAId = userA.id;
   userBId = userB.id;
+  const [userNoBudget] = await superuserDb
+    .insert(users)
+    .values({ email: 'rls-test-no-budget@test.com', passwordHash: 'hash-c', name: 'User No Budget' })
+    .returning();
+  userNoBudgetId = userNoBudget.id;
 
   // Create budgets
   const currentYear = new Date().getFullYear();
@@ -159,6 +171,11 @@ async function setup() {
     .values({ userId: userAId, name: 'Card A', sortOrder: 0 })
     .returning();
   paymentMethodAId = pmA.id;
+  const [pmA2] = await superuserDb
+    .insert(paymentMethods)
+    .values({ userId: userAId, name: 'Card A2', sortOrder: 1 })
+    .returning();
+  paymentMethodA2Id = pmA2.id;
 
   const [pmB] = await superuserDb
     .insert(paymentMethods)
@@ -180,6 +197,21 @@ async function setup() {
     })
     .returning();
   transactionAId = tA.id;
+
+  const [trA] = await superuserDb
+    .insert(schema.transfers)
+    .values({
+      yearId: yearAId,
+      date: '2099-01-20',
+      amount: '10.00',
+      description: 'Seed transfer',
+      sourceAccountId: paymentMethodAId,
+      destinationAccountId: paymentMethodA2Id,
+      accountingMonth: 1,
+      accountingYear: 9901,
+    })
+    .returning();
+  transferAId = trA.id;
 
   // Settings for user A
   await superuserDb.insert(settings).values({ userId: userAId, key: 'theme', value: 'dark' });
@@ -392,6 +424,66 @@ async function testApiLevelPaymentMethodOwnershipEnforced() {
   );
 }
 
+async function testDefaultBudgetCreationIsPerUser() {
+  console.log('Test: Default budget creation is per-user and race-safe');
+
+  const before = await superuserDb.select({ id: budgets.id }).from(budgets).where(eq(budgets.userId, userNoBudgetId));
+  assert(before.length === 0, 'User without budget starts with zero budgets');
+
+  const created = await Promise.all(
+    Array.from({ length: 8 }, () =>
+      withUserContext(userNoBudgetId, async (tx) => {
+        return await getOrCreateDefaultBudget(tx, userNoBudgetId);
+      })
+    )
+  );
+
+  const createdIds = new Set(created.map((b) => b.id));
+  assert(createdIds.size === 1, 'Concurrent default-budget creation resolves to one budget ID');
+
+  const after = await superuserDb.select({ id: budgets.id }).from(budgets).where(eq(budgets.userId, userNoBudgetId));
+  assert(after.length === 1, 'Exactly one default budget exists after concurrent creation');
+}
+
+async function testServiceLayerCrossTenantMutationsBlocked() {
+  console.log('Test: Service-layer cross-tenant mutations are blocked');
+
+  const updatedTxn = await withTenantContext(userBId, budgetBId, async (tx) => {
+    return await transactionsSvc.updateTransaction(tx, userBId, budgetBId, transactionAId, {
+      description: 'hijacked',
+    });
+  });
+  assert(updatedTxn === null, 'updateTransaction returns null for cross-tenant target');
+
+  const deletedTxn = await withTenantContext(userBId, budgetBId, async (tx) => {
+    return await transactionsSvc.deleteTransaction(tx, transactionAId, budgetBId);
+  });
+  assert(deletedTxn === false, 'deleteTransaction returns false for cross-tenant target');
+
+  const updatedTransfer = await withTenantContext(userBId, budgetBId, async (tx) => {
+    return await transfersSvc.updateTransfer(tx, transferAId, { description: 'hijacked transfer' }, budgetBId, userBId);
+  });
+  assert(updatedTransfer === null, 'updateTransfer returns null for cross-tenant target');
+
+  const deletedTransfer = await withTenantContext(userBId, budgetBId, async (tx) => {
+    return await transfersSvc.deleteTransfer(tx, transferAId, budgetBId);
+  });
+  assert(deletedTransfer === false, 'deleteTransfer returns false for cross-tenant target');
+
+  const updatedItem = await withTenantContext(userBId, budgetBId, async (tx) => {
+    return await budgetSvc.updateItem(tx, itemAId, { name: 'hijacked item' }, budgetBId);
+  });
+  assert(updatedItem === null, 'updateItem returns null for cross-tenant target');
+
+  await assertThrows(
+    () =>
+      withTenantContext(userBId, budgetBId, async (tx) => {
+        await accountsSvc.setPaymentMethodAsSavingsAccount(tx, paymentMethodAId, true, userBId, budgetBId);
+      }),
+    'setPaymentMethodAsSavingsAccount rejects foreign payment method'
+  );
+}
+
 async function testDbLevelPaymentMethodOwnershipEnforced() {
   console.log('Test: DB RLS rejects foreign payment method references');
 
@@ -529,6 +621,8 @@ test('RLS enforcement', async () => {
     await testCrossTenantReadBlocked();
     await testCrossTenantWriteBlocked();
     await testApiLevelPaymentMethodOwnershipEnforced();
+    await testDefaultBudgetCreationIsPerUser();
+    await testServiceLayerCrossTenantMutationsBlocked();
     await testDbLevelPaymentMethodOwnershipEnforced();
     await testMissingContextFailsClosed();
     await testDbProxyGuard();
