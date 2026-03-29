@@ -24,6 +24,7 @@ import * as transactionsSvc from '../src/services/transactions.js';
 import * as transfersSvc from '../src/services/transfers.js';
 import * as accountsSvc from '../src/services/accounts.js';
 import * as budgetSvc from '../src/services/budget.js';
+import * as paymentMethodsSvc from '../src/services/paymentMethods.js';
 import { getOrCreateDefaultBudget } from '../src/services/budgets.js';
 const {
   users,
@@ -424,6 +425,41 @@ async function testApiLevelPaymentMethodOwnershipEnforced() {
   );
 }
 
+async function testLinkedPaymentMethodOwnershipEnforced() {
+  console.log('Test: Linked payment method ownership is enforced');
+
+  const updated = await withUserContext(userAId, async (tx) => {
+    return await paymentMethodsSvc.updatePaymentMethod(tx, paymentMethodAId, userAId, {
+      linkedPaymentMethodId: paymentMethodA2Id,
+    });
+  });
+  assert(
+    updated?.linkedPaymentMethodId === paymentMethodA2Id,
+    'updatePaymentMethod allows linking to a same-user payment method'
+  );
+
+  await assertThrows(
+    () =>
+      withUserContext(userAId, async (tx) => {
+        await paymentMethodsSvc.updatePaymentMethod(tx, paymentMethodAId, userAId, {
+          linkedPaymentMethodId: paymentMethodBId,
+        });
+      }),
+    'updatePaymentMethod rejects a foreign linked payment method ID'
+  );
+
+  await assertThrows(
+    () =>
+      withUserContext(userAId, async (tx) => {
+        await tx
+          .update(paymentMethods)
+          .set({ linkedPaymentMethodId: paymentMethodBId, updatedAt: new Date() })
+          .where(eq(paymentMethods.id, paymentMethodAId));
+      }),
+    'RLS blocks updates that switch linked payment method ownership across tenants'
+  );
+}
+
 async function testDefaultBudgetCreationIsPerUser() {
   console.log('Test: Default budget creation is per-user and race-safe');
 
@@ -621,6 +657,7 @@ test('RLS enforcement', async () => {
     await testCrossTenantReadBlocked();
     await testCrossTenantWriteBlocked();
     await testApiLevelPaymentMethodOwnershipEnforced();
+    await testLinkedPaymentMethodOwnershipEnforced();
     await testDefaultBudgetCreationIsPerUser();
     await testServiceLayerCrossTenantMutationsBlocked();
     await testDbLevelPaymentMethodOwnershipEnforced();

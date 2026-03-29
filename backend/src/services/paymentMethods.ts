@@ -14,6 +14,16 @@ export class DuplicatePaymentMethodError extends Error {
   }
 }
 
+export const LINKED_PAYMENT_METHOD_OWNERSHIP_ERROR =
+  'Linked payment method not found or does not belong to you';
+
+export class LinkedPaymentMethodOwnershipError extends Error {
+  constructor() {
+    super(LINKED_PAYMENT_METHOD_OWNERSHIP_ERROR);
+    this.name = 'LinkedPaymentMethodOwnershipError';
+  }
+}
+
 // Savings types
 export type SavingsType = 'epargne' | 'prevoyance' | 'investissements';
 
@@ -71,6 +81,23 @@ async function checkDuplicate(
     const existingInstitution = m.institution?.trim() || null;
     return m.name.toLowerCase() === name.toLowerCase() && existingInstitution === normalizedInstitution;
   });
+}
+
+async function assertOwnedLinkedPaymentMethod(
+  tx: DbClient,
+  userId: string,
+  linkedPaymentMethodId: number
+) {
+  const linkedMethod = await tx.query.paymentMethods.findFirst({
+    where: and(
+      eq(paymentMethods.id, linkedPaymentMethodId),
+      eq(paymentMethods.userId, userId)
+    ),
+  });
+
+  if (!linkedMethod) {
+    throw new LinkedPaymentMethodOwnershipError();
+  }
 }
 
 // Create a new payment method
@@ -136,6 +163,10 @@ export async function updatePaymentMethod(
     if (isDuplicate) {
       throw new DuplicatePaymentMethodError(newName, newInstitution);
     }
+  }
+
+  if (data.linkedPaymentMethodId !== undefined && data.linkedPaymentMethodId !== null) {
+    await assertOwnedLinkedPaymentMethod(tx, userId, data.linkedPaymentMethodId);
   }
 
   const updateData: Partial<{

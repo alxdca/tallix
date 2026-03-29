@@ -2,9 +2,27 @@ import { Router, type Router as RouterType } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { withUserContext } from '../db/context.js';
 import * as paymentMethods from '../services/paymentMethods.js';
-import { DuplicatePaymentMethodError } from '../services/paymentMethods.js';
+import {
+  DuplicatePaymentMethodError,
+  LinkedPaymentMethodOwnershipError,
+} from '../services/paymentMethods.js';
 
 const router: RouterType = Router();
+
+function mapPaymentMethodWriteError(error: unknown): never {
+  if (error instanceof DuplicatePaymentMethodError) {
+    throw new AppError(409, error.message, {
+      code: 'PAYMENT_METHOD_DUPLICATE',
+      params: { displayName: error.displayName },
+    });
+  }
+
+  if (error instanceof LinkedPaymentMethodOwnershipError) {
+    throw new AppError(400, error.message);
+  }
+
+  throw error;
+}
 
 // GET /api/payment-methods - Get all payment methods for the current user
 router.get(
@@ -33,13 +51,7 @@ router.post(
       );
       res.status(201).json(newMethod);
     } catch (error) {
-      if (error instanceof DuplicatePaymentMethodError) {
-        throw new AppError(409, error.message, {
-          code: 'PAYMENT_METHOD_DUPLICATE',
-          params: { displayName: error.displayName },
-        });
-      }
-      throw error;
+      mapPaymentMethodWriteError(error);
     }
   })
 );
@@ -90,13 +102,7 @@ router.put(
       }
       res.json(updated);
     } catch (error) {
-      if (error instanceof DuplicatePaymentMethodError) {
-        throw new AppError(409, error.message, {
-          code: 'PAYMENT_METHOD_DUPLICATE',
-          params: { displayName: error.displayName },
-        });
-      }
-      throw error;
+      mapPaymentMethodWriteError(error);
     }
   })
 );
