@@ -216,8 +216,8 @@ export default function BudgetSpreadsheet({
 
       // For budget start of month:
       // - Current month or earlier: use previous month's actual end balance
-      // - After current month: use previous month's expected end (blended projection)
-      const isAfterCurrentMonth = isCurrentYear && i > currentMonthIndex + 1;
+      // - Future months: use previous month's expected end (blended projection)
+      const isAfterCurrentMonth = isCurrentYear && i > currentMonthIndex;
       const budgetStartOfMonth =
         i === 0
           ? paymentAccountsInitialBalance
@@ -266,9 +266,9 @@ export default function BudgetSpreadsheet({
       const expectedExpense = calculateExpectedSectionTotal(expenseSection, i);
       const expectedSavings = calculateExpectedSectionTotal(savingsSection, i);
 
-      // For current month and next month, start from the actual balance.
-      // For months further out, chain from the previous month's expected end balance.
-      const expectedStart = !isCurrentYear || i <= currentMonthIndex + 1
+      // For current month or earlier, start from actual balance.
+      // For future months, chain from the previous month's expected end balance.
+      const expectedStart = !isCurrentYear || i <= currentMonthIndex
         ? startOfMonth[i].actual
         : expectedEndOfMonth[i - 1];
       const expected = expectedStart + expectedIncome - expectedExpense - expectedSavings;
@@ -357,7 +357,7 @@ export default function BudgetSpreadsheet({
               <td className="cell actual">–</td>
               {fundsSummary.startOfMonth.map((m, i) => {
                 const showAsActual = isMonthActual(i);
-                const isAfterCurrent = isCurrentYear && i > currentMonthIndex + 1;
+                const isAfterCurrent = isCurrentYear && i > currentMonthIndex;
                 const value = isAfterCurrent ? m.budget : m.actual;
                 const tooltip = showAsActual && !isAfterCurrent ? buildTooltip(m.budget, m.actual, formatCurrency, t) : '';
                 return (

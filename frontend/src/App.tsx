@@ -22,6 +22,18 @@ import { organizeBudgetData } from './utils';
 import { getErrorMessage } from './utils/errorMessages';
 import { logger } from './utils/logger';
 
+interface ExpectedBreakdown {
+  monthlyByMonth: number[];
+  monthlyExpected: number;
+  yearlyRemaining: number;
+}
+
+interface ExpectedBreakdownByType {
+  income: ExpectedBreakdown;
+  expense: ExpectedBreakdown;
+  savings: ExpectedBreakdown;
+}
+
 function AppContent() {
   const [budgetData, setBudgetData] = useState<BudgetData | null>(null);
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
@@ -60,6 +72,43 @@ function AppContent() {
       .fill(0)
       .map((_, i) => paymentAccounts.reduce((sum, account) => sum + (account.monthlyBalances[i] || 0), 0));
   }, [paymentAccounts]);
+
+  const expectedBreakdown = useMemo<ExpectedBreakdownByType>(() => {
+    const empty: ExpectedBreakdownByType = {
+      income: { monthlyByMonth: Array(12).fill(0), monthlyExpected: 0, yearlyRemaining: 0 },
+      expense: { monthlyByMonth: Array(12).fill(0), monthlyExpected: 0, yearlyRemaining: 0 },
+      savings: { monthlyByMonth: Array(12).fill(0), monthlyExpected: 0, yearlyRemaining: 0 },
+    };
+
+    if (!budgetData) return empty;
+    const now = new Date();
+    const currentMonthIndex =
+      budgetData.year < now.getFullYear() ? 12 : budgetData.year > now.getFullYear() ? 0 : now.getMonth();
+
+    for (const group of budgetData.groups) {
+      if (group.type !== 'income' && group.type !== 'expense' && group.type !== 'savings') continue;
+
+      const section = empty[group.type];
+      for (const item of group.items) {
+        for (let i = 0; i < 12; i++) {
+          const month = item.months[i];
+          const actual = month?.actual || 0;
+          const budget = month?.budget || 0;
+          const expected = i < currentMonthIndex ? actual : actual !== 0 ? actual : budget;
+          section.monthlyByMonth[i] += expected;
+          section.monthlyExpected += expected;
+        }
+
+        const yearlyBudget = item.yearlyBudget || 0;
+        if (yearlyBudget > 0) {
+          const actualSpent = item.months.reduce((sum, month) => sum + (month?.actual || 0), 0);
+          section.yearlyRemaining += Math.max(0, yearlyBudget - actualSpent);
+        }
+      }
+    }
+
+    return empty;
+  }, [budgetData]);
 
   const loadData = useCallback(
     async (year?: number) => {
@@ -302,6 +351,10 @@ function AppContent() {
             expectedIncome={summary?.expectedIncome || 0}
             expectedExpenses={summary?.expectedExpenses || 0}
             expectedSavings={summary?.expectedSavings || 0}
+            months={months}
+            expectedIncomeBreakdown={expectedBreakdown.income}
+            expectedExpensesBreakdown={expectedBreakdown.expense}
+            expectedSavingsBreakdown={expectedBreakdown.savings}
             remainingBalance={summary?.remainingBalance || 0}
           />
         )}

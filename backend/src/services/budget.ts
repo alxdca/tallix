@@ -12,7 +12,6 @@ import {
   transfers,
 } from '../db/schema.js';
 import type { DbClient } from '../db/index.js';
-import * as accountsSvc from './accounts.js';
 import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, BudgetSummary, MonthlyValue } from '../types.js';
 
 // Configure Decimal.js for financial calculations
@@ -337,7 +336,11 @@ function calculateExpectedTotals(
     for (const item of group.items) {
       for (let i = 0; i < 12; i++) {
         const monthData = item.months[i];
-        const value = i <= currentMonthIndex ? monthData?.actual || 0 : monthData?.budget || 0;
+        const budget = monthData?.budget || 0;
+        const actual = monthData?.actual || 0;
+        // Completed months use strict actuals.
+        // Current/future months use actual if present, otherwise budget.
+        const value = i < currentMonthIndex ? actual : actual !== 0 ? actual : budget;
         if (group.type === 'income') {
           totals.income = totals.income.plus(value);
         } else if (group.type === 'expense') {
@@ -350,9 +353,7 @@ function calculateExpectedTotals(
       const yearlyBudget = item.yearlyBudget || 0;
       if (yearlyBudget !== 0) {
         const actualSpent = item.months.reduce((sum, m) => sum + (m?.actual || 0), 0);
-        const pastBudgets = item.months.reduce((sum, m, i) => sum + (i <= currentMonthIndex ? (m?.budget || 0) : 0), 0);
-        const yearlyUsed = Math.max(0, actualSpent - pastBudgets);
-        const remaining = Math.max(0, yearlyBudget - yearlyUsed);
+        const remaining = Math.max(0, yearlyBudget - actualSpent);
         if (group.type === 'income') {
           totals.income = totals.income.plus(remaining);
         } else if (group.type === 'expense') {
@@ -450,71 +451,6 @@ export async function getBudgetDataForYear(
   };
 }
 
-// Calculate projected end of year balance using blended expected amounts
-// (actual if available per item, otherwise budget) for months after current
-function calculateProjectedEndOfYear(
-  groups: BudgetGroup[],
-  initialBalance: number,
-  actualBalanceThroughMonth?: number
-): number {
-  const currentMonthIndex = new Date().getMonth();
-
-  // Compute per-month expected totals (actual if non-zero, else budget) per section
-  const monthlyExpected = {
-    income: Array(12).fill(0),
-    expense: Array(12).fill(0),
-    savings: Array(12).fill(0),
-  };
-
-  let incomeRemainingYearly = 0;
-  let expenseRemainingYearly = 0;
-  let savingsRemainingYearly = 0;
-
-  for (const group of groups) {
-    const section = monthlyExpected[group.type as keyof typeof monthlyExpected];
-    if (!section) continue;
-
-    for (const item of group.items) {
-      for (let i = 0; i < 12; i++) {
-        const monthData = item.months[i];
-        const budget = monthData?.budget || 0;
-        const actual = monthData?.actual || 0;
-        section[i] += actual !== 0 ? actual : budget;
-      }
-
-      const yearlyBudget = item.yearlyBudget || 0;
-      if (yearlyBudget > 0) {
-        const actualSpent = item.months.reduce((sum, m) => sum + (m?.actual || 0), 0);
-        const pastBudgets = item.months.reduce((sum, m, i) => sum + (i <= currentMonthIndex ? (m?.budget || 0) : 0), 0);
-        const yearlyUsed = Math.max(0, actualSpent - pastBudgets);
-        const remaining = Math.max(0, yearlyBudget - yearlyUsed);
-
-        if (group.type === 'income') {
-          incomeRemainingYearly += remaining;
-        } else if (group.type === 'expense') {
-          expenseRemainingYearly += remaining;
-        } else if (group.type === 'savings') {
-          savingsRemainingYearly += remaining;
-        }
-      }
-    }
-  }
-
-  let projectedEnd = actualBalanceThroughMonth ?? initialBalance;
-
-  // Add expected flows for months after current
-  for (let i = currentMonthIndex + 1; i < 12; i++) {
-    projectedEnd +=
-      monthlyExpected.income[i] -
-      monthlyExpected.expense[i] -
-      monthlyExpected.savings[i];
-  }
-
-  projectedEnd += incomeRemainingYearly - expenseRemainingYearly - savingsRemainingYearly;
-
-  return projectedEnd;
-}
-
 // Get budget summary for a year
 export async function getBudgetSummary(
   tx: DbClient,
@@ -546,17 +482,11 @@ export async function getBudgetSummary(
     .filter((b) => paymentMethodIds.has(b.paymentMethodId))
     .reduce((sum, b) => sum + parseFloat(b.initialBalance), 0);
 
-  let actualBalanceThroughMonth: number | undefined;
-  const accountsResponse = await accountsSvc.getAccountsForYear(tx, year, budgetId, userId);
-  const paymentAccounts = accountsResponse.accounts.filter((account) => !account.isSavingsAccount);
-  if (paymentAccounts.length > 0) {
-    const monthlyBalances = Array(12)
-      .fill(0)
-      .map((_, i) => paymentAccounts.reduce((sum, account) => sum + (account.monthlyBalances[i] || 0), 0));
-    actualBalanceThroughMonth = monthlyBalances[new Date().getMonth()] ?? initialBalance;
-  }
-
-  const remainingBalance = calculateProjectedEndOfYear(data.groups, initialBalance, actualBalanceThroughMonth);
+  const remainingBalance = new Decimal(initialBalance)
+    .plus(expectedTotals.income)
+    .minus(expectedTotals.expenses)
+    .minus(expectedTotals.savings)
+    .toNumber();
 
   return {
     initialBalance,

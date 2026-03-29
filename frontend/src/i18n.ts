@@ -116,6 +116,8 @@ const translations: Record<Locale, Record<string, any>> = {
       savings: 'Savings',
       expenses: 'Expenses',
       yearEndBalance: 'Year-end balance',
+      expectedTooltip:
+        'Monthly breakdown (completed months = actual; current/future = actual if present, else budget):\n{monthLines}\nMonthly subtotal: {monthlyExpected}\nYearly remaining: {yearlyRemaining}\nTotal = monthly subtotal + yearly remaining = {total}',
     },
     login: {
       adminSetup: 'Admin account setup',
@@ -691,6 +693,8 @@ const translations: Record<Locale, Record<string, any>> = {
       savings: 'Épargne',
       expenses: 'Dépenses',
       yearEndBalance: "Solde fin d'année",
+      expectedTooltip:
+        "Détail mensuel (mois terminés = réel ; mois courant/futurs = réel si disponible, sinon budget) :\n{monthLines}\nSous-total mensuel : {monthlyExpected}\nAnnuel restant : {yearlyRemaining}\nTotal = sous-total mensuel + annuel restant = {total}",
     },
     login: {
       adminSetup: 'Création du compte administrateur',
