@@ -261,11 +261,11 @@ export async function deleteItem(id: number): Promise<void> {
 }
 
 // Third Parties (autocomplete)
-export async function fetchThirdParties(search?: string): Promise<string[]> {
+export async function fetchThirdParties(search?: string, options: { signal?: AbortSignal } = {}): Promise<string[]> {
   const url = search
     ? `${API_BASE}/transactions/third-parties?search=${encodeURIComponent(search)}`
     : `${API_BASE}/transactions/third-parties`;
-  const response = await authFetch(url);
+  const response = await authFetch(url, { signal: options.signal });
   await ensureOk(response, 'Failed to fetch third parties');
   return response.json();
 }

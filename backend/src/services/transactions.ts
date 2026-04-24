@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { budgetItems, budgetYears, entryOrderOverrides, paymentMethods, transactions, transfers } from '../db/schema.js';
 import type { DbClient } from '../db/index.js';
 import { getOrCreateUnclassifiedItem } from './budget.js';
@@ -31,6 +31,22 @@ interface TransactionWithRelations {
     name: string;
     institution: string | null;
   } | null;
+}
+
+interface ThirdPartySuggestionEntry {
+  thirdParty: string;
+  normalized: string;
+}
+
+const THIRD_PARTY_SUGGESTION_CACHE_TTL_MS = 5 * 60 * 1000;
+const thirdPartySuggestionCache = new Map<number, { expiresAt: number; entries: ThirdPartySuggestionEntry[] }>();
+const thirdPartySuggestionLoads = new Map<number, Promise<ThirdPartySuggestionEntry[]>>();
+const thirdPartySuggestionCacheVersions = new Map<number, number>();
+
+export function invalidateThirdPartySuggestionCache(budgetId: number): void {
+  thirdPartySuggestionCacheVersions.set(budgetId, (thirdPartySuggestionCacheVersions.get(budgetId) ?? 0) + 1);
+  thirdPartySuggestionCache.delete(budgetId);
+  thirdPartySuggestionLoads.delete(budgetId);
 }
 
 // Format date to YYYY-MM-DD
@@ -376,6 +392,8 @@ export async function createTransaction(
     })
     .returning();
 
+  invalidateThirdPartySuggestionCache(budgetId);
+
   return {
     id: newTransaction.id,
     date: formatDate(newTransaction.date),
@@ -484,6 +502,8 @@ export async function updateTransaction(
     .returning();
 
   if (!updated) return null;
+
+  invalidateThirdPartySuggestionCache(budgetId);
 
   // Get payment method for display name
   const pm = await tx.query.paymentMethods.findFirst({
@@ -598,6 +618,9 @@ export async function deleteTransaction(tx: DbClient, id: number, budgetId: numb
     .delete(transactions)
     .where(and(eq(transactions.id, id), eq(transactions.yearId, transaction.yearId)))
     .returning({ id: transactions.id });
+  if (result.length > 0) {
+    invalidateThirdPartySuggestionCache(budgetId);
+  }
   return result.length > 0;
 }
 
@@ -625,46 +648,78 @@ export async function bulkDeleteTransactions(tx: DbClient, ids: number[], budget
     .where(sql`${transactions.id} IN ${validIds}`)
     .returning({ id: transactions.id });
 
+  if (result.length > 0) {
+    invalidateThirdPartySuggestionCache(budgetId);
+  }
+
   return { deleted: result.length };
 }
 
-// Get distinct third parties for autocomplete
-export async function getThirdParties(tx: DbClient, search: string | undefined, budgetId: number): Promise<string[]> {
-  const budgetCondition = sql`EXISTS (
-    SELECT 1 FROM ${budgetYears}
-    WHERE ${budgetYears.id} = ${transactions.yearId}
-    AND ${budgetYears.budgetId} = ${budgetId}
-  )`;
-
-  if (search?.trim()) {
-    const results = await tx
-      .select({
-        thirdParty: transactions.thirdParty,
-        count: sql<number>`COUNT(*)`.as('count'),
-      })
-      .from(transactions)
-      .where(
-        sql`${transactions.thirdParty} IS NOT NULL AND ${transactions.thirdParty} ILIKE ${`%${search}%`} AND ${budgetCondition}`
-      )
-      .groupBy(transactions.thirdParty)
-      .orderBy(desc(sql`COUNT(*)`))
-      .limit(20);
-
-    return results.map((r) => r.thirdParty).filter((tp): tp is string => tp !== null);
-  }
-
+async function loadThirdPartySuggestionEntries(tx: DbClient, budgetId: number): Promise<ThirdPartySuggestionEntry[]> {
   const results = await tx
     .select({
       thirdParty: transactions.thirdParty,
       count: sql<number>`COUNT(*)`.as('count'),
     })
     .from(transactions)
-    .where(sql`${transactions.thirdParty} IS NOT NULL AND ${budgetCondition}`)
+    .innerJoin(budgetYears, eq(transactions.yearId, budgetYears.id))
+    .where(and(eq(budgetYears.budgetId, budgetId), sql`${transactions.thirdParty} IS NOT NULL`))
     .groupBy(transactions.thirdParty)
-    .orderBy(desc(sql`COUNT(*)`))
-    .limit(50);
+    .orderBy(desc(sql`COUNT(*)`), asc(transactions.thirdParty));
 
-  return results.map((r) => r.thirdParty).filter((tp): tp is string => tp !== null);
+  return results
+    .map((r) =>
+      r.thirdParty === null
+        ? null
+        : {
+            thirdParty: r.thirdParty,
+            normalized: r.thirdParty.toLocaleLowerCase(),
+          }
+    )
+    .filter((entry): entry is ThirdPartySuggestionEntry => entry !== null);
+}
+
+async function getCachedThirdPartySuggestionEntries(tx: DbClient, budgetId: number): Promise<ThirdPartySuggestionEntry[]> {
+  const cached = thirdPartySuggestionCache.get(budgetId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.entries;
+  }
+
+  const existingLoad = thirdPartySuggestionLoads.get(budgetId);
+  if (existingLoad) {
+    return existingLoad;
+  }
+
+  const loadVersion = thirdPartySuggestionCacheVersions.get(budgetId) ?? 0;
+  const load = loadThirdPartySuggestionEntries(tx, budgetId)
+    .then((entries) => {
+      if ((thirdPartySuggestionCacheVersions.get(budgetId) ?? 0) === loadVersion) {
+        thirdPartySuggestionCache.set(budgetId, {
+          expiresAt: Date.now() + THIRD_PARTY_SUGGESTION_CACHE_TTL_MS,
+          entries,
+        });
+      }
+      return entries;
+    })
+    .finally(() => {
+      if (thirdPartySuggestionLoads.get(budgetId) === load) {
+        thirdPartySuggestionLoads.delete(budgetId);
+      }
+    });
+
+  thirdPartySuggestionLoads.set(budgetId, load);
+  return load;
+}
+
+// Get distinct third parties for autocomplete
+export async function getThirdParties(tx: DbClient, search: string | undefined, budgetId: number): Promise<string[]> {
+  const normalizedSearch = search?.trim().toLocaleLowerCase();
+  const entries = await getCachedThirdPartySuggestionEntries(tx, budgetId);
+  const matches = normalizedSearch
+    ? entries.filter((entry) => entry.normalized.includes(normalizedSearch))
+    : entries;
+
+  return matches.slice(0, normalizedSearch ? 20 : 50).map((entry) => entry.thirdParty);
 }
 
 // Bulk create transactions
@@ -782,6 +837,8 @@ export async function bulkCreateTransactions(
       })
     )
     .returning();
+
+  invalidateThirdPartySuggestionCache(budgetId);
 
   return {
     created: inserted.length,

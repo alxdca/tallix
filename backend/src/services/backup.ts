@@ -13,6 +13,7 @@ import {
   accountBalances,
 } from '../db/schema.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { invalidateThirdPartySuggestionCache } from './transactions.js';
 
 // ── Backup payload types ──────────────────────────────────────────────
 
@@ -725,6 +726,8 @@ export async function importBackup(
       }))
     );
   }
+
+  invalidateThirdPartySuggestionCache(budgetId);
 
   return {
     paymentMethods: payload.paymentMethods.length,

@@ -204,6 +204,13 @@
       "when": 1774939802000,
       "tag": "0029_add_transaction_list_sort_order",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1774943402000,
+      "tag": "0030_speed_up_third_party_autocomplete",
+      "breakpoints": true
     }
   ]
 }

@@ -208,6 +208,7 @@ export default function Transactions({
   const [newAmount, setNewAmount] = useState('');
   const [newItemId, setNewItemId] = useState<number | null>(null);
   const [autoItemFromThirdParty, setAutoItemFromThirdParty] = useState(false);
+  const [autoPaymentMethodFromThirdParty, setAutoPaymentMethodFromThirdParty] = useState(false);
   // Transfer-specific form state
   const [newSourceAccount, setNewSourceAccount] = useState(''); // Account ID
   const [newDestAccount, setNewDestAccount] = useState('');
@@ -328,23 +329,26 @@ export default function Transactions({
     }
   };
 
-  const applyThirdPartyCategorySuggestion = useCallback(
-    (value: string) => {
+  const applyNewThirdPartySuggestion = useCallback(
+    (value: string, source: 'blur' | 'select' = 'blur') => {
       const normalized = normalizeThirdParty(value);
       if (!normalized) {
         if (autoItemFromThirdParty) {
           setNewItemId(null);
           setAutoItemFromThirdParty(false);
         }
+        if (autoPaymentMethodFromThirdParty) {
+          setNewPaymentMethodId(null);
+          setAutoPaymentMethodFromThirdParty(false);
+        }
         return;
       }
 
-      const lastMatch = transactions.find(
-        (transaction) => transaction.itemId && normalizeThirdParty(transaction.thirdParty) === normalized
-      );
+      const lastMatch = transactions.find((transaction) => normalizeThirdParty(transaction.thirdParty) === normalized);
+      const shouldApplySelectedSuggestion = source === 'select';
 
       if (lastMatch?.itemId) {
-        if (newItemId === null || autoItemFromThirdParty) {
+        if (shouldApplySelectedSuggestion || newItemId === null || autoItemFromThirdParty) {
           setNewItemId(lastMatch.itemId);
           setAutoItemFromThirdParty(true);
         }
@@ -352,8 +356,38 @@ export default function Transactions({
         setNewItemId(null);
         setAutoItemFromThirdParty(false);
       }
+
+      if (lastMatch?.paymentMethodId) {
+        if (shouldApplySelectedSuggestion || newPaymentMethodId === null || autoPaymentMethodFromThirdParty) {
+          setNewPaymentMethodId(lastMatch.paymentMethodId);
+          setAutoPaymentMethodFromThirdParty(true);
+        }
+      } else if (autoPaymentMethodFromThirdParty) {
+        setNewPaymentMethodId(null);
+        setAutoPaymentMethodFromThirdParty(false);
+      }
     },
-    [transactions, newItemId, autoItemFromThirdParty]
+    [transactions, newItemId, autoItemFromThirdParty, newPaymentMethodId, autoPaymentMethodFromThirdParty]
+  );
+
+  const applyEditThirdPartySuggestion = useCallback(
+    (value: string, source: 'blur' | 'select' = 'blur') => {
+      if (source !== 'select') return;
+
+      const normalized = normalizeThirdParty(value);
+      if (!normalized) return;
+
+      const lastMatch = transactions.find(
+        (transaction) =>
+          normalizeThirdParty(transaction.thirdParty) === normalized &&
+          (!editingId?.startsWith('t_') || transaction.id !== parseInt(editingId.substring(2), 10))
+      );
+
+      if (lastMatch?.paymentMethodId) {
+        setEditPaymentMethodId(lastMatch.paymentMethodId);
+      }
+    },
+    [transactions, editingId]
   );
 
   // Combine transactions and transfers into unified entries
@@ -853,6 +887,7 @@ export default function Transactions({
         setNewDescription('');
         setNewThirdParty('');
         setNewPaymentMethodId(null);
+        setAutoPaymentMethodFromThirdParty(false);
         setNewAmount('');
         setNewItemId(null);
         setAutoItemFromThirdParty(false);
@@ -1294,7 +1329,7 @@ export default function Transactions({
               <ThirdPartyAutocomplete
                 value={newThirdParty}
                 onChange={setNewThirdParty}
-                onCommit={applyThirdPartyCategorySuggestion}
+                onCommit={applyNewThirdPartySuggestion}
                 placeholder={t('transactions.thirdPartyPlaceholder')}
                 className="form-input third-party-input"
               />
@@ -1369,7 +1404,10 @@ export default function Transactions({
             <div className="form-row">
               <select
                 value={newPaymentMethodId ?? ''}
-                onChange={(e) => setNewPaymentMethodId(e.target.value ? Number(e.target.value) : null)}
+                onChange={(e) => {
+                  setNewPaymentMethodId(e.target.value ? Number(e.target.value) : null);
+                  setAutoPaymentMethodFromThirdParty(false);
+                }}
                 className="form-select payment-method-select"
               >
                 <option value="">{t('transactions.paymentMethod')}</option>
@@ -1956,6 +1994,7 @@ export default function Transactions({
                             <ThirdPartyAutocomplete
                               value={editThirdParty}
                               onChange={setEditThirdParty}
+                              onCommit={applyEditThirdPartySuggestion}
                               placeholder={t('transactions.thirdParty')}
                               className="edit-input"
                             />

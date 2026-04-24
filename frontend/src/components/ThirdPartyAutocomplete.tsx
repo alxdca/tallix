@@ -7,9 +7,42 @@ import { logger } from '../utils/logger';
 interface ThirdPartyAutocompleteProps {
   value: string;
   onChange: (value: string) => void;
-  onCommit?: (value: string) => void;
+  onCommit?: (value: string, source: 'blur' | 'select') => void;
   placeholder?: string;
   className?: string;
+}
+
+const SUGGESTION_DEBOUNCE_MS = 120;
+const SUGGESTION_CACHE_TTL_MS = 30_000;
+
+const suggestionCache = new Map<string, { expiresAt: number; results: string[] }>();
+let warmSuggestionsExpiresAt = 0;
+let warmSuggestionsPromise: Promise<void> | null = null;
+
+function getCacheKey(search: string): string {
+  return search.trim().toLocaleLowerCase();
+}
+
+function filterExactMatches(results: string[], search: string): string[] {
+  const normalizedSearch = search.toLocaleLowerCase();
+  return results.filter((tp) => tp.toLocaleLowerCase() !== normalizedSearch);
+}
+
+function warmSuggestionSource(): void {
+  if (warmSuggestionsExpiresAt > Date.now() || warmSuggestionsPromise) {
+    return;
+  }
+
+  warmSuggestionsPromise = fetchThirdParties()
+    .then(() => {
+      warmSuggestionsExpiresAt = Date.now() + SUGGESTION_CACHE_TTL_MS;
+    })
+    .catch((error) => {
+      logger.error('Failed to warm third party suggestions', error);
+    })
+    .finally(() => {
+      warmSuggestionsPromise = null;
+    });
 }
 
 export default function ThirdPartyAutocomplete({
@@ -28,26 +61,59 @@ export default function ThirdPartyAutocomplete({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeRequestRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch suggestions with debounce
   const fetchSuggestions = useCallback(async (search: string) => {
-    if (!search.trim()) {
+    const query = search.trim();
+
+    const requestId = activeRequestRef.current + 1;
+    activeRequestRef.current = requestId;
+    abortControllerRef.current?.abort();
+
+    if (!query) {
       setSuggestions([]);
+      setIsLoading(false);
       return;
     }
 
+    const cacheKey = getCacheKey(query);
+    const cached = suggestionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      setSuggestions(filterExactMatches(cached.results, query));
+      setHighlightedIndex(-1);
+      setIsLoading(false);
+      return;
+    }
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     setIsLoading(true);
     try {
-      const results = await fetchThirdParties(search);
-      // Filter out exact matches and current value
-      const filtered = results.filter((tp) => tp.toLowerCase() !== search.toLowerCase());
-      setSuggestions(filtered);
+      const results = await fetchThirdParties(query, { signal: abortController.signal });
+      if (requestId !== activeRequestRef.current) return;
+
+      suggestionCache.set(cacheKey, {
+        expiresAt: Date.now() + SUGGESTION_CACHE_TTL_MS,
+        results,
+      });
+      setSuggestions(filterExactMatches(results, query));
       setHighlightedIndex(-1);
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
       logger.error('Failed to fetch third parties', error);
       setSuggestions([]);
     } finally {
-      setIsLoading(false);
+      if (requestId === activeRequestRef.current) {
+        setIsLoading(false);
+      }
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
     }
   }, []);
 
@@ -57,10 +123,14 @@ export default function ThirdPartyAutocomplete({
       clearTimeout(debounceRef.current);
     }
 
+    activeRequestRef.current += 1;
+    abortControllerRef.current?.abort();
+    setIsLoading(false);
+
     if (isOpen && value.trim()) {
       debounceRef.current = setTimeout(() => {
         fetchSuggestions(value);
-      }, 200);
+      }, SUGGESTION_DEBOUNCE_MS);
     } else {
       setSuggestions([]);
     }
@@ -71,6 +141,14 @@ export default function ThirdPartyAutocomplete({
       }
     };
   }, [value, isOpen, fetchSuggestions]);
+
+  useEffect(() => {
+    warmSuggestionSource();
+
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -90,14 +168,11 @@ export default function ThirdPartyAutocomplete({
 
   const handleInputFocus = () => {
     setIsOpen(true);
-    if (value.trim()) {
-      fetchSuggestions(value);
-    }
   };
 
   const handleSelectSuggestion = (suggestion: string) => {
     onChange(suggestion);
-    onCommit?.(suggestion);
+    onCommit?.(suggestion, 'select');
     setIsOpen(false);
     setSuggestions([]);
   };
@@ -134,7 +209,7 @@ export default function ThirdPartyAutocomplete({
         value={value}
         onChange={handleInputChange}
         onFocus={handleInputFocus}
-        onBlur={() => onCommit?.(value)}
+        onBlur={() => onCommit?.(value, 'blur')}
         onKeyDown={handleKeyDown}
         placeholder={resolvedPlaceholder}
         className={`autocomplete-input ${className}`}
