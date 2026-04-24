@@ -250,6 +250,28 @@ export const transfers = pgTable('transfers', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const entryOrderOverrides = pgTable(
+  'entry_order_overrides',
+  {
+    id: serial('id').primaryKey(),
+    yearId: integer('year_id')
+      .references(() => budgetYears.id, { onDelete: 'cascade' })
+      .notNull(),
+    entryType: varchar('entry_type', { length: 20 }).notNull(), // 'transaction' | 'transfer'
+    entryId: integer('entry_id').notNull(),
+    sortOffset: integer('sort_offset'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    yearEntryUnique: uniqueIndex('entry_order_overrides_year_entry_unique').on(
+      table.yearId,
+      table.entryType,
+      table.entryId
+    ),
+  })
+);
+
 // Assets (custom asset types for net worth tracking)
 export const assets = pgTable(
   'assets',

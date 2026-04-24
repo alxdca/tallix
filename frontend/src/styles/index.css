@@ -2653,11 +2653,41 @@ td.zero {
   text-align: center;
 }
 
+.transactions-table .col-order {
+  width: 44px;
+  text-align: center;
+}
+
 .transactions-table .col-select input[type="checkbox"] {
   width: 16px;
   height: 16px;
   cursor: pointer;
   accent-color: var(--accent-budget);
+}
+
+.transactions-table .order-cell {
+  width: 44px;
+  text-align: center;
+}
+
+.transactions-table .order-controls {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.transactions-table .order-controls .btn-icon {
+  opacity: 1;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+}
+
+.transactions-table .order-placeholder {
+  display: inline-block;
+  width: 28px;
+  height: 1px;
 }
 
 /* Sortable columns */
@@ -2982,6 +3012,40 @@ td.zero {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.bulk-order-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.btn-order {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.btn-order:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.btn-order:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Summary count item */

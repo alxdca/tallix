@@ -14,6 +14,7 @@ import {
   fetchTransferAccounts,
   fetchTransfers,
   type PaymentMethod,
+  reorderTransactionEntries,
   type Transaction,
   type Transfer,
   updateTransaction,
@@ -28,11 +29,19 @@ import { logger } from '../utils/logger';
 import BulkImportModal from './BulkImportModal';
 import ConfirmDialog from './ConfirmDialog';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
+import {
+  buildSelectionReorderUpdates,
+  buildSingleReorderUpdates,
+  canReorderSelectedEntries,
+  getSelectedReorderEntries,
+} from './transactionsReorder';
 
 // Helper to format name with institution
 const formatWithInstitution = (name: string, institution: string | null): string => {
   return institution ? `${name} (${institution})` : name;
 };
+
+const TRANSACTION_PRIORITY_STORAGE_PREFIX = 'tallix_transaction_sort_priorities';
 
 type EntryType = 'transaction' | 'transfer';
 
@@ -44,6 +53,8 @@ interface UnifiedEntry {
   amount: number;
   accountingMonth: number;
   accountingYear: number;
+  sortPriority: number | null;
+  naturalDateIndex: number;
   // Transaction-specific
   transaction?: Transaction;
   // Transfer-specific
@@ -66,8 +77,75 @@ interface TransactionsProps {
   initialFilters?: Partial<TransactionsFilters>;
 }
 
-type SortField = 'date' | 'thirdParty' | 'description' | 'paymentMethod' | 'category' | 'amount';
+type SortField = 'manual' | 'date' | 'thirdParty' | 'description' | 'paymentMethod' | 'category' | 'amount';
 type SortDirection = 'asc' | 'desc';
+
+function getTransactionPriorityStorageKey(yearId: number): string {
+  return `${TRANSACTION_PRIORITY_STORAGE_PREFIX}:${yearId}`;
+}
+
+function readStoredTransactionPriorities(yearId: number): Map<number, number> {
+  try {
+    const raw = localStorage.getItem(getTransactionPriorityStorageKey(yearId));
+    if (!raw) {
+      return new Map();
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return new Map(
+      Object.entries(parsed)
+        .map(([id, value]) => {
+          const numericId = parseInt(id, 10);
+          if (Number.isNaN(numericId) || typeof value !== 'number' || !Number.isFinite(value)) {
+            return null;
+          }
+          return [numericId, Math.trunc(value)] as const;
+        })
+        .filter((entry): entry is readonly [number, number] => entry !== null)
+    );
+  } catch (error) {
+    logger.warn('Failed to read stored transaction priorities', { yearId, error: String(error) });
+    return new Map();
+  }
+}
+
+function writeStoredTransactionPriorities(
+  yearId: number,
+  updates: Array<{ id: number; sortPriority: number | null }>
+): void {
+  try {
+    const current = Object.fromEntries(readStoredTransactionPriorities(yearId));
+
+    for (const update of updates) {
+      if (update.sortPriority === null || update.sortPriority === 0) {
+        delete current[String(update.id)];
+      } else {
+        current[String(update.id)] = Math.trunc(update.sortPriority);
+      }
+    }
+
+    if (Object.keys(current).length === 0) {
+      localStorage.removeItem(getTransactionPriorityStorageKey(yearId));
+      return;
+    }
+
+    localStorage.setItem(getTransactionPriorityStorageKey(yearId), JSON.stringify(current));
+  } catch (error) {
+    logger.warn('Failed to write stored transaction priorities', { yearId, error: String(error) });
+  }
+}
+
+function mergeStoredTransactionPriorities(yearId: number, entries: Transaction[]): Transaction[] {
+  const storedPriorities = readStoredTransactionPriorities(yearId);
+  if (storedPriorities.size === 0) {
+    return entries;
+  }
+
+  return entries.map((entry) => ({
+    ...entry,
+    sortPriority: entry.sortPriority ?? storedPriorities.get(entry.id) ?? null,
+  }));
+}
 
 export interface TransactionsFilters {
   dateFrom: Date | null;
@@ -80,7 +158,13 @@ export interface TransactionsFilters {
 
 type Filters = TransactionsFilters;
 
-export default function Transactions({ year, yearId, groups, onTransactionsChanged, initialFilters }: TransactionsProps) {
+export default function Transactions({
+  year,
+  yearId,
+  groups,
+  onTransactionsChanged,
+  initialFilters,
+}: TransactionsProps) {
   const formatCurrency = useFormatCurrency();
   const { dialogProps, confirm } = useConfirmDialog();
   const { t, monthNames } = useI18n();
@@ -112,8 +196,8 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   }, [initialFilters]);
 
   // Sort state
-  const [sortField, setSortField] = useState<SortField>('date');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [sortField, setSortField] = useState<SortField>('manual');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   // Form state (dates stored in DD/MM/YYYY display format)
   const [newEntryType, setNewEntryType] = useState<EntryType>('transaction');
@@ -195,7 +279,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
         fetchTransfers(year),
         fetchTransferAccounts(year),
       ]);
-      setTransactions(transactionsData);
+      setTransactions(mergeStoredTransactionPriorities(yearId, transactionsData));
       setPaymentMethods(methodsData);
       setTransfers(transfersData);
       setTransferAccounts(accountsData);
@@ -204,7 +288,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
     } finally {
       setLoading(false);
     }
-  }, [year]);
+  }, [year, yearId]);
 
   useEffect(() => {
     loadData();
@@ -227,7 +311,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
   const loadTransactions = async () => {
     try {
       const [transactionsData, transfersData] = await Promise.all([fetchTransactions(year), fetchTransfers(year)]);
-      setTransactions(transactionsData);
+      setTransactions(mergeStoredTransactionPriorities(yearId, transactionsData));
       setTransfers(transfersData);
       // Clear selections that no longer exist
       setSelectedIds((prev) => {
@@ -256,9 +340,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       }
 
       const lastMatch = transactions.find(
-        (transaction) =>
-          transaction.itemId &&
-          normalizeThirdParty(transaction.thirdParty) === normalized
+        (transaction) => transaction.itemId && normalizeThirdParty(transaction.thirdParty) === normalized
       );
 
       if (lastMatch?.itemId) {
@@ -276,7 +358,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
   // Combine transactions and transfers into unified entries
   const unifiedEntries = useMemo((): UnifiedEntry[] => {
-    const txEntries: UnifiedEntry[] = transactions.map((t) => ({
+    const txEntries = transactions.map((t) => ({
       id: `t_${t.id}`,
       type: 'transaction' as EntryType,
       date: t.date,
@@ -284,10 +366,11 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       amount: t.amount,
       accountingMonth: t.accountingMonth,
       accountingYear: t.accountingYear,
+      sortPriority: t.sortPriority,
       transaction: t,
     }));
 
-    const xferEntries: UnifiedEntry[] = transfers.map((x) => ({
+    const xferEntries = transfers.map((x) => ({
       id: `x_${x.id}`,
       type: 'transfer' as EntryType,
       date: x.date,
@@ -295,11 +378,36 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       amount: x.amount,
       accountingMonth: x.accountingMonth,
       accountingYear: x.accountingYear,
+      sortPriority: x.sortPriority,
       transfer: x,
     }));
 
-    return [...txEntries, ...xferEntries];
+    const naturalDateCounts = new Map<string, number>();
+
+    return [...txEntries, ...xferEntries]
+      .sort((a, b) => {
+        const dateComparison = b.date.localeCompare(a.date);
+        if (dateComparison !== 0) return dateComparison;
+        if (a.type !== b.type) return a.type === 'transaction' ? -1 : 1;
+        return parseInt(b.id.substring(2), 10) - parseInt(a.id.substring(2), 10);
+      })
+      .map((entry) => {
+        const naturalDateIndex = naturalDateCounts.get(entry.date) ?? 0;
+        naturalDateCounts.set(entry.date, naturalDateIndex + 1);
+        return {
+          ...entry,
+          naturalDateIndex,
+        };
+      });
   }, [transactions, transfers]);
+
+  const hasActiveFilters =
+    filters.dateFrom ||
+    filters.dateTo ||
+    filters.thirdParty ||
+    filters.description ||
+    filters.paymentMethods.length > 0 ||
+    filters.categoryFilter;
 
   // Filtered and sorted entries
   const filteredEntries = useMemo(() => {
@@ -382,6 +490,15 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       let comparison = 0;
 
       switch (sortField) {
+        case 'manual':
+          comparison = b.date.localeCompare(a.date);
+          if (comparison === 0) {
+            comparison = (b.sortPriority ?? 0) - (a.sortPriority ?? 0);
+          }
+          if (comparison === 0) {
+            comparison = a.naturalDateIndex - b.naturalDateIndex;
+          }
+          break;
         case 'date':
           comparison = a.date.localeCompare(b.date);
           break;
@@ -433,6 +550,150 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
     return result;
   }, [unifiedEntries, filters, sortField, sortDirection, t]);
+
+  const manualEntries = useMemo(
+    () =>
+      [...unifiedEntries].sort((a, b) => {
+        const dateComparison = b.date.localeCompare(a.date);
+        if (dateComparison !== 0) {
+          return dateComparison;
+        }
+
+        const priorityComparison = (b.sortPriority ?? 0) - (a.sortPriority ?? 0);
+        if (priorityComparison !== 0) {
+          return priorityComparison;
+        }
+        return a.naturalDateIndex - b.naturalDateIndex;
+      }),
+    [unifiedEntries]
+  );
+
+  const canReorderRows = !editingId;
+
+  const selectedReorderEntries = useMemo(
+    () => getSelectedReorderEntries(manualEntries, selectedIds),
+    [manualEntries, selectedIds]
+  );
+
+  const canReorderSelection = useMemo(
+    () => canReorderSelectedEntries(manualEntries, selectedIds, canReorderRows),
+    [manualEntries, selectedIds, canReorderRows]
+  );
+
+  const applyPriorityUpdatesLocally = useCallback(
+    (entries: Array<{ type: 'transaction' | 'transfer'; id: number; sortPriority: number | null }>) => {
+      const transactionPriorityMap = new Map(
+        entries
+          .filter((entry) => entry.type === 'transaction')
+          .map((entry) => [
+            entry.id,
+            entry.sortPriority === null || entry.sortPriority === 0 ? null : Math.trunc(entry.sortPriority),
+          ])
+      );
+      const transferPriorityMap = new Map(
+        entries
+          .filter((entry) => entry.type === 'transfer')
+          .map((entry) => [
+            entry.id,
+            entry.sortPriority === null || entry.sortPriority === 0 ? null : Math.trunc(entry.sortPriority),
+          ])
+      );
+
+      if (transactionPriorityMap.size > 0) {
+        writeStoredTransactionPriorities(
+          yearId,
+          [...transactionPriorityMap.entries()].map(([id, sortPriority]) => ({
+            id,
+            sortPriority,
+          }))
+        );
+        setTransactions((current) =>
+          current.map((transaction) =>
+            transactionPriorityMap.has(transaction.id)
+              ? { ...transaction, sortPriority: transactionPriorityMap.get(transaction.id) ?? null }
+              : transaction
+          )
+        );
+      }
+
+      if (transferPriorityMap.size > 0) {
+        setTransfers((current) =>
+          current.map((transfer) =>
+            transferPriorityMap.has(transfer.id)
+              ? { ...transfer, sortPriority: transferPriorityMap.get(transfer.id) ?? null }
+              : transfer
+          )
+        );
+      }
+    },
+    [yearId]
+  );
+
+  const persistEntryOrder = useCallback(
+    async (entries: Array<{ type: 'transaction' | 'transfer'; id: number; sortPriority: number | null }>) => {
+      await reorderTransactionEntries(entries);
+      onTransactionsChanged?.();
+    },
+    [onTransactionsChanged]
+  );
+
+  const handleReorderSelection = useCallback(
+    async (direction: 'up' | 'down' | 'top' | 'bottom') => {
+      if (!canReorderSelection || isSubmitting) return;
+
+      const selectedEntries = selectedReorderEntries;
+      if (selectedEntries.length === 0) return;
+
+      const priorityUpdates = buildSelectionReorderUpdates(manualEntries, selectedIds, direction);
+      if (priorityUpdates.length === 0) return;
+
+      setSortField('manual');
+      setSortDirection('asc');
+      applyPriorityUpdatesLocally(priorityUpdates);
+      setIsSubmitting(true);
+      try {
+        await persistEntryOrder(priorityUpdates);
+      } catch (error) {
+        logger.error('Failed to reorder transactions', error);
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [
+      applyPriorityUpdatesLocally,
+      canReorderSelection,
+      isSubmitting,
+      manualEntries,
+      persistEntryOrder,
+      selectedIds,
+      selectedReorderEntries,
+    ]
+  );
+
+  const handleReorderSingle = useCallback(
+    async (entryId: string, direction: 'up' | 'down') => {
+      if (!canReorderRows || isSubmitting) return;
+
+      const entry = manualEntries.find((candidate) => candidate.id === entryId);
+      if (!entry) return;
+
+      setSortField('manual');
+      setSortDirection('asc');
+      const priorityUpdates = buildSingleReorderUpdates(manualEntries, entry, direction);
+      if (priorityUpdates.length === 0) return;
+
+      applyPriorityUpdatesLocally(priorityUpdates);
+      setIsSubmitting(true);
+      try {
+        await persistEntryOrder(priorityUpdates);
+      } catch (error) {
+        logger.error('Failed to reorder transaction', error);
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [applyPriorityUpdatesLocally, canReorderRows, isSubmitting, manualEntries, persistEntryOrder]
+  );
 
   // Selection handlers
   const toggleSelect = useCallback((id: string) => {
@@ -518,6 +779,12 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
 
   // Sort handler
   const handleSort = (field: SortField) => {
+    if (field === 'manual') {
+      setSortField('manual');
+      setSortDirection('asc');
+      return;
+    }
+
     if (sortField === field) {
       setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
@@ -556,14 +823,6 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       categoryFilter: '',
     });
   };
-
-  const hasActiveFilters =
-    filters.dateFrom ||
-    filters.dateTo ||
-    filters.thirdParty ||
-    filters.description ||
-    filters.paymentMethods.length > 0 ||
-    filters.categoryFilter;
 
   // Parse account ID string
   const parseAccountString = (str: string): { id: number } | null => {
@@ -731,7 +990,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
       } else {
         // Update transaction
         if (!editPaymentMethodId) return;
-        
+
         const transactionData: Parameters<typeof updateTransaction>[1] = {
           itemId: editItemId,
           date: parseDateInput(editDate),
@@ -841,6 +1100,58 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
         <div className="transactions-title-row">
           <h2>{t('transactions.title', { year })}</h2>
           <div className="transactions-actions">
+            {canReorderSelection && (
+              <div className="bulk-order-actions">
+                <button
+                  type="button"
+                  className="btn-order"
+                  onClick={() => handleReorderSelection('top')}
+                  disabled={isSubmitting}
+                  title={t('transactions.moveSelectionToTop')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="18 11 12 5 6 11" />
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="3" x2="19" y2="3" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="btn-order"
+                  onClick={() => handleReorderSelection('up')}
+                  disabled={isSubmitting}
+                  title={t('transactions.moveSelectionUp')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="18 15 12 9 6 15" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="btn-order"
+                  onClick={() => handleReorderSelection('down')}
+                  disabled={isSubmitting}
+                  title={t('transactions.moveSelectionDown')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="btn-order"
+                  onClick={() => handleReorderSelection('bottom')}
+                  disabled={isSubmitting}
+                  title={t('transactions.moveSelectionToBottom')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 13 12 19 18 13" />
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="21" x2="19" y2="21" />
+                  </svg>
+                </button>
+              </div>
+            )}
             {selectedIds.size > 0 && (
               <button className="btn-danger" onClick={handleBulkDelete} disabled={isSubmitting}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1154,13 +1465,13 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
               </svg>
               {t('common.add')}
             </button>
-        </div>
-      </form>
+          </div>
+        </form>
       </div>
 
       {/* Transactions List */}
       <div className="transactions-list">
-        {transactions.length === 0 ? (
+        {unifiedEntries.length === 0 ? (
           <div className="empty-transactions">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <line x1="12" y1="1" x2="12" y2="23" />
@@ -1194,6 +1505,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                     title={t('transactions.selectAll')}
                   />
                 </th>
+                <th className="col-order sortable" onClick={() => handleSort('manual')}>
+                  {t('transactions.order')} <SortIcon field="manual" />
+                </th>
                 <th className="sortable" onClick={() => handleSort('date')}>
                   {t('transactions.date')} <SortIcon field="date" />
                 </th>
@@ -1219,6 +1533,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 <th>{t('transactions.actions')}</th>
               </tr>
               <tr className="filter-row">
+                <th></th>
                 <th></th>
                 <th>
                   <div className="date-range-filter">
@@ -1362,8 +1677,7 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                 const isTransfer = entry.type === 'transfer';
                 const transaction = entry.transaction;
                 const transfer = entry.transfer;
-                const isPotentialDuplicate =
-                  !isTransfer && transaction?.warning === 'potential_duplicate';
+                const isPotentialDuplicate = !isTransfer && transaction?.warning === 'potential_duplicate';
 
                 return (
                   <tr
@@ -1377,6 +1691,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                         <>
                           <td>
                             <input type="checkbox" checked={selectedIds.has(entry.id)} disabled />
+                          </td>
+                          <td className="order-cell">
+                            <span className="order-placeholder" />
                           </td>
                           <td>
                             <div className="date-input-wrapper edit-date-wrapper">
@@ -1502,13 +1819,13 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             </div>
                           </td>
                           <td>
-                              <input
-                                type="text"
-                                value={editDescription}
-                                onChange={(e) => setEditDescription(e.target.value)}
-                                className="edit-input"
-                                placeholder={t('transactions.description')}
-                              />
+                            <input
+                              type="text"
+                              value={editDescription}
+                              onChange={(e) => setEditDescription(e.target.value)}
+                              className="edit-input"
+                              placeholder={t('transactions.description')}
+                            />
                           </td>
                           <td>-</td>
                           <td>-</td>
@@ -1562,6 +1879,9 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               onChange={() => toggleSelect(entry.id)}
                               disabled
                             />
+                          </td>
+                          <td className="order-cell">
+                            <span className="order-placeholder" />
                           </td>
                           <td>
                             <div className="date-input-wrapper edit-date-wrapper">
@@ -1764,6 +2084,46 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                             onChange={() => toggleSelect(entry.id)}
                           />
                         </td>
+                        <td className="order-cell">
+                          <div className="order-controls">
+                            <button
+                              type="button"
+                              className="btn-icon reorder"
+                              onClick={() => handleReorderSingle(entry.id, 'up')}
+                              title={t('common.moveUp')}
+                              disabled={!canReorderRows || isSubmitting}
+                            >
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <polyline points="18 15 12 9 6 15" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-icon reorder"
+                              onClick={() => handleReorderSingle(entry.id, 'down')}
+                              title={t('common.moveDown')}
+                              disabled={!canReorderRows || isSubmitting}
+                            >
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <polyline points="6 9 12 15 18 9" />
+                              </svg>
+                            </button>
+                          </div>
+                        </td>
                         <td className="date-cell">{formatDateDisplay(entry.date)}</td>
                         <td className="accounting-cell">
                           {formatAccountingPeriod(entry.accountingMonth, entry.accountingYear, monthNames)}
@@ -1863,7 +2223,11 @@ export default function Transactions({ year, yearId, groups, onTransactionsChang
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
                           </button>
-                          <button className="btn-icon delete" onClick={() => handleDelete(entry.id)} title={t('common.delete')}>
+                          <button
+                            className="btn-icon delete"
+                            onClick={() => handleDelete(entry.id)}
+                            title={t('common.delete')}
+                          >
                             <svg
                               width="16"
                               height="16"

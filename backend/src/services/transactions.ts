@@ -1,5 +1,5 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
-import { budgetItems, budgetYears, paymentMethods, transactions } from '../db/schema.js';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { budgetItems, budgetYears, entryOrderOverrides, paymentMethods, transactions, transfers } from '../db/schema.js';
 import type { DbClient } from '../db/index.js';
 import { getOrCreateUnclassifiedItem } from './budget.js';
 
@@ -197,6 +197,83 @@ async function getOwnedPaymentMethodOrThrow(tx: DbClient, userId: string, paymen
   return paymentMethod;
 }
 
+export async function getEntryOrderOffsetMap(
+  tx: DbClient,
+  yearId: number,
+  entryType: 'transaction' | 'transfer'
+): Promise<Map<number, number | null>> {
+  try {
+    const rows = await tx.query.entryOrderOverrides.findMany({
+      where: and(eq(entryOrderOverrides.yearId, yearId), eq(entryOrderOverrides.entryType, entryType)),
+    });
+
+    return new Map(rows.map((row) => [row.entryId, row.sortOffset]));
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'cause' in error && typeof error.cause === 'object' && error.cause !== null
+        ? (error.cause as { code?: string }).code
+        : undefined;
+
+    if (code === '42P01') {
+      return new Map();
+    }
+
+    throw error;
+  }
+}
+
+async function getOwnedEntriesForPriorityUpdate(
+  tx: DbClient,
+  entries: { type: 'transaction' | 'transfer'; id: number; sortPriority: number | null }[],
+  budgetId: number
+) {
+  const transactionIds = entries.filter((entry) => entry.type === 'transaction').map((entry) => entry.id);
+  const transferIds = entries.filter((entry) => entry.type === 'transfer').map((entry) => entry.id);
+  const entryYearMap = new Map<string, number>();
+  const entryDateMap = new Map<string, string>();
+
+  if (transactionIds.length > 0) {
+    const ownedTransactions = await tx.query.transactions.findMany({
+      where: inArray(transactions.id, transactionIds),
+      with: {
+        year: true,
+      },
+    });
+
+    if (
+      ownedTransactions.length !== transactionIds.length ||
+      ownedTransactions.some((transaction) => transaction.year.budgetId !== budgetId)
+    ) {
+      throw new Error('Some transactions were not found in the current budget');
+    }
+
+    for (const transaction of ownedTransactions) {
+      entryYearMap.set(`transaction:${transaction.id}`, transaction.yearId);
+      entryDateMap.set(`transaction:${transaction.id}`, formatDate(transaction.date));
+    }
+  }
+
+  if (transferIds.length > 0) {
+    const ownedTransfers = await tx.query.transfers.findMany({
+      where: inArray(transfers.id, transferIds),
+      with: {
+        year: true,
+      },
+    });
+
+    if (ownedTransfers.length !== transferIds.length || ownedTransfers.some((transfer) => transfer.year.budgetId !== budgetId)) {
+      throw new Error('Some transfers were not found in the current budget');
+    }
+
+    for (const transfer of ownedTransfers) {
+      entryYearMap.set(`transfer:${transfer.id}`, transfer.yearId);
+      entryDateMap.set(`transfer:${transfer.id}`, formatDate(transfer.date));
+    }
+  }
+
+  return { entryYearMap, entryDateMap };
+}
+
 // Get all transactions for a year
 export async function getTransactionsForYear(tx: DbClient, year: number, budgetId: number) {
   const yearId = await getYearId(tx, year, budgetId);
@@ -215,7 +292,12 @@ export async function getTransactionsForYear(tx: DbClient, year: number, budgetI
     },
   });
 
-  return (allTransactions as unknown as TransactionWithRelations[]).map(formatTransaction);
+  const orderOffsetMap = await getEntryOrderOffsetMap(tx, yearId, 'transaction');
+
+  return (allTransactions as unknown as TransactionWithRelations[]).map((transaction) => ({
+    ...formatTransaction(transaction),
+    sortPriority: orderOffsetMap.get(transaction.id) ?? null,
+  }));
 }
 
 // Create a new transaction
@@ -305,6 +387,7 @@ export async function createTransaction(
     itemId: newTransaction.itemId,
     accountingMonth: newTransaction.accountingMonth,
     accountingYear: newTransaction.accountingYear,
+    sortPriority: null,
     warning: newTransaction.warning,
   };
 }
@@ -421,7 +504,82 @@ export async function updateTransaction(
     itemId: updated.itemId,
     accountingMonth: updated.accountingMonth,
     accountingYear: updated.accountingYear,
+    sortPriority: null,
   };
+}
+
+export async function reorderEntries(
+  tx: DbClient,
+  entries: { type: 'transaction' | 'transfer'; id: number; sortPriority: number | null }[],
+  budgetId: number
+): Promise<void> {
+  if (entries.length === 0) {
+    return;
+  }
+
+  const { entryYearMap, entryDateMap } = await getOwnedEntriesForPriorityUpdate(tx, entries, budgetId);
+  const yearIds = new Set(entries.map((entry) => entryYearMap.get(`${entry.type}:${entry.id}`)).filter((yearId): yearId is number => yearId !== undefined));
+  const dates = new Set(entries.map((entry) => entryDateMap.get(`${entry.type}:${entry.id}`)).filter((date): date is string => date !== undefined));
+
+  if (yearIds.size > 1) {
+    throw new Error('Entries from multiple years cannot be reordered together');
+  }
+
+  if (dates.size > 1) {
+    throw new Error('Entries can only be reordered within the same date');
+  }
+
+  const [yearId] = [...yearIds];
+  if (!yearId) {
+    throw new Error('Reorder payload references unknown entries');
+  }
+
+  try {
+    for (const entry of entries) {
+      const normalizedPriority =
+        entry.sortPriority === null || entry.sortPriority === 0 ? null : Math.trunc(entry.sortPriority);
+
+      if (normalizedPriority === null) {
+        await tx
+          .delete(entryOrderOverrides)
+          .where(
+            and(
+              eq(entryOrderOverrides.yearId, yearId),
+              eq(entryOrderOverrides.entryType, entry.type),
+              eq(entryOrderOverrides.entryId, entry.id)
+            )
+          );
+        continue;
+      }
+
+      await tx
+        .insert(entryOrderOverrides)
+        .values({
+          yearId,
+          entryType: entry.type,
+          entryId: entry.id,
+          sortOffset: normalizedPriority,
+        })
+        .onConflictDoUpdate({
+          target: [entryOrderOverrides.yearId, entryOrderOverrides.entryType, entryOrderOverrides.entryId],
+          set: {
+            sortOffset: normalizedPriority,
+            updatedAt: new Date(),
+          },
+        });
+    }
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'cause' in error && typeof error.cause === 'object' && error.cause !== null
+        ? (error.cause as { code?: string }).code
+        : undefined;
+
+    if (code === '42P01') {
+      throw new Error('Transaction order persistence is unavailable until migration 0029 is applied');
+    }
+
+    throw error;
+  }
 }
 
 // Delete a transaction

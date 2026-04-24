@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { budgetYears, paymentMethods, transfers } from '../db/schema.js';
 import type { DbClient } from '../db/index.js';
+import { getEntryOrderOffsetMap } from './transactions.js';
 
 // Constant for unknown account names
 const UNKNOWN_ACCOUNT_NAME = 'Unknown';
@@ -21,6 +22,7 @@ export interface Transfer {
   destinationAccount: AccountIdentifier;
   accountingMonth: number;
   accountingYear: number;
+  sortPriority: number | null;
 }
 
 export interface CreateTransferData {
@@ -78,6 +80,8 @@ export async function getTransfersForYear(tx: DbClient, year: number, budgetId: 
     }
   }
 
+  const orderOffsetMap = await getEntryOrderOffsetMap(tx, budgetYear.id, 'transfer');
+
   return transferRecords.map((t) => {
     const source = accountMap.get(t.sourceAccountId);
     const dest = accountMap.get(t.destinationAccountId);
@@ -101,6 +105,7 @@ export async function getTransfersForYear(tx: DbClient, year: number, budgetId: 
       },
       accountingMonth: t.accountingMonth,
       accountingYear: t.accountingYear,
+      sortPriority: orderOffsetMap.get(t.id) ?? null,
     };
   });
 }
@@ -180,6 +185,7 @@ export async function createTransfer(tx: DbClient, year: number, data: CreateTra
     },
     accountingMonth,
     accountingYear,
+    sortPriority: null,
   };
 }
 
@@ -288,6 +294,7 @@ export async function updateTransfer(tx: DbClient, id: number, data: Partial<Cre
     },
     accountingMonth: updated.accountingMonth,
     accountingYear: updated.accountingYear,
+    sortPriority: null,
   };
 }
 

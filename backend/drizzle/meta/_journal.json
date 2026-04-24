@@ -197,6 +197,13 @@
       "when": 1774762200000,
       "tag": "0028_enforce_linked_payment_method_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1774939802000,
+      "tag": "0029_add_transaction_list_sort_order",
+      "breakpoints": true
     }
   ]
 }

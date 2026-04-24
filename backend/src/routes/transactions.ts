@@ -88,6 +88,35 @@ router.post(
   })
 );
 
+// PUT /api/transactions/reorder - Persist manual order for the mixed transaction list
+router.put(
+  '/reorder',
+  asyncHandler(async (req, res) => {
+    const { entries } = req.body as {
+      entries?: Array<{ type: 'transaction' | 'transfer'; id: number; sortPriority: number | null }>;
+    };
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      throw new AppError(400, 'entries must be a non-empty array');
+    }
+
+    for (const entry of entries) {
+      if (
+        (entry.type !== 'transaction' && entry.type !== 'transfer') ||
+        typeof entry.id !== 'number' ||
+        (entry.sortPriority !== null && typeof entry.sortPriority !== 'number')
+      ) {
+        throw new AppError(400, 'Each entry must have a valid type, id, and sortPriority');
+      }
+    }
+
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    await withTenantContext(userId, budgetId, (tx) => transactionsSvc.reorderEntries(tx, entries, budgetId));
+    res.status(204).send();
+  })
+);
+
 // PUT /api/transactions/:id - Update a transaction
 router.put(
   '/:id',

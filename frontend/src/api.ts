@@ -286,6 +286,7 @@ export interface Transaction {
   groupType: 'income' | 'expense' | 'savings';
   accountingMonth: number;
   accountingYear: number;
+  sortPriority: number | null;
   warning?: string | null;
 }
 
@@ -363,6 +364,16 @@ export async function dismissTransactionWarning(id: number): Promise<Transaction
   });
   await ensureOk(response, 'Failed to dismiss transaction warning');
   return response.json();
+}
+
+export async function reorderTransactionEntries(
+  entries: Array<{ type: 'transaction' | 'transfer'; id: number; sortPriority: number | null }>
+): Promise<void> {
+  const response = await authFetch(`${API_BASE}/transactions/reorder`, {
+    method: 'PUT',
+    body: JSON.stringify({ entries }),
+  });
+  await ensureOk(response, 'Failed to reorder transactions');
 }
 
 // Monthly Values
@@ -681,6 +692,7 @@ export interface Transfer {
   destinationAccount: AccountIdentifier;
   accountingMonth: number;
   accountingYear: number;
+  sortPriority: number | null;
 }
 
 export async function fetchTransfers(year: number): Promise<Transfer[]> {

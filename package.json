@@ -7,6 +7,7 @@
     "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
     "build": "pnpm --filter backend build && pnpm --filter frontend build",
     "backend": "pnpm --filter backend dev",
+    "db:migrate": "pnpm --filter backend db:migrate",
     "frontend": "pnpm --filter frontend dev",
     "mobile": "pnpm --filter mobile start",
     "lint": "biome lint .",
