@@ -3,7 +3,7 @@ services:
     build:
       context: ./postgres
       dockerfile: Dockerfile
-    image: ghcr.io/${GITHUB_REPOSITORY:-alxdca/tallix}/postgres:${IMAGE_TAG:-latest}
+    image: tallix-postgres:${IMAGE_TAG:-latest}
     container_name: tallix-db
     restart: unless-stopped
     environment:

@@ -10,12 +10,12 @@ import {
   parsePdf,
   parsePdfWithLlm,
 } from '../api';
-import type { BudgetGroup } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
+import type { BudgetGroup } from '../types';
+import { formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import { getErrorMessage } from '../utils/errorMessages';
 import { logger } from '../utils/logger';
-import { formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import CategoryCombobox from './CategoryCombobox';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
 
@@ -852,7 +852,10 @@ export default function BulkImportModal({ isOpen, onClose, yearId, groups, onImp
             updates.itemId = classification.categoryId;
           }
 
-          if (classification.description) {
+          if (importSource === 'pdf') {
+            // A null AI description means the category/merchant already says enough.
+            updates.description = classification.description || '';
+          } else if (classification.description) {
             updates.description = classification.description;
           }
 

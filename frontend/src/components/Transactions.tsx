@@ -4,8 +4,6 @@ import 'react-datepicker/dist/react-datepicker.css';
 import {
   type AccountIdentifier,
   bulkDeleteTransactions,
-  createTransaction,
-  createTransfer,
   deleteTransaction,
   deleteTransfer,
   dismissTransactionWarning,
@@ -24,22 +22,19 @@ import { useI18n } from '../contexts/I18nContext';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import type { BudgetGroup } from '../types';
-import { formatDateDisplay, getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
+import { formatDateDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import { logger } from '../utils/logger';
 import BulkImportModal from './BulkImportModal';
 import ConfirmDialog from './ConfirmDialog';
+import NewTransactionForm from './NewTransactionForm';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
+import { formatWithInstitution, normalizeThirdParty, parseAccountString } from './transactionFormUtils';
 import {
   buildSelectionReorderUpdates,
   buildSingleReorderUpdates,
   canReorderSelectedEntries,
   getSelectedReorderEntries,
 } from './transactionsReorder';
-
-// Helper to format name with institution
-const formatWithInstitution = (name: string, institution: string | null): string => {
-  return institution ? `${name} (${institution})` : name;
-};
 
 const TRANSACTION_PRIORITY_STORAGE_PREFIX = 'tallix_transaction_sort_priorities';
 
@@ -63,10 +58,6 @@ interface UnifiedEntry {
 
 function formatAccountingPeriod(month: number, year: number, monthNames: string[]): string {
   return `${monthNames[month - 1]} ${year}`;
-}
-
-function normalizeThirdParty(value?: string | null): string {
-  return value?.trim().toLowerCase().replace(/\s+/g, ' ') ?? '';
 }
 
 interface TransactionsProps {
@@ -199,20 +190,6 @@ export default function Transactions({
   const [sortField, setSortField] = useState<SortField>('manual');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
-  // Form state (dates stored in DD/MM/YYYY display format)
-  const [newEntryType, setNewEntryType] = useState<EntryType>('transaction');
-  const [newDate, setNewDate] = useState(getTodayDisplay());
-  const [newDescription, setNewDescription] = useState('');
-  const [newThirdParty, setNewThirdParty] = useState('');
-  const [newPaymentMethodId, setNewPaymentMethodId] = useState<number | null>(null);
-  const [newAmount, setNewAmount] = useState('');
-  const [newItemId, setNewItemId] = useState<number | null>(null);
-  const [autoItemFromThirdParty, setAutoItemFromThirdParty] = useState(false);
-  const [autoPaymentMethodFromThirdParty, setAutoPaymentMethodFromThirdParty] = useState(false);
-  // Transfer-specific form state
-  const [newSourceAccount, setNewSourceAccount] = useState(''); // Account ID
-  const [newDestAccount, setNewDestAccount] = useState('');
-
   // Edit form state
   const [editDate, setEditDate] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -233,18 +210,21 @@ export default function Transactions({
   const [editDestAccount, setEditDestAccount] = useState('');
 
   // Get all items from all groups (savings accounts are now real budget items in "Épargne" group)
-  const allItems = groups.flatMap((g) =>
-    g.items.map((item) => ({
-      ...item,
-      groupName: g.name,
-      groupType: g.type,
-    }))
+  const allItems = useMemo(
+    () =>
+      groups.flatMap((g) =>
+        g.items.map((item) => ({
+          ...item,
+          groupName: g.name,
+          groupType: g.type,
+        }))
+      ),
+    [groups]
   );
 
   const incomeItems = allItems.filter((i) => i.groupType === 'income');
   const expenseItems = allItems.filter((i) => i.groupType === 'expense');
   const savingsCategoryItems = allItems.filter((i) => i.groupType === 'savings');
-
   // Get unique values for filter dropdowns (include transfer accounts)
   const uniquePaymentMethods = useMemo(() => {
     const methodIds = new Set<number>();
@@ -328,47 +308,6 @@ export default function Transactions({
       logger.error('Failed to load transactions', error);
     }
   };
-
-  const applyNewThirdPartySuggestion = useCallback(
-    (value: string, source: 'blur' | 'select' = 'blur') => {
-      const normalized = normalizeThirdParty(value);
-      if (!normalized) {
-        if (autoItemFromThirdParty) {
-          setNewItemId(null);
-          setAutoItemFromThirdParty(false);
-        }
-        if (autoPaymentMethodFromThirdParty) {
-          setNewPaymentMethodId(null);
-          setAutoPaymentMethodFromThirdParty(false);
-        }
-        return;
-      }
-
-      const lastMatch = transactions.find((transaction) => normalizeThirdParty(transaction.thirdParty) === normalized);
-      const shouldApplySelectedSuggestion = source === 'select';
-
-      if (lastMatch?.itemId) {
-        if (shouldApplySelectedSuggestion || newItemId === null || autoItemFromThirdParty) {
-          setNewItemId(lastMatch.itemId);
-          setAutoItemFromThirdParty(true);
-        }
-      } else if (autoItemFromThirdParty) {
-        setNewItemId(null);
-        setAutoItemFromThirdParty(false);
-      }
-
-      if (lastMatch?.paymentMethodId) {
-        if (shouldApplySelectedSuggestion || newPaymentMethodId === null || autoPaymentMethodFromThirdParty) {
-          setNewPaymentMethodId(lastMatch.paymentMethodId);
-          setAutoPaymentMethodFromThirdParty(true);
-        }
-      } else if (autoPaymentMethodFromThirdParty) {
-        setNewPaymentMethodId(null);
-        setAutoPaymentMethodFromThirdParty(false);
-      }
-    },
-    [transactions, newItemId, autoItemFromThirdParty, newPaymentMethodId, autoPaymentMethodFromThirdParty]
-  );
 
   const applyEditThirdPartySuggestion = useCallback(
     (value: string, source: 'blur' | 'select' = 'blur') => {
@@ -858,75 +797,6 @@ export default function Transactions({
     });
   };
 
-  // Parse account ID string
-  const parseAccountString = (str: string): { id: number } | null => {
-    if (!str) return null;
-    const id = parseInt(str, 10);
-    if (Number.isNaN(id)) return null;
-    return { id };
-  };
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newAmount || isSubmitting || !isValidDateFormat(newDate)) return;
-
-    if (newEntryType === 'transaction') {
-      if (!newItemId || !newPaymentMethodId) return;
-
-      setIsSubmitting(true);
-      try {
-        await createTransaction({
-          yearId,
-          itemId: newItemId,
-          date: parseDateInput(newDate), // Convert DD/MM/YYYY to YYYY-MM-DD
-          description: newDescription.trim() || undefined,
-          thirdParty: newThirdParty.trim() || undefined,
-          paymentMethodId: newPaymentMethodId,
-          amount: parseFloat(newAmount),
-        });
-        setNewDescription('');
-        setNewThirdParty('');
-        setNewPaymentMethodId(null);
-        setAutoPaymentMethodFromThirdParty(false);
-        setNewAmount('');
-        setNewItemId(null);
-        setAutoItemFromThirdParty(false);
-        await loadTransactions();
-        onTransactionsChanged?.();
-      } catch (error) {
-        logger.error('Failed to create transaction', error);
-      } finally {
-        setIsSubmitting(false);
-      }
-    } else {
-      // Transfer
-      const source = parseAccountString(newSourceAccount);
-      const dest = parseAccountString(newDestAccount);
-      if (!source || !dest) return;
-
-      setIsSubmitting(true);
-      try {
-        await createTransfer(year, {
-          date: parseDateInput(newDate),
-          amount: parseFloat(newAmount),
-          description: newDescription.trim() || undefined,
-          sourceAccountId: source.id,
-          destinationAccountId: dest.id,
-        });
-        setNewDescription('');
-        setNewAmount('');
-        setNewSourceAccount('');
-        setNewDestAccount('');
-        await loadTransactions();
-        onTransactionsChanged?.();
-      } catch (error) {
-        logger.error('Failed to create transfer', error);
-      } finally {
-        setIsSubmitting(false);
-      }
-    }
-  };
-
   const startEditTransaction = (transaction: Transaction) => {
     setEditingId(`t_${transaction.id}`); // Use entry ID format
     const dateDisplay = formatDateDisplay(transaction.date);
@@ -1257,255 +1127,20 @@ export default function Transactions({
       />
 
       {/* Add Transaction/Transfer Form */}
-      <div className="transaction-form-card">
-        <div className="form-type-toggle">
-          <button
-            type="button"
-            className={`type-toggle-btn ${newEntryType === 'transaction' ? 'active' : ''}`}
-            onClick={() => setNewEntryType('transaction')}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="1" x2="12" y2="23" />
-              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
-            {t('transactions.typeTransaction')}
-          </button>
-          <button
-            type="button"
-            className={`type-toggle-btn ${newEntryType === 'transfer' ? 'active' : ''}`}
-            onClick={() => setNewEntryType('transfer')}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="17 1 21 5 17 9" />
-              <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-              <polyline points="7 23 3 19 7 15" />
-              <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-            </svg>
-            {t('transactions.typeTransfer')}
-          </button>
-        </div>
-
-        <form onSubmit={handleCreate} className="transaction-form">
-          <div className="form-row">
-            <div className="date-input-wrapper">
-              <input
-                type="text"
-                value={newDate}
-                onChange={(e) => setNewDate(e.target.value)}
-                placeholder={t('transactions.datePlaceholder')}
-                pattern="\d{2}/\d{2}/\d{4}"
-                className={`form-input date-input ${!isValidDateFormat(newDate) && newDate ? 'invalid' : ''}`}
-              />
-              <input
-                type="date"
-                className="date-picker-hidden"
-                value={isValidDateFormat(newDate) ? parseDateInput(newDate) : ''}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    const [y, m, d] = e.target.value.split('-');
-                    setNewDate(`${d}/${m}/${y}`);
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="date-picker-btn"
-                onClick={(e) => {
-                  const hiddenInput = e.currentTarget.previousElementSibling as HTMLInputElement;
-                  hiddenInput?.showPicker?.();
-                }}
-                title={t('transactions.openCalendar')}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                  <line x1="16" y1="2" x2="16" y2="6" />
-                  <line x1="8" y1="2" x2="8" y2="6" />
-                  <line x1="3" y1="10" x2="21" y2="10" />
-                </svg>
-              </button>
-            </div>
-
-            {newEntryType === 'transaction' ? (
-              <ThirdPartyAutocomplete
-                value={newThirdParty}
-                onChange={setNewThirdParty}
-                onCommit={applyNewThirdPartySuggestion}
-                placeholder={t('transactions.thirdPartyPlaceholder')}
-                className="form-input third-party-input"
-              />
-            ) : (
-              <>
-                <select
-                  value={newSourceAccount}
-                  onChange={(e) => setNewSourceAccount(e.target.value)}
-                  className="form-select account-select"
-                  required
-                >
-                  <option value="">{t('transactions.sourceAccount')}</option>
-                  <optgroup label={t('accounts.paymentAccounts')}>
-                    {transferAccounts
-                      .filter((a) => !a.isSavingsAccount)
-                      .map((a) => (
-                        <option key={`pm_${a.id}`} value={`${a.id}`}>
-                          {formatWithInstitution(a.name, a.institution)}
-                        </option>
-                      ))}
-                  </optgroup>
-                  <optgroup label={t('accounts.savingsAccounts')}>
-                    {transferAccounts
-                      .filter((a) => a.isSavingsAccount)
-                      .map((a) => (
-                        <option key={`si_${a.id}`} value={`${a.id}`}>
-                          {formatWithInstitution(a.name, a.institution)}
-                        </option>
-                      ))}
-                  </optgroup>
-                </select>
-                <span className="transfer-arrow">→</span>
-                <select
-                  value={newDestAccount}
-                  onChange={(e) => setNewDestAccount(e.target.value)}
-                  className="form-select account-select"
-                  required
-                >
-                  <option value="">{t('transactions.destinationAccount')}</option>
-                  <optgroup label={t('accounts.paymentAccounts')}>
-                    {transferAccounts
-                      .filter((a) => !a.isSavingsAccount)
-                      .map((a) => (
-                        <option key={`pm_${a.id}`} value={`${a.id}`}>
-                          {formatWithInstitution(a.name, a.institution)}
-                        </option>
-                      ))}
-                  </optgroup>
-                  <optgroup label={t('accounts.savingsAccounts')}>
-                    {transferAccounts
-                      .filter((a) => a.isSavingsAccount)
-                      .map((a) => (
-                        <option key={`si_${a.id}`} value={`${a.id}`}>
-                          {formatWithInstitution(a.name, a.institution)}
-                        </option>
-                      ))}
-                  </optgroup>
-                </select>
-              </>
-            )}
-
-            <input
-              type="text"
-              placeholder={t('transactions.descriptionPlaceholder')}
-              value={newDescription}
-              onChange={(e) => setNewDescription(e.target.value)}
-              className="form-input description-input"
-            />
-          </div>
-
-          {newEntryType === 'transaction' && (
-            <div className="form-row">
-              <select
-                value={newPaymentMethodId ?? ''}
-                onChange={(e) => {
-                  setNewPaymentMethodId(e.target.value ? Number(e.target.value) : null);
-                  setAutoPaymentMethodFromThirdParty(false);
-                }}
-                className="form-select payment-method-select"
-              >
-                <option value="">{t('transactions.paymentMethod')}</option>
-                {paymentMethods
-                  .filter((m) => !m.isSavingsAccount)
-                  .map((method) => (
-                    <option key={method.id} value={method.id}>
-                      {formatWithInstitution(method.name, method.institution)}
-                    </option>
-                  ))}
-                {paymentMethods.some((m) => m.isSavingsAccount) && (
-                  <optgroup label={t('accounts.savingsAccounts')}>
-                    {paymentMethods
-                      .filter((m) => m.isSavingsAccount)
-                      .map((method) => (
-                        <option key={method.id} value={method.id}>
-                          {formatWithInstitution(method.name, method.institution)}
-                        </option>
-                      ))}
-                  </optgroup>
-                )}
-              </select>
-              <input
-                type="number"
-                placeholder={t('transactions.amountPlaceholder')}
-                value={newAmount}
-                onChange={(e) => setNewAmount(e.target.value)}
-                step="0.01"
-                className="form-input amount-input"
-              />
-            </div>
-          )}
-
-          <div className="form-row">
-            {newEntryType === 'transaction' ? (
-              <select
-                value={newItemId || ''}
-                onChange={(e) => {
-                  setNewItemId(e.target.value ? Number(e.target.value) : null);
-                  setAutoItemFromThirdParty(false);
-                }}
-                className="form-select category-select"
-                required
-              >
-                <option value="">{t('transactions.selectCategory')}</option>
-                <optgroup label={t('budget.income')}>
-                  {incomeItems.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.groupName} → {item.name}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label={t('budget.expenses')}>
-                  {expenseItems.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.groupName} → {item.name}
-                    </option>
-                  ))}
-                </optgroup>
-                {savingsCategoryItems.length > 0 && (
-                  <optgroup label={t('budget.savings')}>
-                    {savingsCategoryItems.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-            ) : (
-              <input
-                type="number"
-                placeholder={t('transactions.amountPlaceholder')}
-                value={newAmount}
-                onChange={(e) => setNewAmount(e.target.value)}
-                step="0.01"
-                className="form-input amount-input"
-              />
-            )}
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={
-                !newAmount ||
-                isSubmitting ||
-                (newEntryType === 'transaction' && !newItemId) ||
-                (newEntryType === 'transfer' && (!newSourceAccount || !newDestAccount))
-              }
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              {t('common.add')}
-            </button>
-          </div>
-        </form>
-      </div>
+      <NewTransactionForm
+        year={year}
+        yearId={yearId}
+        categories={allItems}
+        transactions={transactions}
+        paymentMethods={paymentMethods}
+        transferAccounts={transferAccounts}
+        isSubmitting={isSubmitting}
+        onSubmittingChange={setIsSubmitting}
+        onCreated={async () => {
+          await loadTransactions();
+          onTransactionsChanged?.();
+        }}
+      />
 
       {/* Transactions List */}
       <div className="transactions-list">
@@ -1720,7 +1355,7 @@ export default function Transactions({
                 return (
                   <tr
                     key={entry.id}
-                    className={`${isTransfer ? 'transfer' : transaction?.groupType} ${selectedIds.has(entry.id) ? 'selected' : ''} ${isPotentialDuplicate ? 'warning-row' : ''}`}
+                    className={`${isTransfer ? 'transfer' : transaction?.groupType} ${selectedIds.has(entry.id) ? 'selected' : ''} ${isPotentialDuplicate ? 'warning-row' : ''} ${editingId === entry.id ? 'editing-row' : ''}`}
                     title={isPotentialDuplicate ? t('transactions.potentialDuplicate') : undefined}
                   >
                     {editingId === entry.id ? (

@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { logger } from '../logger.js';
 import { getLanguageLLMName } from '../constants/languages.js';
+import { logger } from '../logger.js';
 
 // DeepSeek API configuration
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
@@ -65,6 +65,165 @@ interface DeepSeekResponse {
   };
 }
 
+const DESCRIPTION_STOP_WORDS = new Set([
+  'a',
+  'achat',
+  'achats',
+  'and',
+  'de',
+  'des',
+  'du',
+  'et',
+  'expense',
+  'expenses',
+  'for',
+  'la',
+  'le',
+  'les',
+  'of',
+  'paiement',
+  'payment',
+  'pour',
+  'purchase',
+  'the',
+  'transaction',
+]);
+
+const DESCRIPTION_CONCEPTS = new Map<string, string>([
+  ['alimentaire', 'food'],
+  ['alimentation', 'food'],
+  ['course', 'food'],
+  ['courses', 'food'],
+  ['epicerie', 'food'],
+  ['food', 'food'],
+  ['groceries', 'food'],
+  ['grocery', 'food'],
+  ['supermarket', 'food'],
+  ['bar', 'restaurant'],
+  ['cafe', 'restaurant'],
+  ['dining', 'restaurant'],
+  ['meal', 'restaurant'],
+  ['repas', 'restaurant'],
+  ['restaurant', 'restaurant'],
+  ['billet', 'transport'],
+  ['bus', 'transport'],
+  ['metro', 'transport'],
+  ['taxi', 'transport'],
+  ['ticket', 'transport'],
+  ['train', 'transport'],
+  ['tram', 'transport'],
+  ['transport', 'transport'],
+  ['travel', 'transport'],
+  ['voyage', 'transport'],
+  ['doctor', 'health'],
+  ['health', 'health'],
+  ['healthcare', 'health'],
+  ['medecin', 'health'],
+  ['medical', 'health'],
+  ['medicaux', 'health'],
+  ['pharmacie', 'health'],
+  ['sante', 'health'],
+  ['soin', 'health'],
+]);
+
+const LEGAL_ENTITY_SUFFIX = /(?:[\s,]+)\(?(?:gmbh(?:\s*&\s*co\.?\s*k\.?g\.?)?|s[.\s]*[aà][.\s]*r[.\s]*l|s[.\s]*a|l[.\s]*l[.\s]*c|ltd|limited|inc(?:orporated)?|corp(?:oration)?|plc|llp|pty\.?\s*ltd|co\.?\s*ltd|a[.\s]*g|k[.\s]*g|kgaa|sasu?|eurl|snc|b\.?v\.?|n\.?v\.?|oy|a\.?b\.?|a\.?s\.?|aps|s\.?p\.?a|s\.?r\.?l|s\.?l\.?u?)\)?[.,\s]*$/iu;
+
+const GENERIC_BUSINESS_TYPE_PREFIX = /^(?:(?:pharmacie|pharmacy|apotheke|drogerie|drugstore|restaurant|ristorante|h[oô]tel|garage|boulangerie|b[aä]ckerei|bakery|supermarch[eé]|supermarket|clinique|klinik|clinic|coiffeur|hairdresser)\s+)+/iu;
+
+function normalizeComparableToken(token: string): string {
+  if (token.length > 4 && token.endsWith('ies')) return `${token.slice(0, -3)}y`;
+  if (token.length > 3 && token.endsWith('s')) return token.slice(0, -1);
+  return token;
+}
+
+function descriptionTokens(value: string): Set<string> {
+  const normalized = value
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase();
+  const words = normalized.match(/[\p{L}\p{N}]+/gu) ?? [];
+  const tokens = words
+    .filter((word) => !DESCRIPTION_STOP_WORDS.has(word))
+    .map((word) => {
+      const stemmed = normalizeComparableToken(word);
+      return DESCRIPTION_CONCEPTS.get(word) ?? DESCRIPTION_CONCEPTS.get(stemmed) ?? stemmed;
+    });
+  return new Set(tokens);
+}
+
+/**
+ * Drop AI descriptions that do not add information beyond the category or merchant.
+ */
+export function removeRedundantAiDescription(
+  description: string | null | undefined,
+  categoryName: string | null,
+  thirdParty?: string | null
+): string | null {
+  const cleaned = description?.trim().replace(/\s+/g, ' ');
+  if (!cleaned) return null;
+
+  const descriptionSet = descriptionTokens(cleaned);
+  if (descriptionSet.size === 0) return null;
+
+  const knownValues = [categoryName, thirdParty].filter((value): value is string => !!value?.trim());
+  const onlyRepeatsKnownValue = knownValues.some((value) => {
+    const knownValueSet = descriptionTokens(value);
+    return knownValueSet.size > 0 && [...descriptionSet].every((token) => knownValueSet.has(token));
+  });
+  return onlyRepeatsKnownValue ? null : cleaned;
+}
+
+/**
+ * Normalize merchant names returned by the AI without damaging short brand acronyms.
+ */
+export function normalizeAiThirdParty(thirdParty: string | null | undefined): string | null {
+  const cleaned = thirdParty?.trim().replace(/\s+/g, ' ');
+  if (!cleaned) return null;
+
+  let withoutLegalSuffix = cleaned;
+  while (LEGAL_ENTITY_SUFFIX.test(withoutLegalSuffix)) {
+    withoutLegalSuffix = withoutLegalSuffix.replace(LEGAL_ENTITY_SUFFIX, '').trim();
+  }
+  if (!withoutLegalSuffix) return null;
+
+  const withoutBusinessType = withoutLegalSuffix.replace(GENERIC_BUSINESS_TYPE_PREFIX, '').trim();
+  const brandName = withoutBusinessType || withoutLegalSuffix;
+
+  const hasUppercase = /\p{Lu}/u.test(brandName);
+  const hasLowercase = /\p{Ll}/u.test(brandName);
+  if (!hasUppercase || hasLowercase) return brandName;
+
+  return brandName.replace(/\p{L}+(?:['’‘-]\p{L}+)*/gu, (word) => {
+    const letters = word.match(/\p{L}/gu)?.length ?? 0;
+    if (letters <= 3) return word;
+
+    return word
+      .toLocaleLowerCase()
+      .replace(/(^|['’‘-])\p{L}/gu, (letter) => letter.toLocaleUpperCase());
+  });
+}
+
+export function normalizeExtractedPdfTextFields(
+  description: string | null | undefined,
+  thirdParty: string | null | undefined,
+  categoryName: string | null
+): { description: string; thirdParty: string | null } {
+  const normalizedThirdParty = normalizeAiThirdParty(thirdParty);
+  const meaningfulDescription = removeRedundantAiDescription(description, categoryName, normalizedThirdParty);
+
+  if (!normalizedThirdParty && meaningfulDescription) {
+    return {
+      description: '',
+      thirdParty: normalizeAiThirdParty(meaningfulDescription),
+    };
+  }
+
+  return {
+    description: meaningfulDescription ?? '',
+    thirdParty: normalizedThirdParty,
+  };
+}
+
 /**
  * Check if LLM service is configured
  */
@@ -116,7 +275,8 @@ Cat(id,n,g,t=i/e/s):${JSON.stringify(categoryCatalog)}
 ${pmLine}${thirdPartiesLine}${countryLine}
 
 Return: catId,pmId (from lists),desc,tp,conf(h/m/l). Omit null fields. Use s(savings) categories for transfers to savings accounts.
-desc: Keep original if clean, else simplify to 3-8 words, Title Case, in ${langName}. Remove dates/refs/codes/country codes. Don't repeat merchant (tp is separate).
+desc: Optional. Omit unless it adds specific useful detail not already conveyed by cat or tp. Never infer a generic description from the merchant/category. If useful, simplify to 3-8 words, Title Case, in ${langName}; remove dates/refs/codes/country codes and don't repeat tp.
+tp: Merchant/store brand only. Always remove branch names, locations, cities, addresses, country codes, and generic business-type labels (pharmacy, restaurant, hotel, garage, etc.); keep only the location-free brand name. Omit legal company suffixes (SA, Sarl, GmbH, LLC, etc.) and use natural name casing, never an all-uppercase company name (except genuine short acronyms).
 pmId: Match from rawPaymentMethod if provided, else infer from transaction pattern if obvious (e.g., ATM withdrawal, card payment patterns).
 
 JSON:[{index,catId?,pmId?,desc,tp?,conf},...]`;
@@ -203,7 +363,7 @@ function parseClassificationResponse(
   content: string,
   categories: CategoryInfo[],
   paymentMethods: PaymentMethodInfo[],
-  _transactionCount: number
+  sourceTransactions: TransactionToClassify[]
 ): ClassificationResult[] {
   let parsed: unknown;
 
@@ -251,13 +411,15 @@ function parseClassificationResponse(
   };
 
   const classifications: ClassificationResult[] = [];
+  const transactionByIndex = new Map(sourceTransactions.map((transaction) => [transaction.index, transaction]));
 
   for (const raw of parsed as Array<Record<string, unknown>>) {
     const index = typeof raw.index === 'number' ? raw.index : typeof raw.i === 'number' ? raw.i : -1;
     if (index < 0) {
       continue;
     }
-    // Note: We don't validate index < transactionCount because batches may use global indices
+    // Batch indexes are global, so look up source fields by their explicit index.
+    const sourceTransaction = transactionByIndex.get(index);
 
     // Get category by ID (new compact format) or by name (legacy fallback)
     let categoryId: number | null = null;
@@ -300,10 +462,15 @@ function parseClassificationResponse(
     // Extract fields with compact (desc, tp, conf) and legacy support
     const description = (raw.desc ?? raw.description) as string | undefined;
     const thirdParty = (raw.tp ?? raw.thirdParty) as string | undefined;
+    const thirdPartyToNormalize =
+      typeof thirdParty === 'string'
+        ? thirdParty
+        : sourceTransaction?.rawThirdParty || sourceTransaction?.thirdParty || null;
     const confidence = confMap[(raw.conf ?? raw.confidence) as string] || 'low';
 
     // Get payment method details
     const paymentMethod = paymentMethodId !== null ? paymentMethodById.get(paymentMethodId) : null;
+    const normalizedThirdParty = normalizeAiThirdParty(thirdPartyToNormalize);
 
     classifications.push({
       index,
@@ -311,8 +478,12 @@ function parseClassificationResponse(
       categoryName,
       groupName,
       isIncome,
-      description: typeof description === 'string' ? description : null,
-      thirdParty: typeof thirdParty === 'string' ? thirdParty : null,
+      description: removeRedundantAiDescription(
+        typeof description === 'string' ? description : null,
+        categoryName,
+        normalizedThirdParty
+      ),
+      thirdParty: normalizedThirdParty,
       paymentMethodId,
       paymentMethodName: paymentMethod ? paymentMethod.name : null,
       paymentMethodInstitution: paymentMethod ? paymentMethod.institution : null,
@@ -361,8 +532,9 @@ Identify the PDF issuer (bank/card company) from header/logo/footer. Match issue
 Return:{issuerPmId?:number,txs:[{d,a,catId?,desc,tp?,conf},...]}
 issuerPmId=detected document issuer's payment method ID (applies to all txs).
 d=YYYY-MM-DD, a=amount(+expense/-income), catId from list.
-tp=merchant/store name (NO location/city/address/country codes). Remove trailing city+country tokens. Remove abbreviations/codes/prefixes unless part of brand. Reconstruct truncated names if possible using common completions of the remaining tokens.
-desc=what was bought, Title Case in ${langName}, DON'T repeat tp. Infer desc from merchant type.
+If a transaction has both transaction and accounting dates, use the earliest date for d.
+tp=merchant/store brand only. ALWAYS remove branch names, locations, cities, addresses, country codes, and generic business-type labels (pharmacy, restaurant, hotel, garage, etc.); return only the location-free brand name. Omit legal company suffixes such as SA, Sarl, GmbH, LLC. Use natural name casing, never an all-uppercase company name except genuine short acronyms. Remove abbreviations/codes/prefixes unless part of brand. Reconstruct truncated names if possible using common completions of the remaining tokens.
+desc=optional useful detail about what was bought, Title Case in ${langName}. Omit unless the PDF contains specific detail not already conveyed by cat or tp. DON'T repeat tp and never infer a generic description from merchant type.
 conf=h/m/l. Use s(savings) for transfers. Omit null fields.`;
 }
 
@@ -379,6 +551,30 @@ export interface ExtractedTransaction {
   paymentMethodName: string | null;
   paymentMethodInstitution: string | null;
   confidence: 'high' | 'medium' | 'low';
+}
+
+/** Select the earliest valid transaction/accounting date, normalized to ISO format. */
+export function selectEarliestExtractedTransactionDate(raw: Record<string, unknown>): string {
+  const dates: string[] = [];
+  for (const value of [raw.d, raw.date, raw.transactionDate, raw.accountingDate]) {
+    if (typeof value !== 'string') continue;
+
+    for (const match of value.matchAll(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b|\b(\d{1,2})([./-])(\d{1,2})\5(\d{4})\b/g)) {
+      const year = Number(match[1] ?? match[7]);
+      const month = Number(match[2] ?? match[6]);
+      const day = Number(match[3] ?? match[4]);
+      const normalized = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const parsed = new Date(`${normalized}T00:00:00Z`);
+      if (
+        parsed.getUTCFullYear() === year &&
+        parsed.getUTCMonth() + 1 === month &&
+        parsed.getUTCDate() === day
+      ) {
+        dates.push(normalized);
+      }
+    }
+  }
+  return dates.sort()[0] ?? '';
 }
 
 /**
@@ -490,19 +686,7 @@ function parseExtractResponse(
       }
     }
 
-    // Parse date - support both compact 'd' and full 'date'
-    let date = typeof raw.d === 'string' ? raw.d : typeof raw.date === 'string' ? raw.date : '';
-    // Try to normalize various date formats to YYYY-MM-DD
-    if (date && !date.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      const parts = date.split(/[./-]/);
-      if (parts.length === 3) {
-        const [a, b, c] = parts.map((p) => parseInt(p, 10));
-        // Handle DD.MM.YYYY or DD/MM/YYYY
-        if (c > 1900) {
-          date = `${c}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
-        }
-      }
-    }
+    const date = selectEarliestExtractedTransactionDate(raw);
 
     // Parse amount - support both compact 'a' and full 'amount'
     const rawAmount = raw.a !== undefined ? raw.a : raw.amount;
@@ -525,6 +709,12 @@ function parseExtractResponse(
       'Applying payment method to extracted transaction'
     );
 
+    const normalizedText = normalizeExtractedPdfTextFields(
+      typeof raw.desc === 'string' ? raw.desc : null,
+      typeof raw.tp === 'string' ? raw.tp : null,
+      category?.name ?? null
+    );
+
     transactions.push({
       date,
       amount: Math.abs(amount),
@@ -532,8 +722,8 @@ function parseExtractResponse(
       categoryName: category ? category.name : null,
       groupName: category ? category.groupName : null,
       isIncome: category?.groupType === 'income' || amount < 0,
-      description: typeof raw.desc === 'string' ? raw.desc : '',
-      thirdParty: typeof raw.tp === 'string' ? raw.tp : null,
+      description: normalizedText.description,
+      thirdParty: normalizedText.thirdParty,
       paymentMethodId: finalPaymentMethodId,
       paymentMethodName: pm ? pm.name : null,
       paymentMethodInstitution: pm ? pm.institution : null,
@@ -718,7 +908,7 @@ export async function classifyTransactions(
 
     logger.info({ contentLength: content.length, content: content.slice(0, 1000) }, 'Parsing LLM response');
 
-    const classifications = parseClassificationResponse(content, categories, paymentMethods, transactions.length);
+    const classifications = parseClassificationResponse(content, categories, paymentMethods, transactions);
 
     logger.info({ classifiedCount: classifications.length }, 'Parsed LLM classifications');
 

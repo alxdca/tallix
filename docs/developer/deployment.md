@@ -7,6 +7,10 @@ This project ships as a Node backend and a static frontend bundle.
 - `docker-compose.yml` is for local development.
 - `docker-compose.prod.yml` is for production.
 
+For production, set `GITHUB_REPOSITORY` in `.env` to the `owner/repository` that publishes your images.
+All three production images use this value; `IMAGE_TAG` defaults to `latest`.
+Local development builds the database image as `tallix-postgres` without a registry namespace.
+
 Typical flow:
 
 ```bash

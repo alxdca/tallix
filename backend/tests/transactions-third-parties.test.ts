@@ -1,10 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { withTenantContext } from '../src/db/context.js';
 import * as schema from '../src/db/schema.js';
-import { createTransaction, getThirdParties } from '../src/services/transactions.js';
+import { createTransaction, getAppendedSortPriority, getThirdParties } from '../src/services/transactions.js';
 
 const { users, budgets, budgetYears, paymentMethods, transactions } = schema;
 
@@ -144,17 +144,43 @@ describe('third party autocomplete', () => {
     const before = await withTenantContext(userAId, budgetAId, (tx) => getThirdParties(tx, 'aldi', budgetAId));
     expect(before).toEqual([]);
 
-    await withTenantContext(userAId, budgetAId, (tx) =>
+    const created = await withTenantContext(userAId, budgetAId, (tx) =>
       createTransaction(tx, userAId, budgetAId, {
         yearId: yearAId,
-        date: '2026-01-06',
+        date: '2026-01-01',
         thirdParty: 'Aldi',
         paymentMethodId: paymentMethodAId,
         amount: 15,
       })
     );
+    expect(created.sortPriority).toBe(1);
+
+    const nextCreated = await withTenantContext(userAId, budgetAId, (tx) =>
+      createTransaction(tx, userAId, budgetAId, {
+        yearId: yearAId,
+        date: '2026-01-01',
+        paymentMethodId: paymentMethodAId,
+        amount: 16,
+      })
+    );
+    expect(nextCreated.sortPriority).toBe(2);
 
     const after = await withTenantContext(userAId, budgetAId, (tx) => getThirdParties(tx, 'aldi', budgetAId));
     expect(after).toEqual(['Aldi']);
+  });
+});
+
+describe('transaction append priority', () => {
+  it('does not create an order override for the first entry on a date', () => {
+    expect(getAppendedSortPriority([])).toBeNull();
+  });
+
+  it('places the latest transaction above unprioritized and manually ordered entries', () => {
+    expect(getAppendedSortPriority([null, 3, 1])).toBe(4);
+    expect(getAppendedSortPriority([4, 2])).toBe(5);
+  });
+
+  it('keeps repeated additions in latest-first order', () => {
+    expect(getAppendedSortPriority([null, 1])).toBe(2);
   });
 });

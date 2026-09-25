@@ -116,6 +116,9 @@ const translations: Record<Locale, Record<string, any>> = {
       savings: 'Savings',
       expenses: 'Expenses',
       yearEndBalance: 'Year-end balance',
+      withYearlyBudgetsTooltip: 'Includes the remaining yearly income, expense and savings budgets.',
+      monthlyOnlyTooltip:
+        'Uses recorded actuals and monthly budgets, including spending already recorded against yearly budgets. Excludes all remaining yearly income, expense and savings allocations.',
       expectedTooltip:
         'Monthly breakdown (completed months = actual; current/future = actual if present, else budget):\n{monthLines}\nMonthly subtotal: {monthlyExpected}\nYearly remaining: {yearlyRemaining}\nTotal = monthly subtotal + yearly remaining = {total}',
     },
@@ -423,6 +426,7 @@ const translations: Record<Locale, Record<string, any>> = {
       paymentMethodsPlaceholder: 'Select…',
       sectionExpenses: '▸ EXPENSES',
       sectionIncome: '▸ INCOME',
+      recentlyUsedCategories: 'Recently used',
       typeExpense: 'Expense',
       typeIncome: 'Income',
       typeToggleToExpense: 'Income (click to change to Expense)',
@@ -698,6 +702,9 @@ const translations: Record<Locale, Record<string, any>> = {
       savings: 'Épargne',
       expenses: 'Dépenses',
       yearEndBalance: "Solde fin d'année",
+      withYearlyBudgetsTooltip: "Inclut les budgets annuels restants de revenus, de dépenses et d’épargne.",
+      monthlyOnlyTooltip:
+        "Utilise les montants réels et les budgets mensuels, y compris les dépenses déjà enregistrées sur les budgets annuels. Exclut toutes les allocations annuelles restantes de revenus, de dépenses et d’épargne.",
       expectedTooltip:
         "Détail mensuel (mois terminés = réel ; mois courant/futurs = réel si disponible, sinon budget) :\n{monthLines}\nSous-total mensuel : {monthlyExpected}\nAnnuel restant : {yearlyRemaining}\nTotal = sous-total mensuel + annuel restant = {total}",
     },
@@ -1007,6 +1014,7 @@ const translations: Record<Locale, Record<string, any>> = {
       paymentMethodsPlaceholder: 'Sélectionner…',
       sectionExpenses: '▸ DÉPENSES',
       sectionIncome: '▸ REVENUS',
+      recentlyUsedCategories: 'Récemment utilisées',
       typeExpense: 'Dépense',
       typeIncome: 'Revenu',
       typeToggleToExpense: 'Revenu (cliquer pour changer en Dépense)',

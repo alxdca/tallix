@@ -41,6 +41,12 @@ export default function Header({
 }: HeaderProps) {
   const formatCurrency = useFormatCurrency();
   const { t } = useI18n();
+  const monthlyRemainingBalance =
+    initialBalance +
+    expectedIncomeBreakdown.monthlyExpected -
+    expectedExpensesBreakdown.monthlyExpected -
+    expectedSavingsBreakdown.monthlyExpected;
+
   const buildExpectedTooltip = (breakdown: ExpectedBreakdown, total: number) => {
     const monthLines = (months.length === 12 ? months : Array(12).fill(0).map((_, i) => `M${i + 1}`))
       .map((month, i) => `${month}: ${formatCurrency(breakdown.monthlyByMonth[i] || 0, true)}`)
@@ -69,13 +75,13 @@ export default function Header({
           <span className="balance-amounts">
             <span className="balance-value">{formatCurrency(totalIncome.actual, true)}</span>
             <span className="balance-divider">/</span>
-            <span
+            <button
               className="balance-budget with-tooltip"
               data-tooltip={buildExpectedTooltip(expectedIncomeBreakdown, expectedIncome)}
-              tabIndex={0}
+              type="button"
             >
               {formatCurrency(expectedIncome, true)}
-            </span>
+            </button>
           </span>
         </div>
         <div className="balance-card expense">
@@ -83,13 +89,13 @@ export default function Header({
           <span className="balance-amounts">
             <span className="balance-value">{formatCurrency(totalExpenses.actual, true)}</span>
             <span className="balance-divider">/</span>
-            <span
+            <button
               className="balance-budget with-tooltip"
               data-tooltip={buildExpectedTooltip(expectedExpensesBreakdown, expectedExpenses)}
-              tabIndex={0}
+              type="button"
             >
               {formatCurrency(expectedExpenses, true)}
-            </span>
+            </button>
           </span>
         </div>
         <div className="balance-card savings">
@@ -97,18 +103,29 @@ export default function Header({
           <span className="balance-amounts">
             <span className="balance-value">{formatCurrency(totalSavings.actual, true)}</span>
             <span className="balance-divider">/</span>
-            <span
+            <button
               className="balance-budget with-tooltip"
               data-tooltip={buildExpectedTooltip(expectedSavingsBreakdown, expectedSavings)}
-              tabIndex={0}
+              type="button"
             >
               {formatCurrency(expectedSavings, true)}
-            </span>
+            </button>
           </span>
         </div>
-        <div className={`balance-card total ${remainingBalance >= 0 ? 'positive' : 'negative'}`}>
+        <div className="balance-card total">
           <span className="balance-label">{t('header.yearEndBalance')}</span>
-          <span className="balance-value">{formatCurrency(remainingBalance, true)}</span>
+          <span
+            className={`balance-value balance-projection ${remainingBalance >= 0 ? 'positive' : 'negative'}`}
+            title={t('header.withYearlyBudgetsTooltip')}
+          >
+            {formatCurrency(remainingBalance, true)}
+          </span>
+          <span
+            className={`balance-value balance-projection balance-projection-secondary ${monthlyRemainingBalance >= 0 ? 'positive' : 'negative'}`}
+            title={t('header.monthlyOnlyTooltip')}
+          >
+            {formatCurrency(monthlyRemainingBalance, true)}
+          </span>
         </div>
       </div>
     </header>

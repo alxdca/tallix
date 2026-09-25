@@ -498,10 +498,12 @@ input[type="number"]::-webkit-inner-spin-button {
   position: relative;
   z-index: 20;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  height: var(--header-height);
+  gap: 12px;
+  padding: 8px 24px;
+  height: auto;
   min-height: var(--header-height);
   flex-shrink: 0;
   background: var(--gradient-header);
@@ -523,8 +525,10 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .header-right {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
+  max-width: 100%;
 }
 
 .balance-card {
@@ -560,6 +564,26 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .balance-card.total {
   border-width: 2px;
+  padding: 6px 12px;
+  line-height: 1.25;
+}
+
+.balance-card.total .balance-projection {
+  padding: 0;
+  white-space: nowrap;
+}
+
+.balance-card.total .balance-projection-secondary {
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.balance-projection.positive {
+  color: var(--accent-actual);
+}
+
+.balance-projection.negative {
+  color: var(--accent-negative);
 }
 
 .balance-amounts {
@@ -575,6 +599,11 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .balance-budget.with-tooltip {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-weight: inherit;
+  line-height: inherit;
   position: relative;
   display: inline-block;
   cursor: help;
@@ -2626,6 +2655,10 @@ td.zero {
 }
 
 .transactions-table tbody tr:hover .actions-cell .btn-icon {
+  opacity: 1;
+}
+
+.transactions-table tbody tr.editing-row .actions-cell .btn-icon {
   opacity: 1;
 }
 

@@ -124,7 +124,7 @@ async function setup() {
     .values({ yearId: y2024.id, groupId: gExpense.id, name: 'Rent', slug: 'rent', sortOrder: 0 })
     .returning();
   // Budget items (year 2025)
-  const [iSalary25] = await superuserDb
+  await superuserDb
     .insert(budgetItems)
     .values({ yearId: y2025.id, groupId: gIncome.id, name: 'Monthly Salary', slug: 'monthly-salary', sortOrder: 0 })
     .returning();

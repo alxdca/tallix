@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
-import { budgetItems, budgetYears, entryOrderOverrides, paymentMethods, transactions, transfers } from '../db/schema.js';
 import type { DbClient } from '../db/index.js';
+import { budgetItems, budgetYears, entryOrderOverrides, paymentMethods, transactions, transfers } from '../db/schema.js';
 import { getOrCreateUnclassifiedItem } from './budget.js';
 
 export const PAYMENT_METHOD_OWNERSHIP_ERROR = 'Payment method not found or does not belong to you';
@@ -238,6 +238,37 @@ export async function getEntryOrderOffsetMap(
   }
 }
 
+export function getAppendedSortPriority(existingPriorities: readonly (number | null)[]): number | null {
+  if (existingPriorities.length === 0) {
+    return null;
+  }
+
+  return Math.max(0, ...existingPriorities.map((priority) => priority ?? 0)) + 1;
+}
+
+async function getTransactionAppendPriority(tx: DbClient, yearId: number, date: string): Promise<number | null> {
+  const sameDateTransactions = await tx.query.transactions.findMany({
+    columns: { id: true },
+    where: and(eq(transactions.yearId, yearId), eq(transactions.date, date)),
+  });
+  const sameDateTransfers = await tx.query.transfers.findMany({
+    columns: { id: true },
+    where: and(eq(transfers.yearId, yearId), eq(transfers.date, date)),
+  });
+
+  if (sameDateTransactions.length === 0 && sameDateTransfers.length === 0) {
+    return null;
+  }
+
+  const transactionOrderOffsets = await getEntryOrderOffsetMap(tx, yearId, 'transaction');
+  const transferOrderOffsets = await getEntryOrderOffsetMap(tx, yearId, 'transfer');
+
+  return getAppendedSortPriority([
+    ...sameDateTransactions.map((transaction) => transactionOrderOffsets.get(transaction.id) ?? null),
+    ...sameDateTransfers.map((transfer) => transferOrderOffsets.get(transfer.id) ?? null),
+  ]);
+}
+
 async function getOwnedEntriesForPriorityUpdate(
   tx: DbClient,
   entries: { type: 'transaction' | 'transfer'; id: number; sortPriority: number | null }[],
@@ -375,6 +406,13 @@ export async function createTransaction(
     amount: data.amount,
   });
 
+  // Serialize additions for the same day so concurrent creates also append in creation order.
+  const transactionDate = formatDate(data.date);
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${`transaction-order:${data.yearId}:${transactionDate}`}))`
+  );
+  const sortPriority = await getTransactionAppendPriority(tx, data.yearId, transactionDate);
+
   const [newTransaction] = await tx
     .insert(transactions)
     .values({
@@ -392,6 +430,15 @@ export async function createTransaction(
     })
     .returning();
 
+  if (sortPriority !== null) {
+    await tx.insert(entryOrderOverrides).values({
+      yearId: data.yearId,
+      entryType: 'transaction',
+      entryId: newTransaction.id,
+      sortOffset: sortPriority,
+    });
+  }
+
   invalidateThirdPartySuggestionCache(budgetId);
 
   return {
@@ -405,7 +452,7 @@ export async function createTransaction(
     itemId: newTransaction.itemId,
     accountingMonth: newTransaction.accountingMonth,
     accountingYear: newTransaction.accountingYear,
-    sortPriority: null,
+    sortPriority,
     warning: newTransaction.warning,
   };
 }

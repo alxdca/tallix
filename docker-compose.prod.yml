@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: ghcr.io/${GITHUB_REPOSITORY:-alxdca/tallix}/postgres:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}/postgres:${IMAGE_TAG:-latest}
     container_name: tallix-db
     restart: unless-stopped
     environment:
@@ -20,7 +20,7 @@ services:
       - tallix-network
 
   backend:
-    image: ghcr.io/alxdca/tallix/backend:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}/backend:${IMAGE_TAG:-latest}
     container_name: tallix-backend
     restart: unless-stopped
     environment:
@@ -53,7 +53,7 @@ services:
       - tallix-network
 
   frontend:
-    image: ghcr.io/alxdca/tallix/frontend:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}/frontend:${IMAGE_TAG:-latest}
     container_name: tallix-frontend
     restart: unless-stopped
     ports:

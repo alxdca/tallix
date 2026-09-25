@@ -823,7 +823,7 @@ Planned income: ${totalPlannedIncome.toFixed(2)}, Planned expenses: ${totalPlann
 Language: ${langName} (answer in this language)
 ${categoriesSection}
 Transactions (pipe-delimited, d=MM-DD date, a=amount, m=accounting month, c=category, tp=third party, ds=description, pm=payment method; trailing empty fields trimmed).
-IMPORTANT: A NEGATIVE amount on an expense transaction means a REFUND (money received back), NOT a payment. For example, a tax transaction of -13000 means a tax refund of 13000, not a tax payment.:
+IMPORTANT: A NEGATIVE amount on an expense transaction means a REFUND (money received back), NOT a payment. For example, an expense transaction of -100 means a refund of 100, not a payment.
 ${txHeader}
 ${txRows.join('\n')}
 
@@ -839,7 +839,7 @@ Guidelines:
 2. Be conversational and helpful - explain insights, give context, offer perspective like a real financial advisor would.
 3. The summary can be 1-3 sentences. Be concise but don't be robotic - it's OK to be warm and insightful.
 4. Double-check comparisons: if A > B, say "higher/above"; if A < B, say "lower/below".
-5. CRITICAL: A negative amount on an expense transaction is a REFUND (money coming back to the user), NOT a payment. For example, a tax "décompte" with amount -13000 is a tax refund of 13000 CHF. Never describe refunds as payments or costs. The pre-calculated totals already account for refunds.
+5. CRITICAL: A negative amount on an expense transaction is a REFUND (money coming back to the user), NOT a payment. For example, an expense transaction of -100 means a refund of 100. Never describe refunds as payments or costs. The pre-calculated totals already account for refunds.
 6. For projections, base on historical data and explain your reasoning.
 7. When budget plan data is available, use it to compare planned vs actual amounts. Budget data is grouped by category with "tp" (TOTAL yearly planned budget for the category), "p" (array of planned amounts per month), "a" (array of actual amounts per month), and "yb" (additional yearly variable envelope). CRITICAL: Always use "tp" for the total planned budget of a category. Do NOT sum the "p" array alone — "tp" already includes both monthly amounts AND the yearly variable envelope (tp = sum(p) + yb).
 8. IMPORTANT - Blending actual and planned data for forward-looking analysis:
