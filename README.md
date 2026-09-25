@@ -24,6 +24,7 @@ Demo: https://www.tallix.org
 - **Payment Method Management** - Add institutions, reorder methods, and manage account/savings flags
 - **Savings Accounts** - Mark payment methods as savings and categorize by type (e.g., epargne, prevoyance, investissements)
 - **User Preferences** - Theme toggle, decimal separator, and budget display options
+- **Budget Sharing** - Share a budget with multiple registered users as read-only collaborators or editors
 - **Data Backup & Restore** - Export and import full budget data as JSON from Settings
   - Includes categories, payment methods, transactions, and planned spending
   - Covers all available budget years
@@ -259,6 +260,11 @@ All endpoints below (except `/api/auth/*`) require a `Bearer` token.
 - `POST /api/auth/change-password` - Change password
 
 ### Budget
+- `GET /api/budgets` - List owned and shared budgets
+- `GET /api/budgets/current/shares` - List collaborators (owner only)
+- `POST /api/budgets/current/shares` - Add or update a collaborator by email (owner only)
+- `PUT /api/budgets/current/shares/:shareId` - Change collaborator access (owner only)
+- `DELETE /api/budgets/current/shares/:shareId` - Remove collaborator access (owner only)
 - `GET /api/budget` - Get current year budget (includes yearly budgets per item)
 - `GET /api/budget/year/:year` - Get budget for specific year
 - `GET /api/budget/months` - List month names

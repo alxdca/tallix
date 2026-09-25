@@ -8,13 +8,14 @@ import { withUserContext } from './db/context.js';
 import { users, budgets } from './db/schema.js';
 import logger from './logger.js';
 import { requireAuth } from './middleware/auth.js';
-import { requireBudget } from './middleware/budget.js';
+import { requireBudget, requireBudgetOwner, requireBudgetWrite } from './middleware/budget.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import accountsRoutes from './routes/accounts.js';
 import assetsRoutes from './routes/assets.js';
 import authRoutes from './routes/auth.js';
 import backupRoutes from './routes/backup.js';
 import budgetRoutes from './routes/budget.js';
+import budgetsRoutes from './routes/budgets.js';
 import copilotRoutes from './routes/copilot.js';
 import importRoutes from './routes/import.js';
 import paymentMethodsRoutes from './routes/paymentMethods.js';
@@ -149,16 +150,17 @@ app.use(express.json({ limit: '10mb' }));
 app.use('/api/auth', authRoutes);
 
 // Protected routes (auth required)
-app.use('/api/budget', requireAuth, requireBudget, budgetRoutes);
+app.use('/api/budgets', requireAuth, budgetsRoutes);
+app.use('/api/budget', requireAuth, requireBudget, requireBudgetWrite, budgetRoutes);
 app.use('/api/copilot', requireAuth, requireBudget, copilotRoutes);
 app.use('/api/settings', requireAuth, settingsRoutes);
-app.use('/api/transactions', requireAuth, requireBudget, transactionsRoutes);
-app.use('/api/payment-methods', requireAuth, paymentMethodsRoutes);
-app.use('/api/import', requireAuth, requireBudget, importRoutes);
-app.use('/api/accounts', requireAuth, requireBudget, accountsRoutes);
-app.use('/api/assets', requireAuth, requireBudget, assetsRoutes);
-app.use('/api/backup', requireAuth, requireBudget, backupRoutes);
-app.use('/api/transfers', requireAuth, requireBudget, transfersRoutes);
+app.use('/api/transactions', requireAuth, requireBudget, requireBudgetWrite, transactionsRoutes);
+app.use('/api/payment-methods', requireAuth, requireBudget, paymentMethodsRoutes);
+app.use('/api/import', requireAuth, requireBudget, requireBudgetWrite, importRoutes);
+app.use('/api/accounts', requireAuth, requireBudget, requireBudgetWrite, accountsRoutes);
+app.use('/api/assets', requireAuth, requireBudget, requireBudgetWrite, assetsRoutes);
+app.use('/api/backup', requireAuth, requireBudget, requireBudgetOwner, backupRoutes);
+app.use('/api/transfers', requireAuth, requireBudget, requireBudgetWrite, transfersRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {

@@ -25,7 +25,11 @@ import * as transfersSvc from '../src/services/transfers.js';
 import * as accountsSvc from '../src/services/accounts.js';
 import * as budgetSvc from '../src/services/budget.js';
 import * as paymentMethodsSvc from '../src/services/paymentMethods.js';
-import { getOrCreateDefaultBudget } from '../src/services/budgets.js';
+import {
+  BudgetShareUserNotFoundError,
+  getOrCreateDefaultBudget,
+  shareBudgetWithUser,
+} from '../src/services/budgets.js';
 const {
   users,
   budgets,
@@ -600,13 +604,25 @@ async function testDbProxyGuard() {
 }
 
 async function testBudgetSharingReadOnly() {
-  console.log('Test: Shared budget access (reader role)');
+  console.log('Test: Shared budget access (read and write roles)');
 
-  // Share budget A with User B as reader (use superuser to avoid RLS recursion)
+  try {
+    await withTenantContext(userAId, budgetAId, (tx) =>
+      shareBudgetWithUser(tx, budgetAId, userAId, 'missing-user@test.com', 'read')
+    );
+    assert(false, 'Sharing with an unknown email returns a specific error');
+  } catch (error) {
+    assert(
+      error instanceof BudgetShareUserNotFoundError,
+      'Sharing with an unknown email returns a specific error'
+    );
+  }
+
+  // Share budget A with User B as read-only.
   await superuserDb.insert(budgetShares).values({
     budgetId: budgetAId,
     userId: userBId,
-    role: 'reader',
+    role: 'read',
   });
 
   try {
@@ -625,13 +641,38 @@ async function testBudgetSharingReadOnly() {
             itemId: itemAId,
             date: '2099-07-01',
             amount: '50.00',
-            paymentMethodId: paymentMethodBId,
+            paymentMethodId: paymentMethodAId,
+            createdByUserId: userBId,
             accountingMonth: 7,
             accountingYear: 9901,
           });
         }),
       'Shared reader cannot insert transactions'
     );
+
+    await superuserDb
+      .update(budgetShares)
+      .set({ role: 'write' })
+      .where(sql`budget_id = ${budgetAId} AND user_id = ${userBId}`);
+
+    const created = await withTenantContext(userBId, budgetAId, (tx) =>
+      transactionsSvc.createTransaction(
+        tx,
+        userBId,
+        budgetAId,
+        {
+          yearId: yearAId,
+          itemId: itemAId,
+          date: '2099-07-02',
+          amount: 51,
+          paymentMethodId: paymentMethodAId,
+          accountingMonth: 7,
+          accountingYear: 9901,
+        },
+        userAId
+      )
+    );
+    assert(created.createdByUserId === userBId, 'Shared writer can create an attributed transaction');
   } finally {
     // Clean up share (use superuser to avoid RLS recursion)
     await superuserDb

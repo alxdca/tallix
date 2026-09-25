@@ -38,7 +38,7 @@ export const budgets = pgTable('budgets', {
 });
 
 // Budget Shares (grant access to other users)
-// role: 'reader' (view only) | 'writer' (add transactions) | 'admin' (edit categories)
+// role: 'read' (view only) | 'write' (edit budget data)
 // The budget owner (budgets.user_id) always has full access
 export const budgetShares = pgTable(
   'budget_shares',
@@ -50,7 +50,7 @@ export const budgetShares = pgTable(
     userId: uuid('user_id')
       .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
-    role: varchar('role', { length: 20 }).notNull(), // 'reader' | 'writer' | 'admin'
+    role: varchar('role', { length: 20 }).notNull(), // 'read' | 'write'
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -164,6 +164,7 @@ export const transactions = pgTable('transactions', {
   paymentMethodId: integer('payment_method_id')
     .references(() => paymentMethods.id, { onDelete: 'restrict' })
     .notNull(),
+  createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
   // Accounting month/year: when the transaction is accounted for (based on payment method's settlement day)
   // Can be manually overridden by user
@@ -428,6 +429,10 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
   paymentMethodRel: one(paymentMethods, {
     fields: [transactions.paymentMethodId],
     references: [paymentMethods.id],
+  }),
+  createdBy: one(users, {
+    fields: [transactions.createdByUserId],
+    references: [users.id],
   }),
 }));
 

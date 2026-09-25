@@ -1,6 +1,6 @@
 import { type Router as RouterType, Router } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
-import { withTenantContext, withUserContext } from '../db/context.js';
+import { withTenantContext } from '../db/context.js';
 import * as transfersSvc from '../services/transfers.js';
 
 const router: RouterType = Router();
@@ -15,8 +15,9 @@ router.get(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
     const transfers = await withTenantContext(userId, budgetId, (tx) =>
-      transfersSvc.getTransfersForYear(tx, year, budgetId, userId)
+      transfersSvc.getTransfersForYear(tx, year, budgetId, ownerId)
     );
     res.json(transfers);
   })
@@ -27,8 +28,10 @@ router.get(
   '/:year/accounts',
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
-    const accounts = await withUserContext(userId, (tx) =>
-      transfersSvc.getAvailableAccounts(tx, userId)
+    const budgetId = req.budget!.id;
+    const ownerId = req.budget!.userId;
+    const accounts = await withTenantContext(userId, budgetId, (tx) =>
+      transfersSvc.getAvailableAccounts(tx, ownerId)
     );
     res.json(accounts);
   })
@@ -56,6 +59,7 @@ router.post(
 
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
     const transfer = await withTenantContext(userId, budgetId, (tx) =>
       transfersSvc.createTransfer(tx, year, {
         date,
@@ -65,7 +69,7 @@ router.post(
         destinationAccountId: parseInt(destinationAccountId, 10),
         accountingMonth: accountingMonth ? parseInt(accountingMonth, 10) : undefined,
         accountingYear: accountingYear ? parseInt(accountingYear, 10) : undefined,
-      }, budgetId, userId)
+      }, budgetId, ownerId)
     );
 
     res.status(201).json(transfer);
@@ -86,6 +90,7 @@ router.put(
 
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
     const transfer = await withTenantContext(userId, budgetId, (tx) =>
       transfersSvc.updateTransfer(tx, id, {
         date,
@@ -95,7 +100,7 @@ router.put(
         destinationAccountId: destinationAccountId !== undefined ? parseInt(destinationAccountId, 10) : undefined,
         accountingMonth: accountingMonth !== undefined ? parseInt(accountingMonth, 10) : undefined,
         accountingYear: accountingYear !== undefined ? parseInt(accountingYear, 10) : undefined,
-      }, budgetId, userId)
+      }, budgetId, ownerId)
     );
 
     if (!transfer) {

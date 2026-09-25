@@ -2,6 +2,7 @@ import { type Router as RouterType, Router } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { withTenantContext } from '../db/context.js';
 import * as accountsSvc from '../services/accounts.js';
+import { requireBudgetOwner } from '../middleware/budget.js';
 
 const router: RouterType = Router();
 
@@ -15,8 +16,9 @@ router.get(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
     const result = await withTenantContext(userId, budgetId, (tx) =>
-      accountsSvc.getAccountsForYear(tx, year, budgetId, userId)
+      accountsSvc.getAccountsForYear(tx, year, budgetId, ownerId)
     );
     res.json(result);
   })
@@ -38,8 +40,9 @@ router.put(
 
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
     await withTenantContext(userId, budgetId, (tx) =>
-      accountsSvc.setAccountBalance(tx, year, parseInt(paymentMethodId, 10), initialBalance, budgetId, userId)
+      accountsSvc.setAccountBalance(tx, year, parseInt(paymentMethodId, 10), initialBalance, budgetId, ownerId)
     );
     res.json({ success: true });
   })
@@ -48,6 +51,7 @@ router.put(
 // PUT /api/accounts/payment-method/:id/savings - Toggle payment method as savings account
 router.put(
   '/payment-method/:id/savings',
+  requireBudgetOwner,
   asyncHandler(async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) {

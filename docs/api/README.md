@@ -16,6 +16,14 @@ All endpoints are under `/api`.
 
 ## Budget
 
+Budget-scoped endpoints accept an `X-Budget-Id` header. If omitted, the authenticated user's own default budget is used.
+
+- `GET /api/budgets`
+- `GET /api/budgets/current/shares` (owner only)
+- `POST /api/budgets/current/shares` (owner only)
+- `PUT /api/budgets/current/shares/:shareId` (owner only)
+- `DELETE /api/budgets/current/shares/:shareId` (owner only)
+
 - `GET /api/budget` (current year)
 - `GET /api/budget/year/:year`
 - `GET /api/budget/summary`

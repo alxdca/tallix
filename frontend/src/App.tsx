@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { type Account, fetchAccounts, fetchBudgetData, fetchBudgetSummary } from './api';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ACTIVE_BUDGET_KEY,
+  type AccessibleBudget,
+  type Account,
+  fetchAccounts,
+  fetchBudgetData,
+  fetchBudgetSummary,
+  fetchBudgets,
+} from './api';
 import Accounts from './components/Accounts';
 import Archive from './components/Archive';
 import Assets from './components/Assets';
@@ -47,7 +55,35 @@ function AppContent() {
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [availableBudgets, setAvailableBudgets] = useState<AccessibleBudget[]>([]);
+  const [activeBudgetId, setActiveBudgetId] = useState<number | null>(() => {
+    const stored = Number.parseInt(localStorage.getItem(ACTIVE_BUDGET_KEY) || '', 10);
+    return Number.isNaN(stored) ? null : stored;
+  });
+  const [budgetsReady, setBudgetsReady] = useState(false);
   const { t, monthNames } = useI18n();
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchBudgets()
+      .then(({ budgets, defaultBudgetId }) => {
+        if (cancelled) return;
+        setAvailableBudgets(budgets);
+        const storedId = Number.parseInt(localStorage.getItem(ACTIVE_BUDGET_KEY) || '', 10);
+        const selectedId = budgets.some((budget) => budget.id === storedId) ? storedId : defaultBudgetId;
+        localStorage.setItem(ACTIVE_BUDGET_KEY, String(selectedId));
+        setActiveBudgetId(selectedId);
+        setBudgetsReady(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(getErrorMessage(err, t));
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
 
   // Organize budget data into 3-layer structure
   const organizedData = useMemo(() => {
@@ -170,8 +206,8 @@ function AppContent() {
   }, [selectedYear]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (budgetsReady && activeBudgetId !== null) loadData();
+  }, [budgetsReady, activeBudgetId, loadData]);
 
   useEffect(() => {
     setMonths(monthNames);
@@ -190,6 +226,23 @@ function AppContent() {
 
   const currentYear = budgetData?.year || new Date().getFullYear();
   const yearId = budgetData?.yearId || 0;
+  const activeBudget = availableBudgets.find((budget) => budget.id === activeBudgetId) ?? null;
+
+  const handleBudgetChange = useCallback((budgetId: number) => {
+    localStorage.setItem(ACTIVE_BUDGET_KEY, String(budgetId));
+    setActiveBudgetId(budgetId);
+    setArchiveBudgetData(null);
+    setActiveView('current');
+  }, []);
+
+  const protectReadOnly = (content: ReactNode) =>
+    activeBudget?.role === 'read' ? (
+      <fieldset className="read-only-surface" disabled>
+        {content}
+      </fieldset>
+    ) : (
+      content
+    );
 
   // Refresh budget data when transactions might have changed
   const handleTransactionsChanged = useCallback(async () => {
@@ -272,10 +325,11 @@ function AppContent() {
               yearId={archiveBudgetData?.yearId || 0}
               groups={archiveBudgetData?.groups || []}
               onTransactionsChanged={() => loadArchiveData(archiveYear)}
+              readOnly={activeBudget?.role === 'read'}
             />
           );
         } else if (archiveSubView === 'accounts') {
-          return <Accounts year={archiveYear} months={months} onDataChanged={refreshData} />;
+          return protectReadOnly(<Accounts year={archiveYear} months={months} onDataChanged={refreshData} />);
         }
       }
       return null;
@@ -304,22 +358,30 @@ function AppContent() {
             yearId={yearId}
             groups={budgetData?.groups || []}
             onTransactionsChanged={handleTransactionsChanged}
+            readOnly={activeBudget?.role === 'read'}
           />
         );
       case 'settings':
-        return <Settings yearId={yearId} groups={budgetData?.groups || []} onDataChanged={refreshData} />;
-      case 'accounts':
-        return <Accounts year={currentYear} months={months} onDataChanged={refreshData} />;
-      case 'assets':
-        return <Assets onDataChanged={refreshData} />;
-      case 'budget-planning':
         return (
+          <Settings
+            yearId={yearId}
+            groups={budgetData?.groups || []}
+            onDataChanged={refreshData}
+            accessRole={activeBudget?.role || 'owner'}
+          />
+        );
+      case 'accounts':
+        return protectReadOnly(<Accounts year={currentYear} months={months} onDataChanged={refreshData} />);
+      case 'assets':
+        return protectReadOnly(<Assets onDataChanged={refreshData} />);
+      case 'budget-planning':
+        return protectReadOnly(
           <BudgetPlanning
             year={currentYear}
             groups={budgetData?.groups || []}
             months={months}
             onDataChanged={refreshData}
-          />
+          />,
         );
       case 'playground':
         return (
@@ -339,8 +401,16 @@ function AppContent() {
 
   return (
     <div className="app">
-      <Sidebar activeView={activeView} onViewChange={setActiveView} currentYear={selectedYear} />
+      <Sidebar
+        activeView={activeView}
+        onViewChange={setActiveView}
+        currentYear={selectedYear}
+        budgets={availableBudgets}
+        activeBudgetId={activeBudgetId}
+        onBudgetChange={handleBudgetChange}
+      />
       <main className="main-content">
+        {activeBudget?.role === 'read' && <div className="read-only-banner">{t('sharing.readOnlyBanner')}</div>}
         {showBudgetHeader && (
           <Header
             year={selectedYear}

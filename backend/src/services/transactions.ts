@@ -19,6 +19,7 @@ interface TransactionWithRelations {
   accountingMonth: number;
   accountingYear: number;
   warning: string | null;
+  createdByUserId: string | null;
   item?: {
     name: string;
     group?: {
@@ -30,6 +31,11 @@ interface TransactionWithRelations {
     id: number;
     name: string;
     institution: string | null;
+  } | null;
+  createdBy?: {
+    id: string;
+    name: string | null;
+    email: string;
   } | null;
 }
 
@@ -190,6 +196,10 @@ function formatTransaction(t: TransactionWithRelations) {
     accountingMonth: t.accountingMonth,
     accountingYear: t.accountingYear,
     warning: t.warning,
+    createdByUserId: t.createdByUserId,
+    createdBy: t.createdBy
+      ? { id: t.createdBy.id, name: t.createdBy.name, email: t.createdBy.email }
+      : null,
   };
 }
 
@@ -336,6 +346,7 @@ export async function getTransactionsForYear(tx: DbClient, year: number, budgetI
         },
       },
       paymentMethodRel: true,
+      createdBy: true,
     },
   });
 
@@ -350,7 +361,7 @@ export async function getTransactionsForYear(tx: DbClient, year: number, budgetI
 // Create a new transaction
 export async function createTransaction(
   tx: DbClient,
-  userId: string,
+  actorUserId: string,
   budgetId: number,
   data: {
     yearId: number;
@@ -363,7 +374,8 @@ export async function createTransaction(
     amount: number;
     accountingMonth?: number;
     accountingYear?: number;
-  }
+  },
+  budgetOwnerId: string = actorUserId
 ) {
   const year = await tx.query.budgetYears.findFirst({
     where: and(eq(budgetYears.id, data.yearId), eq(budgetYears.budgetId, budgetId)),
@@ -387,7 +399,7 @@ export async function createTransaction(
     }
   }
 
-  const paymentMethod = await getOwnedPaymentMethodOrThrow(tx, userId, data.paymentMethodId);
+  const paymentMethod = await getOwnedPaymentMethodOrThrow(tx, budgetOwnerId, data.paymentMethodId);
 
   let accountingMonth = data.accountingMonth;
   let accountingYear = data.accountingYear;
@@ -427,6 +439,7 @@ export async function createTransaction(
       accountingMonth,
       accountingYear,
       warning: isPotentialDuplicate ? 'potential_duplicate' : null,
+      createdByUserId: actorUserId,
     })
     .returning();
 
@@ -454,6 +467,7 @@ export async function createTransaction(
     accountingYear: newTransaction.accountingYear,
     sortPriority,
     warning: newTransaction.warning,
+    createdByUserId: newTransaction.createdByUserId,
   };
 }
 
@@ -475,7 +489,8 @@ export async function updateTransaction(
     accountingYear?: number;
     recalculateAccounting?: boolean;
     warning?: string | null;
-  }
+  },
+  budgetOwnerId: string = userId
 ) {
   const transaction = await tx.query.transactions.findFirst({
     where: eq(transactions.id, id),
@@ -500,7 +515,7 @@ export async function updateTransaction(
   }
 
   const requestedPaymentMethod =
-    data.paymentMethodId !== undefined ? await getOwnedPaymentMethodOrThrow(tx, userId, data.paymentMethodId) : null;
+    data.paymentMethodId !== undefined ? await getOwnedPaymentMethodOrThrow(tx, budgetOwnerId, data.paymentMethodId) : null;
 
   const updateData: Partial<{
     itemId: number | null;
@@ -535,7 +550,7 @@ export async function updateTransaction(
       data.accountingYear === undefined)
   ) {
     const date = data.date ?? transaction.date;
-    const paymentMethod = requestedPaymentMethod ?? (await getOwnedPaymentMethodOrThrow(tx, userId, transaction.paymentMethodId));
+    const paymentMethod = requestedPaymentMethod ?? (await getOwnedPaymentMethodOrThrow(tx, budgetOwnerId, transaction.paymentMethodId));
     const settlementDay = paymentMethod.settlementDay ?? null;
     const accounting = calculateAccountingPeriod(date, settlementDay);
     updateData.accountingMonth = accounting.accountingMonth;
@@ -554,7 +569,7 @@ export async function updateTransaction(
 
   // Get payment method for display name
   const pm = await tx.query.paymentMethods.findFirst({
-    where: and(eq(paymentMethods.id, updated.paymentMethodId), eq(paymentMethods.userId, userId)),
+    where: and(eq(paymentMethods.id, updated.paymentMethodId), eq(paymentMethods.userId, budgetOwnerId)),
   });
   const paymentMethodName = pm 
     ? (pm.institution ? `${pm.name} (${pm.institution})` : pm.name)
@@ -572,6 +587,7 @@ export async function updateTransaction(
     accountingMonth: updated.accountingMonth,
     accountingYear: updated.accountingYear,
     sortPriority: null,
+    createdByUserId: updated.createdByUserId,
   };
 }
 
@@ -772,7 +788,7 @@ export async function getThirdParties(tx: DbClient, search: string | undefined, 
 // Bulk create transactions
 export async function bulkCreateTransactions(
   tx: DbClient,
-  userId: string,
+  actorUserId: string,
   budgetId: number,
   yearId: number,
   transactionsData: Array<{
@@ -785,7 +801,8 @@ export async function bulkCreateTransactions(
     itemId?: number | null;
     accountingMonth?: number;
     accountingYear?: number;
-  }>
+  }>,
+  budgetOwnerId: string = actorUserId
 ) {
   if (transactionsData.length === 0) {
     return { created: 0, transactions: [] };
@@ -835,7 +852,7 @@ export async function bulkCreateTransactions(
 
   for (const pmId of uniquePaymentMethodIds) {
     const pm = await tx.query.paymentMethods.findFirst({
-      where: and(eq(paymentMethods.id, pmId), eq(paymentMethods.userId, userId)),
+      where: and(eq(paymentMethods.id, pmId), eq(paymentMethods.userId, budgetOwnerId)),
     });
     if (!pm) {
       throw new Error(`Payment method ${pmId} not found or does not belong to you`);
@@ -880,6 +897,7 @@ export async function bulkCreateTransactions(
           accountingMonth,
           accountingYear,
           warning: duplicateFlags[index] ? 'potential_duplicate' : null,
+          createdByUserId: actorUserId,
         };
       })
     )

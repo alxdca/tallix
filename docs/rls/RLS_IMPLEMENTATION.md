@@ -97,7 +97,7 @@ All policies are defined in migrations `0013_enable_rls.sql`, `0014_harden_rls_p
 
 ### Budget Sharing
 
-The `is_budget_authorized(p_budget_id)` helper function (defined as `SECURITY DEFINER`) checks whether the current user is the budget owner or has a share entry. Budget-scoped tables use this for their `USING` clause. Write access is restricted to budget owners only via `WITH CHECK`.
+The `is_budget_authorized(p_budget_id)` helper function checks whether the current user is the budget owner or has a share entry. The `is_budget_writer(p_budget_id)` helper separately grants mutations to owners and collaborators with the `write` role. Read-only collaborators receive `SELECT` policies only, while share management, payment-method configuration, and backups remain owner-only.
 
 ## Fail-Closed Behavior
 

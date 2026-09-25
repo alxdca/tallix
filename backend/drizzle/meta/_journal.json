@@ -211,6 +211,13 @@
       "when": 1774943402000,
       "tag": "0030_speed_up_third_party_autocomplete",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1790287200000,
+      "tag": "0031_budget_collaboration",
+      "breakpoints": true
     }
   ]
 }

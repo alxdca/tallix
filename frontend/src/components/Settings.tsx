@@ -4,20 +4,26 @@ import {
   createGroup,
   createItem,
   createPaymentMethod,
+  type BudgetAccessRole,
+  type BudgetShare,
   deleteGroup,
   deleteItem,
   deletePaymentMethod,
   exportBackup,
   fetchPaymentMethods,
+  fetchBudgetShares,
   fetchStartYear,
   importBackup,
   moveItem,
+  removeBudgetShare,
   type PaymentMethod,
   reorderGroups,
   reorderItems,
   reorderPaymentMethods,
   type SavingsType,
   togglePaymentMethodSavings,
+  shareBudget,
+  updateBudgetShare,
   updateGroup,
   updateItem,
   updatePaymentMethod,
@@ -35,6 +41,7 @@ interface SettingsProps {
   yearId: number;
   groups: BudgetGroup[];
   onDataChanged: () => void;
+  accessRole: BudgetAccessRole;
 }
 
 function slugify(text: string): string {
@@ -46,14 +53,19 @@ function slugify(text: string): string {
     .replace(/(^-|-$)/g, '');
 }
 
-type SettingsTab = 'categories' | 'accounts' | 'preferences' | 'backup';
+type SettingsTab = 'categories' | 'accounts' | 'preferences' | 'sharing' | 'backup';
 
-export default function Settings({ yearId, groups, onDataChanged }: SettingsProps) {
+export default function Settings({ yearId, groups, onDataChanged, accessRole }: SettingsProps) {
   const { t } = useI18n();
   const { theme, decimalSeparator, showBudgetBelowActual, toggleTheme, setDecimalSeparator, setShowBudgetBelowActual } =
     useSettings();
   const { dialogProps, confirm } = useConfirmDialog();
   const [activeTab, setActiveTab] = useState<SettingsTab>('categories');
+  const [shares, setShares] = useState<BudgetShare[]>([]);
+  const [shareEmail, setShareEmail] = useState('');
+  const [shareRole, setShareRole] = useState<'read' | 'write'>('read');
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareSuccess, setShareSuccess] = useState<string | null>(null);
   const [editingGroup, setEditingGroup] = useState<number | null>(null);
   const [editingItem, setEditingItem] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
@@ -122,6 +134,64 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
   useEffect(() => {
     loadStartYear();
   }, [loadStartYear]);
+
+  const loadShares = useCallback(async () => {
+    if (accessRole !== 'owner') return;
+    try {
+      setShares(await fetchBudgetShares());
+    } catch (error) {
+      logger.error('Failed to load budget shares', error);
+      setShareError(getErrorMessage(error, t));
+    }
+  }, [accessRole, t]);
+
+  useEffect(() => {
+    loadShares();
+  }, [loadShares]);
+
+  const handleShareBudget = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!shareEmail.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    setShareError(null);
+    setShareSuccess(null);
+    try {
+      setShares(await shareBudget(shareEmail.trim(), shareRole));
+      setShareEmail('');
+      setShareSuccess(t('sharing.sharedSuccessfully'));
+    } catch (error) {
+      setShareError(getErrorMessage(error, t));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleShareRoleChange = async (shareId: number, role: 'read' | 'write') => {
+    setShareError(null);
+    try {
+      await updateBudgetShare(shareId, role);
+      setShares((current) => current.map((share) => (share.id === shareId ? { ...share, role } : share)));
+    } catch (error) {
+      setShareError(getErrorMessage(error, t));
+    }
+  };
+
+  const handleRemoveShare = async (share: BudgetShare) => {
+    const confirmed = await confirm({
+      title: t('sharing.removeTitle'),
+      message: t('sharing.removeConfirm', { email: share.email }),
+      confirmLabel: t('common.remove'),
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+    setShareError(null);
+    try {
+      await removeBudgetShare(share.id);
+      setShares((current) => current.filter((item) => item.id !== share.id));
+    } catch (error) {
+      setShareError(getErrorMessage(error, t));
+    }
+  };
 
   const handleExportBackup = async () => {
     if (isExporting || isSubmitting) return;
@@ -1431,6 +1501,68 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
     </div>
   );
 
+  const renderSharingTab = () => (
+    <div className="sharing-section">
+      <div className="create-card">
+        <h3>{t('sharing.title')}</h3>
+        <p className="setting-help-text">{t('sharing.help')}</p>
+        <form className="create-form" onSubmit={handleShareBudget}>
+          <div className="form-row">
+            <input
+              className="form-input"
+              type="email"
+              value={shareEmail}
+              onChange={(event) => setShareEmail(event.target.value)}
+              placeholder={t('sharing.emailPlaceholder')}
+              disabled={isSubmitting}
+            />
+            <select
+              className="form-select sharing-role-select"
+              value={shareRole}
+              onChange={(event) => setShareRole(event.target.value as 'read' | 'write')}
+              disabled={isSubmitting}
+            >
+              <option value="read">{t('sharing.readOnly')}</option>
+              <option value="write">{t('sharing.canEdit')}</option>
+            </select>
+            <button className="btn-primary" type="submit" disabled={!shareEmail.trim() || isSubmitting}>
+              {t('sharing.share')}
+            </button>
+          </div>
+        </form>
+        {shareError && <div className="form-error">{shareError}</div>}
+        {shareSuccess && <div className="form-success">{shareSuccess}</div>}
+      </div>
+
+      <div className="sharing-list">
+        <h3>{t('sharing.peopleWithAccess')}</h3>
+        {shares.length === 0 ? (
+          <p className="empty-message">{t('sharing.noShares')}</p>
+        ) : (
+          shares.map((share) => (
+            <div className="sharing-member" key={share.id}>
+              <div className="sharing-member-identity">
+                <strong>{share.name || share.email}</strong>
+                {share.name && <span>{share.email}</span>}
+              </div>
+              <select
+                className="form-select sharing-role-select"
+                value={share.role}
+                onChange={(event) => handleShareRoleChange(share.id, event.target.value as 'read' | 'write')}
+              >
+                <option value="read">{t('sharing.readOnly')}</option>
+                <option value="write">{t('sharing.canEdit')}</option>
+              </select>
+              <button className="btn-icon delete" type="button" onClick={() => handleRemoveShare(share)}>
+                {t('common.remove')}
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="settings-container">
       <div className="settings-header">
@@ -1449,17 +1581,34 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
           </svg>
           {t('settings.categories')}
         </button>
-        <button
-          type="button"
-          className={`settings-tab ${activeTab === 'accounts' ? 'active' : ''}`}
-          onClick={() => setActiveTab('accounts')}
-        >
+        {accessRole === 'owner' && (
+          <button
+            type="button"
+            className={`settings-tab ${activeTab === 'accounts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('accounts')}
+          >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
             <line x1="1" y1="10" x2="23" y2="10" />
           </svg>
           {t('settings.paymentMethodsTitle')}
-        </button>
+          </button>
+        )}
+        {accessRole === 'owner' && (
+          <button
+            type="button"
+            className={`settings-tab ${activeTab === 'sharing' ? 'active' : ''}`}
+            onClick={() => setActiveTab('sharing')}
+          >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+          {t('sharing.tab')}
+          </button>
+        )}
         <button
           type="button"
           className={`settings-tab ${activeTab === 'preferences' ? 'active' : ''}`}
@@ -1471,25 +1620,28 @@ export default function Settings({ yearId, groups, onDataChanged }: SettingsProp
           </svg>
           {t('settings.preferences')}
         </button>
-        <button
-          type="button"
-          className={`settings-tab ${activeTab === 'backup' ? 'active' : ''}`}
-          onClick={() => setActiveTab('backup')}
-        >
+        {accessRole === 'owner' && (
+          <button
+            type="button"
+            className={`settings-tab ${activeTab === 'backup' ? 'active' : ''}`}
+            onClick={() => setActiveTab('backup')}
+          >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
           {t('settings.dataBackup')}
-        </button>
+          </button>
+        )}
       </div>
 
       <div className="settings-content">
         {activeTab === 'categories' && renderCategoriesTab()}
         {activeTab === 'accounts' && renderAccountsTab()}
         {activeTab === 'preferences' && renderPreferencesTab()}
-        {activeTab === 'backup' && renderBackupTab()}
+        {activeTab === 'sharing' && accessRole === 'owner' && renderSharingTab()}
+        {activeTab === 'backup' && accessRole === 'owner' && renderBackupTab()}
       </div>
 
       <ConfirmDialog {...dialogProps} />

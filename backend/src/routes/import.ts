@@ -163,6 +163,7 @@ router.post(
     }
 
     const budgetId = req.budget!.id;
+    const ownerId = req.budget!.userId;
     const result = await withTenantContext(userId, budgetId, async (tx) => {
       // If transactions already have paymentMethodId, use them directly
       // Otherwise convert payment method names to IDs
@@ -179,16 +180,16 @@ router.post(
           accountingMonth: t.accountingMonth,
           accountingYear: t.accountingYear,
         }));
-        return transactionsSvc.bulkCreateTransactions(tx, userId, budgetId, yearId, transactionsWithIds);
+        return transactionsSvc.bulkCreateTransactions(tx, userId, budgetId, yearId, transactionsWithIds, ownerId);
       }
       const transactionsWithNames = transactionsData.map((t) => ({
         ...t,
         paymentMethod: t.paymentMethod!,
       }));
       const transactionsWithIds = await importSvc.convertPaymentMethodNamesToIds(
-        tx, userId, transactionsWithNames
+        tx, ownerId, transactionsWithNames
       );
-      return transactionsSvc.bulkCreateTransactions(tx, userId, budgetId, yearId, transactionsWithIds);
+      return transactionsSvc.bulkCreateTransactions(tx, userId, budgetId, yearId, transactionsWithIds, ownerId);
     });
     res.status(201).json(result);
   })

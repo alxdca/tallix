@@ -1,6 +1,8 @@
 import { Router, type Router as RouterType } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { withUserContext } from '../db/context.js';
+import { withTenantContext } from '../db/context.js';
+import { requireBudgetOwner } from '../middleware/budget.js';
 import * as paymentMethods from '../services/paymentMethods.js';
 import {
   DuplicatePaymentMethodError,
@@ -29,8 +31,9 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
-    const methods = await withUserContext(userId, (tx) =>
-      paymentMethods.getAllPaymentMethods(tx, userId)
+    const ownerId = req.budget!.userId;
+    const methods = await withTenantContext(userId, req.budget!.id, (tx) =>
+      paymentMethods.getAllPaymentMethods(tx, ownerId)
     );
     res.json(methods);
   })
@@ -39,6 +42,7 @@ router.get(
 // POST /api/payment-methods - Create a new payment method
 router.post(
   '/',
+  requireBudgetOwner,
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const { name, sortOrder = 0, institution } = req.body;
@@ -59,6 +63,7 @@ router.post(
 // PUT /api/payment-methods/reorder - Reorder payment methods
 router.put(
   '/reorder',
+  requireBudgetOwner,
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const { methods } = req.body as { methods: { id: number; sortOrder: number }[] };
@@ -75,6 +80,7 @@ router.put(
 // PUT /api/payment-methods/:id - Update a payment method
 router.put(
   '/:id',
+  requireBudgetOwner,
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const id = parseInt(req.params.id, 10);
@@ -110,6 +116,7 @@ router.put(
 // DELETE /api/payment-methods/:id - Delete a payment method
 router.delete(
   '/:id',
+  requireBudgetOwner,
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const id = parseInt(req.params.id, 10);

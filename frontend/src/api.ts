@@ -2,6 +2,7 @@ import type { BudgetData, BudgetGroup, BudgetItem, BudgetSummary } from './types
 
 const API_BASE = '/api';
 const TOKEN_KEY = 'tallix_token';
+export const ACTIVE_BUDGET_KEY = 'tallix_active_budget_id';
 
 const ERROR_MESSAGE_TO_CODE: Record<string, string> = {
   'Invalid email or password': 'AUTH_INVALID_CREDENTIALS',
@@ -70,7 +71,64 @@ function getAuthHeaders(): HeadersInit {
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
+  const budgetId = localStorage.getItem(ACTIVE_BUDGET_KEY);
+  if (budgetId) {
+    headers['X-Budget-Id'] = budgetId;
+  }
   return headers;
+}
+
+export type BudgetAccessRole = 'owner' | 'read' | 'write';
+
+export interface AccessibleBudget {
+  id: number;
+  description: string | null;
+  ownerId: string;
+  ownerName: string | null;
+  ownerEmail: string;
+  role: BudgetAccessRole;
+}
+
+export interface BudgetShare {
+  id: number;
+  userId: string;
+  email: string;
+  name: string | null;
+  role: 'read' | 'write';
+}
+
+export async function fetchBudgets(): Promise<{ budgets: AccessibleBudget[]; defaultBudgetId: number }> {
+  const response = await authFetch(`${API_BASE}/budgets`);
+  await ensureOk(response, 'Failed to fetch budgets');
+  return response.json();
+}
+
+export async function fetchBudgetShares(): Promise<BudgetShare[]> {
+  const response = await authFetch(`${API_BASE}/budgets/current/shares`);
+  await ensureOk(response, 'Failed to fetch budget sharing settings');
+  return response.json();
+}
+
+export async function shareBudget(email: string, role: 'read' | 'write'): Promise<BudgetShare[]> {
+  const response = await authFetch(`${API_BASE}/budgets/current/shares`, {
+    method: 'POST',
+    body: JSON.stringify({ email, role }),
+  });
+  await ensureOk(response, 'Failed to share budget');
+  return response.json();
+}
+
+export async function updateBudgetShare(shareId: number, role: 'read' | 'write'): Promise<void> {
+  const response = await authFetch(`${API_BASE}/budgets/current/shares/${shareId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ role }),
+  });
+  await ensureOk(response, 'Failed to update budget access');
+}
+
+export async function removeBudgetShare(shareId: number): Promise<void> {
+  const response = await authFetch(`${API_BASE}/budgets/current/shares/${shareId}`, { method: 'DELETE' });
+  await ensureOk(response, 'Failed to remove budget access');
 }
 
 // Authenticated fetch wrapper
@@ -288,12 +346,12 @@ export interface Transaction {
   accountingYear: number;
   sortPriority: number | null;
   warning?: string | null;
+  createdByUserId?: string | null;
+  createdBy?: { id: string; name: string | null; email: string } | null;
 }
 
 export async function fetchTransactions(year?: number): Promise<Transaction[]> {
-  const url = typeof year === 'number'
-    ? `${API_BASE}/transactions/year/${year}`
-    : `${API_BASE}/transactions`;
+  const url = typeof year === 'number' ? `${API_BASE}/transactions/year/${year}` : `${API_BASE}/transactions`;
   const response = await authFetch(url);
   await ensureOk(response, 'Failed to fetch transactions');
   return response.json();

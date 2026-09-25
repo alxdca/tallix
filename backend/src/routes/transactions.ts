@@ -72,13 +72,14 @@ router.post(
     }
 
     const budgetId = req.budget!.id;
+    const ownerId = req.budget!.userId;
     let newTransaction: Awaited<ReturnType<typeof transactionsSvc.createTransaction>>;
     try {
       newTransaction = await withTenantContext(userId, budgetId, (tx) =>
         transactionsSvc.createTransaction(tx, userId, budgetId, {
           yearId, itemId, date, description, comment, thirdParty,
           paymentMethodId, amount, accountingMonth, accountingYear,
-        })
+        }, ownerId)
       );
     } catch (error) {
       mapTransactionWriteError(error);
@@ -133,13 +134,14 @@ router.put(
     } = req.body;
 
     const budgetId = req.budget!.id;
+    const ownerId = req.budget!.userId;
     let updated: Awaited<ReturnType<typeof transactionsSvc.updateTransaction>>;
     try {
       updated = await withTenantContext(userId, budgetId, (tx) =>
         transactionsSvc.updateTransaction(tx, userId, budgetId, id, {
           itemId, date, description, comment, thirdParty, paymentMethodId,
           amount, accountingMonth, accountingYear, recalculateAccounting,
-        })
+        }, ownerId)
       );
     } catch (error) {
       mapTransactionWriteError(error);
@@ -164,10 +166,11 @@ router.post(
     }
 
     const budgetId = req.budget!.id;
+    const ownerId = req.budget!.userId;
     const updated = await withTenantContext(userId, budgetId, (tx) =>
       transactionsSvc.updateTransaction(tx, userId, budgetId, id, {
         warning: null,
-      })
+      }, ownerId)
     );
 
     if (!updated) {

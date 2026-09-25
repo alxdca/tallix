@@ -12,8 +12,9 @@ router.get(
     const currentYear = new Date().getFullYear();
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
     const data = await withTenantContext(userId, budgetId, (tx) =>
-      budget.getBudgetDataForYear(tx, currentYear, budgetId, userId)
+      budget.getBudgetDataForYear(tx, currentYear, budgetId, ownerId)
     );
     res.json(data);
   })
@@ -29,8 +30,9 @@ router.get(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
     const data = await withTenantContext(userId, budgetId, (tx) =>
-      budget.getBudgetDataForYear(tx, year, budgetId, userId)
+      budget.getBudgetDataForYear(tx, year, budgetId, ownerId)
     );
     res.json(data);
   })
@@ -48,8 +50,9 @@ router.get(
     const currentYear = new Date().getFullYear();
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
     const summary = await withTenantContext(userId, budgetId, (tx) =>
-      budget.getBudgetSummary(tx, currentYear, budgetId, userId)
+      budget.getBudgetSummary(tx, currentYear, budgetId, ownerId)
     );
     res.json(summary);
   })
@@ -80,8 +83,9 @@ router.post(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
     const newYear = await withTenantContext(userId, budgetId, (tx) =>
-      budget.createYear(tx, year, initialBalance, budgetId, userId)
+      budget.createYear(tx, year, initialBalance, budgetId, ownerId)
     );
     res.status(201).json(newYear);
   })
@@ -334,10 +338,11 @@ router.put(
 
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
 
     try {
       const result = await withTenantContext(userId, budgetId, (tx) =>
-        budget.updateStartYear(tx, budgetId, userId, startYear)
+        budget.updateStartYear(tx, budgetId, ownerId, startYear)
       );
       res.json(result);
     } catch (err: unknown) {

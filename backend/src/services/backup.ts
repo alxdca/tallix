@@ -646,6 +646,7 @@ export async function importBackup(
       accountingMonth: t.accountingMonth,
       accountingYear: t.accountingYear,
       warning: t.warning,
+      createdByUserId: userId,
     }));
 
     // Insert in chunks of 500 to avoid hitting PostgreSQL parameter limits

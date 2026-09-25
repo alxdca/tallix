@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchAvailableYears } from '../api';
+import { type AccessibleBudget, fetchAvailableYears } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
 import { logger } from '../utils/logger';
@@ -8,15 +8,26 @@ interface SidebarProps {
   activeView: string;
   onViewChange: (view: string) => void;
   currentYear: number;
+  budgets: AccessibleBudget[];
+  activeBudgetId: number | null;
+  onBudgetChange: (budgetId: number) => void;
 }
 
-export default function Sidebar({ activeView, onViewChange, currentYear }: SidebarProps) {
+export default function Sidebar({
+  activeView,
+  onViewChange,
+  currentYear,
+  budgets,
+  activeBudgetId,
+  onBudgetChange,
+}: SidebarProps) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showArchiveDropdown, setShowArchiveDropdown] = useState(false);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
+  const activeBudgetRole = budgets.find((budget) => budget.id === activeBudgetId)?.role;
 
   // Fetch available years
   const loadAvailableYears = useCallback(async () => {
@@ -32,8 +43,8 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
   }, [currentYear]);
 
   useEffect(() => {
-    loadAvailableYears();
-  }, [loadAvailableYears]);
+    if (activeBudgetId !== null) loadAvailableYears();
+  }, [activeBudgetId, loadAvailableYears]);
 
   // Reload available years when returning from settings or when activeView changes
   useEffect(() => {
@@ -69,6 +80,32 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
           <span className="logo-icon">◈</span>
           <span className="logo-text">Tallix</span>
         </div>
+        {budgets.length > 0 && (
+          <div className="budget-switcher">
+            <label htmlFor="active-budget">{t('sharing.budget')}</label>
+            <select
+              id="active-budget"
+              value={activeBudgetId ?? ''}
+              onChange={(event) => onBudgetChange(Number(event.target.value))}
+            >
+              {budgets.map((budget) => (
+                <option key={budget.id} value={budget.id}>
+                  {budget.description ||
+                    (budget.role === 'owner'
+                      ? t('sharing.myBudget')
+                      : t('sharing.sharedBy', { owner: budget.ownerName || budget.ownerEmail }))}
+                </option>
+              ))}
+            </select>
+            {budgets.find((budget) => budget.id === activeBudgetId)?.role !== 'owner' && (
+              <span className="budget-access-badge">
+                {budgets.find((budget) => budget.id === activeBudgetId)?.role === 'write'
+                  ? t('sharing.writeAccess')
+                  : t('sharing.readAccess')}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <nav className="sidebar-nav">
@@ -228,18 +265,20 @@ export default function Sidebar({ activeView, onViewChange, currentYear }: Sideb
         </div>
 
         {/* Settings */}
-        <button
-          className={`nav-item ${activeView === 'settings' ? 'active' : ''}`}
-          onClick={() => onViewChange('settings')}
-        >
-          <span className="nav-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </span>
-          <span className="nav-label">{t('nav.settings')}</span>
-        </button>
+        {activeBudgetRole !== 'read' && (
+          <button
+            className={`nav-item ${activeView === 'settings' ? 'active' : ''}`}
+            onClick={() => onViewChange('settings')}
+          >
+            <span className="nav-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </span>
+            <span className="nav-label">{t('nav.settings')}</span>
+          </button>
+        )}
       </nav>
 
       <div className="sidebar-footer">

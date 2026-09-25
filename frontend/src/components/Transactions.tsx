@@ -66,6 +66,7 @@ interface TransactionsProps {
   groups: BudgetGroup[];
   onTransactionsChanged?: () => void;
   initialFilters?: Partial<TransactionsFilters>;
+  readOnly?: boolean;
 }
 
 type SortField = 'manual' | 'date' | 'thirdParty' | 'description' | 'paymentMethod' | 'category' | 'amount';
@@ -155,6 +156,7 @@ export default function Transactions({
   groups,
   onTransactionsChanged,
   initialFilters,
+  readOnly = false,
 }: TransactionsProps) {
   const formatCurrency = useFormatCurrency();
   const { dialogProps, confirm } = useConfirmDialog();
@@ -1057,7 +1059,7 @@ export default function Transactions({
                 </button>
               </div>
             )}
-            {selectedIds.size > 0 && (
+            {!readOnly && selectedIds.size > 0 && (
               <button className="btn-danger" onClick={handleBulkDelete} disabled={isSubmitting}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="3 6 5 6 21 6" />
@@ -1075,14 +1077,16 @@ export default function Transactions({
                 {t('transactions.clearFilters')}
               </button>
             )}
-            <button className="btn-import" onClick={() => setShowImportModal(true)}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-              {t('transactions.bulkImport')}
-            </button>
+            {!readOnly && (
+              <button className="btn-import" onClick={() => setShowImportModal(true)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                {t('transactions.bulkImport')}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1115,7 +1119,7 @@ export default function Transactions({
       </div>
 
       {/* Bulk Import Modal */}
-      <BulkImportModal
+      {!readOnly && <BulkImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         yearId={yearId}
@@ -1124,10 +1128,10 @@ export default function Transactions({
           loadTransactions();
           onTransactionsChanged?.();
         }}
-      />
+      />}
 
       {/* Add Transaction/Transfer Form */}
-      <NewTransactionForm
+      {!readOnly && <NewTransactionForm
         year={year}
         yearId={yearId}
         categories={allItems}
@@ -1140,7 +1144,7 @@ export default function Transactions({
           await loadTransactions();
           onTransactionsChanged?.();
         }}
-      />
+      />}
 
       {/* Transactions List */}
       <div className="transactions-list">
@@ -1176,6 +1180,7 @@ export default function Transactions({
                     }}
                     onChange={toggleSelectAll}
                     title={t('transactions.selectAll')}
+                    disabled={readOnly}
                   />
                 </th>
                 <th className="col-order sortable" onClick={() => handleSort('manual')}>
@@ -1756,6 +1761,7 @@ export default function Transactions({
                             type="checkbox"
                             checked={selectedIds.has(entry.id)}
                             onChange={() => toggleSelect(entry.id)}
+                            disabled={readOnly}
                           />
                         </td>
                         <td className="order-cell">
@@ -1765,7 +1771,7 @@ export default function Transactions({
                               className="btn-icon reorder"
                               onClick={() => handleReorderSingle(entry.id, 'up')}
                               title={t('common.moveUp')}
-                              disabled={!canReorderRows || isSubmitting}
+                              disabled={readOnly || !canReorderRows || isSubmitting}
                             >
                               <svg
                                 width="14"
@@ -1783,7 +1789,7 @@ export default function Transactions({
                               className="btn-icon reorder"
                               onClick={() => handleReorderSingle(entry.id, 'down')}
                               title={t('common.moveDown')}
-                              disabled={!canReorderRows || isSubmitting}
+                              disabled={readOnly || !canReorderRows || isSubmitting}
                             >
                               <svg
                                 width="14"
@@ -1815,6 +1821,13 @@ export default function Transactions({
                         </td>
                         <td className="description-cell">
                           {entry.description || <span className="empty-field">-</span>}
+                          {!isTransfer && transaction?.createdBy && (
+                            <span className="transaction-creator" title={transaction.createdBy.email}>
+                              {t('transactions.createdBy', {
+                                name: transaction.createdBy.name || transaction.createdBy.email,
+                              })}
+                            </span>
+                          )}
                         </td>
                         <td className="comment-cell">
                           {!isTransfer && transaction?.comment ? (
@@ -1860,6 +1873,7 @@ export default function Transactions({
                           {formatCurrency(entry.amount, true)}
                         </td>
                         <td className="actions-cell">
+                          {!readOnly && <>
                           {!isTransfer && transaction?.warning === 'potential_duplicate' && (
                             <button
                               className="btn-icon dismiss-warning"
@@ -1914,6 +1928,7 @@ export default function Transactions({
                               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                             </svg>
                           </button>
+                          </>}
                         </td>
                       </>
                     )}

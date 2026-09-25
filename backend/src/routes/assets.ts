@@ -11,8 +11,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
 
-    const result = await withTenantContext(userId, budgetId, (tx) => assetsSvc.getAssets(tx, budgetId, userId));
+    const result = await withTenantContext(userId, budgetId, (tx) => assetsSvc.getAssets(tx, budgetId, ownerId));
 
     res.json(result);
   })
