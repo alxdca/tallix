@@ -156,7 +156,9 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .sidebar-header {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
   padding: 20px;
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -1369,30 +1371,118 @@ td.zero {
 .budget-switcher {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 16px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .budget-switcher label {
-  color: var(--text-muted);
-  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
+.budget-select-control {
+  position: relative;
+}
+
 .budget-switcher select {
+  appearance: none;
   width: 100%;
-  padding: 8px 10px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 36px 0 40px;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
   color: var(--text-primary);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 7px;
+  border-radius: 10px;
+  text-overflow: ellipsis;
+  color-scheme: dark;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.budget-switcher select:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+
+.budget-switcher select:focus-visible {
+  outline: 2px solid var(--accent-budget);
+  outline-offset: 3px;
+}
+
+[data-theme="light"] .budget-switcher select {
+  color-scheme: light;
+}
+
+.budget-select-icon,
+.budget-select-chevron {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.budget-select-icon {
+  left: 12px;
+  color: var(--accent-budget-light);
+}
+
+.budget-select-chevron {
+  right: 12px;
+  color: var(--text-secondary);
 }
 
 .budget-access-badge {
   color: var(--accent-budget);
   font-size: 0.72rem;
+}
+
+@media (max-width: 768px) {
+  .sidebar-header {
+    align-items: center;
+    padding: 20px 12px;
+    gap: 16px;
+  }
+
+  .budget-switcher {
+    width: 44px;
+  }
+
+  .budget-switcher label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .budget-switcher select {
+    padding: 0;
+    color: transparent;
+  }
+
+  .budget-switcher option {
+    color: var(--text-primary);
+  }
+
+  .budget-select-icon {
+    left: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .budget-select-chevron,
+  .budget-access-badge {
+    display: none;
+  }
 }
 
 .transaction-creator {
