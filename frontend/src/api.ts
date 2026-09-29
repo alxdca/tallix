@@ -83,6 +83,7 @@ export type BudgetAccessRole = 'owner' | 'read' | 'write';
 export interface AccessibleBudget {
   id: number;
   description: string | null;
+  year: number;
   ownerId: string;
   ownerName: string | null;
   ownerEmail: string;
@@ -100,6 +101,15 @@ export interface BudgetShare {
 export async function fetchBudgets(): Promise<{ budgets: AccessibleBudget[]; defaultBudgetId: number }> {
   const response = await authFetch(`${API_BASE}/budgets`);
   await ensureOk(response, 'Failed to fetch budgets');
+  return response.json();
+}
+
+export async function createBudget(year: number, description?: string): Promise<AccessibleBudget> {
+  const response = await authFetch(`${API_BASE}/budgets`, {
+    method: 'POST',
+    body: JSON.stringify({ year, description }),
+  });
+  await ensureOk(response, 'Failed to create budget');
   return response.json();
 }
 
@@ -148,8 +158,9 @@ export async function fetchBudgetData(year?: number): Promise<BudgetData> {
   return response.json();
 }
 
-export async function fetchBudgetSummary(): Promise<BudgetSummary> {
-  const response = await authFetch(`${API_BASE}/budget/summary`);
+export async function fetchBudgetSummary(year?: number): Promise<BudgetSummary> {
+  const query = year ? `?year=${encodeURIComponent(String(year))}` : '';
+  const response = await authFetch(`${API_BASE}/budget/summary${query}`);
   await ensureOk(response, 'Failed to fetch budget summary');
   return response.json();
 }
@@ -157,59 +168,6 @@ export async function fetchBudgetSummary(): Promise<BudgetSummary> {
 export async function fetchMonths(): Promise<string[]> {
   const response = await authFetch(`${API_BASE}/budget/months`);
   await ensureOk(response, 'Failed to fetch months');
-  return response.json();
-}
-
-// Years
-export interface BudgetYear {
-  id: number;
-  year: number;
-  initialBalance: number;
-}
-
-export async function fetchYears(): Promise<BudgetYear[]> {
-  const response = await authFetch(`${API_BASE}/budget/years`);
-  await ensureOk(response, 'Failed to fetch years');
-  return response.json();
-}
-
-export async function createYear(year: number, initialBalance: number = 0): Promise<BudgetYear> {
-  const response = await authFetch(`${API_BASE}/budget/years`, {
-    method: 'POST',
-    body: JSON.stringify({ year, initialBalance }),
-  });
-  await ensureOk(response, 'Failed to create year');
-  return response.json();
-}
-
-export async function updateYear(id: number, initialBalance: number): Promise<BudgetYear> {
-  const response = await authFetch(`${API_BASE}/budget/years/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify({ initialBalance }),
-  });
-  await ensureOk(response, 'Failed to update year');
-  return response.json();
-}
-
-// Start Year
-export async function fetchStartYear(): Promise<{ startYear: number }> {
-  const response = await authFetch(`${API_BASE}/budget/start-year`);
-  await ensureOk(response, 'Failed to fetch start year');
-  return response.json();
-}
-
-export async function updateStartYear(startYear: number): Promise<{ startYear: number; createdYears: number[] }> {
-  const response = await authFetch(`${API_BASE}/budget/start-year`, {
-    method: 'PUT',
-    body: JSON.stringify({ startYear }),
-  });
-  await ensureOk(response, 'Failed to update start year');
-  return response.json();
-}
-
-export async function fetchAvailableYears(): Promise<{ years: number[] }> {
-  const response = await authFetch(`${API_BASE}/budget/years`);
-  await ensureOk(response, 'Failed to fetch available years');
   return response.json();
 }
 

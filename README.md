@@ -27,7 +27,7 @@ Demo: https://www.tallix.org
 - **Budget Sharing** - Share a budget with multiple registered users as read-only collaborators or editors
 - **Data Backup & Restore** - Export and import full budget data as JSON from Settings
   - Includes categories, payment methods, transactions, and planned spending
-  - Covers all available budget years
+  - Covers the selected yearly budget
 - **Spreadsheet Import** - Paste data from Excel/Sheets with configurable column mapping
 - **PDF Import** - Import transactions from bank statement PDFs with optional category suggestions
 - **AI-Powered Import (optional)** - DeepSeek LLM integration for intelligent transaction processing:
@@ -265,12 +265,12 @@ All endpoints below (except `/api/auth/*`) require a `Bearer` token.
 - `POST /api/budgets/current/shares` - Add or update a collaborator by email (owner only)
 - `PUT /api/budgets/current/shares/:shareId` - Change collaborator access (owner only)
 - `DELETE /api/budgets/current/shares/:shareId` - Remove collaborator access (owner only)
-- `GET /api/budget` - Get current year budget (includes yearly budgets per item)
+- `GET /api/budget` - Get the selected yearly budget (includes yearly budgets per item)
 - `GET /api/budget/year/:year` - Get budget for specific year
 - `GET /api/budget/months` - List month names
 - `GET /api/budget/summary` - Get budget summary (includes yearly budgets in totals)
-- `GET /api/budget/years` - List all years
-- `POST /api/budget/years` - Create new year
+- `GET /api/budget/years` - List the selected budget year
+- `POST /api/budgets` - Create an independently shareable yearly budget
 - `PUT /api/budget/years/:id` - Update year
 - `POST /api/budget/groups` - Create category group
 - `PUT /api/budget/groups/reorder` - Reorder groups

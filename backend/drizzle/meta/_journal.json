@@ -218,6 +218,13 @@
       "when": 1790287200000,
       "tag": "0031_budget_collaboration",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1790632800000,
+      "tag": "0032_split_yearly_budgets",
+      "breakpoints": true
     }
   ]
 }

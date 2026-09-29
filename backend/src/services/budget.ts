@@ -45,6 +45,21 @@ export const SAVINGS_GROUP_SLUG = 'epargne';
 export const SAVINGS_GROUP_TYPE = 'savings';
 export const SAVINGS_SORT_ORDER = 998;
 
+async function assertBudgetYearMatchesStartYear(tx: DbClient, year: number, budgetId: number) {
+  const budget = await tx.query.budgets.findFirst({
+    where: eq(budgets.id, budgetId),
+    columns: { startYear: true },
+  });
+
+  if (!budget) {
+    throw new Error('Budget not found');
+  }
+
+  if (budget.startYear !== year) {
+    throw new Error('Create a new budget instead of adding years to the current budget');
+  }
+}
+
 function itemInBudgetScope(budgetId: number) {
   return sql`${budgetItems.yearId} IN (
     SELECT ${budgetYears.id}
@@ -64,6 +79,8 @@ async function getActiveSavingsAccountIds(tx: DbClient, userId: string): Promise
 
 // Get or create a budget year
 export async function getOrCreateYear(tx: DbClient, year: number, budgetId: number) {
+  await assertBudgetYearMatchesStartYear(tx, year, budgetId);
+
   const existing = await tx.query.budgetYears.findFirst({
     where: and(eq(budgetYears.budgetId, budgetId), eq(budgetYears.year, year)),
   });
@@ -372,6 +389,13 @@ function calculateExpectedTotals(
   };
 }
 
+export function getExpectedBudgetMonthIndex(year: number, now = new Date()): number {
+  const currentYear = now.getFullYear();
+  if (year < currentYear) return 12;
+  if (year > currentYear) return 0;
+  return now.getMonth();
+}
+
 // Get full budget data for a year
 export async function getBudgetDataForYear(
   tx: DbClient,
@@ -460,7 +484,7 @@ export async function getBudgetSummary(
 ): Promise<BudgetSummary> {
   const data = await getBudgetDataForYear(tx, year, budgetId, userId);
   const { income, expenses, savings } = calculateTotals(data.groups);
-  const currentMonthIndex = new Date().getMonth();
+  const currentMonthIndex = getExpectedBudgetMonthIndex(year);
   const expectedTotals = calculateExpectedTotals(data.groups, currentMonthIndex);
 
   const paymentMethodAccounts = await tx
@@ -521,6 +545,8 @@ export async function createYear(
   budgetId: number,
   userId: string
 ) {
+  await assertBudgetYearMatchesStartYear(tx, year, budgetId);
+
   try {
     const [newYear] = await tx
       .insert(budgetYears)
@@ -1110,9 +1136,7 @@ export async function createSavingsItemForYear(
   return newItem.id;
 }
 
-// ============ START YEAR MANAGEMENT ============
-
-// Get the start year for a budget
+// Get the selected budget year for the legacy start-year API
 export async function getStartYear(tx: DbClient, budgetId: number): Promise<number> {
   const budget = await tx.query.budgets.findFirst({
     where: eq(budgets.id, budgetId),
@@ -1124,52 +1148,4 @@ export async function getStartYear(tx: DbClient, budgetId: number): Promise<numb
   }
 
   return budget.startYear;
-}
-
-// Update the start year for a budget and backfill missing years
-export async function updateStartYear(
-  tx: DbClient,
-  budgetId: number,
-  userId: string,
-  newStartYear: number
-): Promise<{ startYear: number; createdYears: number[] }> {
-  const currentYear = new Date().getFullYear();
-
-  // Validation: startYear must be <= current year
-  if (newStartYear > currentYear) {
-    throw new Error(`Start year cannot be in the future. Current year is ${currentYear}.`);
-  }
-
-  // Get existing years for this budget
-  const existingYears = await tx.query.budgetYears.findMany({
-    where: eq(budgetYears.budgetId, budgetId),
-    orderBy: [asc(budgetYears.year)],
-    columns: { year: true },
-  });
-
-  const existingYearNumbers = existingYears.map((y) => y.year);
-  const minExistingYear = existingYearNumbers.length > 0 ? Math.min(...existingYearNumbers) : null;
-
-  // Validation: cannot move start year forward if there are older years
-  if (minExistingYear !== null && newStartYear > minExistingYear) {
-    const blockingYears = existingYearNumbers.filter((y) => y < newStartYear);
-    throw new Error(
-      `Cannot set start year to ${newStartYear} because older years exist: ${blockingYears.join(', ')}. ` +
-        `Please delete these years first or choose an earlier start year.`
-    );
-  }
-
-  // Update the budget's start year
-  await tx.update(budgets).set({ startYear: newStartYear, updatedAt: new Date() }).where(eq(budgets.id, budgetId));
-
-  // Backfill missing years from startYear to currentYear
-  const createdYears: number[] = [];
-  for (let year = newStartYear; year <= currentYear; year++) {
-    if (!existingYearNumbers.includes(year)) {
-      await createYear(tx, year, 0, budgetId, userId);
-      createdYears.push(year);
-    }
-  }
-
-  return { startYear: newStartYear, createdYears };
 }

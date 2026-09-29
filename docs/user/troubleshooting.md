@@ -5,7 +5,7 @@ Common issues and quick fixes.
 ## Transactions not showing
 
 - Make sure you are viewing the correct year.
-- Use the Archive section to check past years.
+- Use the Budget dropdown to select the budget for a past year.
 
 ## Duplicate warning appears but it is not a duplicate
 

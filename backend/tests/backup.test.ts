@@ -203,7 +203,7 @@ async function setup() {
 
   const [bB] = await superuserDb
     .insert(budgets)
-    .values({ userId: userBId, startYear: 2024 })
+    .values({ userId: userBId, startYear: 8024 })
     .returning();
   budgetBId = bB.id;
 }
@@ -279,20 +279,42 @@ test('Backup export and import', async () => {
     // ── Test 2: Round-trip (export from A → import into B) ──
     console.log('\n--- Test 2: Round-trip import ---');
 
+    await expect(
+      withTenantContext(userBId, budgetBId, (tx) =>
+        backupSvc.importBackup(tx, userBId, budgetBId, exported)
+      )
+    ).rejects.toThrow(/exactly one budget year/);
+
+    const exportedYear = exported.budgetYears[0];
+    const exportedYearId = exportedYear.id;
+    const itemIdsForYear = new Set(
+      exported.budgetItems.filter((item) => item.yearId === exportedYearId).map((item) => item.id)
+    );
+    const singleYearExport: BackupPayload = {
+      ...exported,
+      budgetYears: [exportedYear],
+      budgetItems: exported.budgetItems.filter((item) => item.yearId === exportedYearId),
+      monthlyValues: exported.monthlyValues.filter((value) => itemIdsForYear.has(value.itemId)),
+      transactions: exported.transactions.filter((transaction) => transaction.yearId === exportedYearId),
+      assetValues: exported.assetValues.filter((value) => value.yearId === exportedYearId),
+      transfers: exported.transfers.filter((transfer) => transfer.yearId === exportedYearId),
+      accountBalances: exported.accountBalances.filter((balance) => balance.yearId === exportedYearId),
+    };
+
     const importResult = await withTenantContext(userBId, budgetBId, (tx) =>
-      backupSvc.importBackup(tx, userBId, budgetBId, exported)
+      backupSvc.importBackup(tx, userBId, budgetBId, singleYearExport)
     );
 
     expect(importResult.paymentMethods).toBe(3);
-    expect(importResult.budgetYears).toBe(2);
+    expect(importResult.budgetYears).toBe(1);
     expect(importResult.budgetGroups).toBe(2);
-    expect(importResult.budgetItems).toBe(3);
-    expect(importResult.monthlyValues).toBe(3);
-    expect(importResult.transactions).toBe(2);
+    expect(importResult.budgetItems).toBe(singleYearExport.budgetItems.length);
+    expect(importResult.monthlyValues).toBe(singleYearExport.monthlyValues.length);
+    expect(importResult.transactions).toBe(singleYearExport.transactions.length);
     expect(importResult.assets).toBe(2);
-    expect(importResult.assetValues).toBe(2);
-    expect(importResult.transfers).toBe(1);
-    expect(importResult.accountBalances).toBe(2);
+    expect(importResult.assetValues).toBe(singleYearExport.assetValues.length);
+    expect(importResult.transfers).toBe(singleYearExport.transfers.length);
+    expect(importResult.accountBalances).toBe(singleYearExport.accountBalances.length);
 
     // Verify data in user B's budget
     const bPms = await withUserContext(userBId, (tx) =>
@@ -303,7 +325,7 @@ test('Backup export and import', async () => {
     const bYears = await withTenantContext(userBId, budgetBId, (tx) =>
       tx.select().from(budgetYears)
     );
-    expect(bYears).toHaveLength(2);
+    expect(bYears).toHaveLength(1);
 
     const bGroups = await withTenantContext(userBId, budgetBId, (tx) =>
       tx.select().from(budgetGroups)
@@ -329,7 +351,7 @@ test('Backup export and import', async () => {
       const { inArray } = await import('drizzle-orm');
       return tx.select().from(transactions).where(inArray(transactions.yearId, bYearIds));
     });
-    expect(bTxns).toHaveLength(2);
+    expect(bTxns).toHaveLength(singleYearExport.transactions.length);
     // All transaction payment methods should belong to user B
     const bPmIds = new Set(bPms.map((pm) => pm.id));
     for (const txn of bTxns) {
@@ -341,11 +363,16 @@ test('Backup export and import', async () => {
     // ── Test 3: Destructive import deletes existing data ──
     console.log('\n--- Test 3: Destructive import ---');
 
+    const [siblingOnlyPaymentMethod] = await superuserDb
+      .insert(paymentMethods)
+      .values({ userId: userBId, name: 'Sibling only', sortOrder: 99 })
+      .returning();
+
     // User B now has data from test 2. Import again — should wipe and re-import.
     const importResult2 = await withTenantContext(userBId, budgetBId, (tx) =>
-      backupSvc.importBackup(tx, userBId, budgetBId, exported)
+      backupSvc.importBackup(tx, userBId, budgetBId, singleYearExport)
     );
-    expect(importResult2.transactions).toBe(2);
+    expect(importResult2.transactions).toBe(singleYearExport.transactions.length);
 
     // Verify no duplicate data (should be exactly the same counts as the backup)
     const b2Txns = await withTenantContext(userBId, budgetBId, async (tx) => {
@@ -353,12 +380,18 @@ test('Backup export and import', async () => {
       const years = await tx.select({ id: budgetYears.id }).from(budgetYears);
       return tx.select().from(transactions).where(inArray(transactions.yearId, years.map((y) => y.id)));
     });
-    expect(b2Txns).toHaveLength(2);
+    expect(b2Txns).toHaveLength(singleYearExport.transactions.length);
 
     const b2Groups = await withTenantContext(userBId, budgetBId, (tx) =>
       tx.select().from(budgetGroups)
     );
     expect(b2Groups).toHaveLength(2);
+
+    const [preservedSiblingPaymentMethod] = await superuserDb
+      .select()
+      .from(paymentMethods)
+      .where(sql`id = ${siblingOnlyPaymentMethod.id}`);
+    expect(preservedSiblingPaymentMethod?.name).toBe('Sibling only');
 
     console.log('  Destructive import: all assertions passed');
 
@@ -406,6 +439,50 @@ test('Backup export and import', async () => {
         backupSvc.importBackup(tx, userBId, budgetBId, brokenPayload)
       )
     ).rejects.toThrow(/unknown year backup ID/);
+
+    const conflictingPaymentMethodPayload: BackupPayload = {
+      ...singleYearExport,
+      paymentMethods: singleYearExport.paymentMethods.map((method, index) =>
+        index === 0 ? { ...method, settlementDay: method.settlementDay === null ? 10 : method.settlementDay + 1 } : method
+      ),
+    };
+    await expect(
+      withTenantContext(userBId, budgetBId, (tx) =>
+        backupSvc.importBackup(tx, userBId, budgetBId, conflictingPaymentMethodPayload)
+      )
+    ).rejects.toThrow(/different settings/);
+
+    const selectedGroupsBeforeLinkedConflict = await withTenantContext(userBId, budgetBId, (tx) =>
+      tx.select().from(budgetGroups)
+    );
+    const existingCard = singleYearExport.paymentMethods.find((method) => method.name === 'Credit Card');
+    const newLinkedChecking: BackupPayload['paymentMethods'][number] = {
+      id: 99901,
+      name: 'New Linked Checking',
+      institution: 'Import Bank',
+      sortOrder: 900,
+      isSavingsAccount: false,
+      savingsType: null,
+      settlementDay: null,
+      linkedPaymentMethodId: null,
+    };
+    const missingLocalLinkedTargetPayload: BackupPayload = {
+      ...singleYearExport,
+      paymentMethods: singleYearExport.paymentMethods
+        .map((method) =>
+          existingCard && method.id === existingCard.id ? { ...method, linkedPaymentMethodId: newLinkedChecking.id } : method
+        )
+        .concat(newLinkedChecking),
+    };
+    await expect(
+      withTenantContext(userBId, budgetBId, (tx) =>
+        backupSvc.importBackup(tx, userBId, budgetBId, missingLocalLinkedTargetPayload)
+      )
+    ).rejects.toThrow(/different linked account settings/);
+    const selectedGroupsAfterLinkedConflict = await withTenantContext(userBId, budgetBId, (tx) =>
+      tx.select().from(budgetGroups)
+    );
+    expect(selectedGroupsAfterLinkedConflict).toHaveLength(selectedGroupsBeforeLinkedConflict.length);
 
     console.log('  Validation: all assertions passed');
 

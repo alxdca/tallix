@@ -30,11 +30,11 @@ router.get(
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const currentYear = new Date().getFullYear();
+    const selectedYear = req.budget!.startYear;
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const transactions = await withTenantContext(userId, budgetId, (tx) =>
-      transactionsSvc.getTransactionsForYear(tx, currentYear, budgetId)
+      transactionsSvc.getTransactionsForYear(tx, selectedYear, budgetId)
     );
     res.json(transactions);
   })
@@ -47,6 +47,9 @@ router.get(
     const year = parseInt(req.params.year, 10);
     if (Number.isNaN(year)) {
       throw new AppError(400, 'Invalid year');
+    }
+    if (year !== req.budget!.startYear) {
+      throw new AppError(404, 'Budget year not found');
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;

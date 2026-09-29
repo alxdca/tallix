@@ -50,7 +50,7 @@ router.post(
     const budgetId = req.budget!.id;
     const language = req.user!.language || 'en';
     const country = req.user!.country || 'US';
-    const currentYear = new Date().getFullYear();
+    const currentYear = req.budget!.startYear;
 
     const context: copilot.CopilotContext = {
       userId,

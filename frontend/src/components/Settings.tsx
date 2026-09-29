@@ -1,33 +1,31 @@
 import type React from 'react';
 import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  type BudgetAccessRole,
+  type BudgetShare,
   createGroup,
   createItem,
   createPaymentMethod,
-  type BudgetAccessRole,
-  type BudgetShare,
   deleteGroup,
   deleteItem,
   deletePaymentMethod,
   exportBackup,
-  fetchPaymentMethods,
   fetchBudgetShares,
-  fetchStartYear,
+  fetchPaymentMethods,
   importBackup,
   moveItem,
-  removeBudgetShare,
   type PaymentMethod,
+  removeBudgetShare,
   reorderGroups,
   reorderItems,
   reorderPaymentMethods,
   type SavingsType,
-  togglePaymentMethodSavings,
   shareBudget,
+  togglePaymentMethodSavings,
   updateBudgetShare,
   updateGroup,
   updateItem,
   updatePaymentMethod,
-  updateStartYear,
 } from '../api';
 import { useI18n } from '../contexts/I18nContext';
 import { useSettings } from '../contexts/SettingsContext';
@@ -91,12 +89,6 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
   const [editLinkedPaymentMethodId, setEditLinkedPaymentMethodId] = useState<number | null>(null);
   const [paymentMethodError, setPaymentMethodError] = useState<string | null>(null);
 
-  // Start year state
-  const [startYear, setStartYear] = useState<number>(new Date().getFullYear());
-  const [startYearInput, setStartYearInput] = useState<string>('');
-  const [startYearError, setStartYearError] = useState<string | null>(null);
-  const [startYearSuccess, setStartYearSuccess] = useState<string | null>(null);
-
   // Backup state
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -120,20 +112,6 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
   useEffect(() => {
     loadPaymentMethods();
   }, [loadPaymentMethods]);
-
-  const loadStartYear = useCallback(async () => {
-    try {
-      const data = await fetchStartYear();
-      setStartYear(data.startYear);
-      setStartYearInput(data.startYear.toString());
-    } catch (error) {
-      logger.error('Failed to load start year', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadStartYear();
-  }, [loadStartYear]);
 
   const loadShares = useCallback(async () => {
     if (accessRole !== 'owner') return;
@@ -269,46 +247,6 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
       setBackupError(getErrorMessage(error, t));
     } finally {
       setIsImporting(false);
-    }
-  };
-
-  const handleUpdateStartYear = async () => {
-    if (isSubmitting) return;
-
-    const yearValue = parseInt(startYearInput, 10);
-    if (Number.isNaN(yearValue)) {
-      setStartYearError(t('settings.startYearInvalid'));
-      return;
-    }
-
-    const currentYear = new Date().getFullYear();
-    if (yearValue > currentYear) {
-      setStartYearError(t('settings.startYearFuture', { currentYear }));
-      return;
-    }
-
-    setIsSubmitting(true);
-    setStartYearError(null);
-    setStartYearSuccess(null);
-
-    try {
-      const result = await updateStartYear(yearValue);
-      setStartYear(result.startYear);
-      setStartYearInput(result.startYear.toString());
-
-      if (result.createdYears.length > 0) {
-        setStartYearSuccess(t('settings.startYearUpdatedWithYears', { years: result.createdYears.join(', ') }));
-      } else {
-        setStartYearSuccess(t('settings.startYearUpdated'));
-      }
-
-      // Refresh data to show new years
-      onDataChanged();
-    } catch (error) {
-      logger.error('Failed to update start year', error);
-      setStartYearError(getErrorMessage(error, t));
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -1010,7 +948,14 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
                         onClick={() => startAddItem(group.id)}
                         title={t('settings.addItem')}
                       >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
                           <line x1="12" y1="5" x2="12" y2="19" />
                           <line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
@@ -1041,7 +986,9 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
               {group.items.length === 0 && addingItemTo !== group.id && (
                 <p className="empty-items drop-hint">{t('settings.dropHere')}</p>
               )}
-              {group.items.map((item, itemIndex) => renderItem(item, group.items, itemIndex, group.id, group.type === 'savings'))}
+              {group.items.map((item, itemIndex) =>
+                renderItem(item, group.items, itemIndex, group.id, group.type === 'savings')
+              )}
 
               {/* Add item inline form */}
               {addingItemTo === group.id && (
@@ -1400,51 +1347,6 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
           </div>
         </div>
       </div>
-
-      <div className="appearance-section">
-        <h3 className="section-title">
-          <span className="section-indicator appearance"></span>
-          {t('settings.budgetSettings')}
-        </h3>
-        <div className="appearance-options">
-          <div className="setting-row">
-            <span className="setting-label">{t('settings.startYear')}</span>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleUpdateStartYear();
-              }}
-              className="start-year-form"
-            >
-              <div className="start-year-controls">
-                <input
-                  type="number"
-                  min="1900"
-                  max={new Date().getFullYear()}
-                  value={startYearInput}
-                  onChange={(e) => {
-                    setStartYearInput(e.target.value);
-                    setStartYearError(null);
-                    setStartYearSuccess(null);
-                  }}
-                  className="form-input"
-                  disabled={isSubmitting}
-                />
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={isSubmitting || startYearInput === startYear.toString()}
-                >
-                  {t('common.save')}
-                </button>
-              </div>
-            </form>
-          </div>
-          {startYearError && <div className="form-error">{startYearError}</div>}
-          {startYearSuccess && <div className="form-success">{startYearSuccess}</div>}
-          <div className="setting-help-text">{t('settings.startYearHelp')}</div>
-        </div>
-      </div>
     </>
   );
 
@@ -1476,7 +1378,14 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
 
         <div className="setting-row">
           <span className="setting-label">{t('settings.importLabel')}</span>
-          <label className={`btn-primary ${isImporting || isSubmitting ? 'disabled' : ''}`} style={{ width: '180px', justifyContent: 'center', cursor: isImporting || isSubmitting ? 'not-allowed' : 'pointer' }}>
+          <label
+            className={`btn-primary ${isImporting || isSubmitting ? 'disabled' : ''}`}
+            style={{
+              width: '180px',
+              justifyContent: 'center',
+              cursor: isImporting || isSubmitting ? 'not-allowed' : 'pointer',
+            }}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
@@ -1587,11 +1496,11 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
             className={`settings-tab ${activeTab === 'accounts' ? 'active' : ''}`}
             onClick={() => setActiveTab('accounts')}
           >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-            <line x1="1" y1="10" x2="23" y2="10" />
-          </svg>
-          {t('settings.paymentMethodsTitle')}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+              <line x1="1" y1="10" x2="23" y2="10" />
+            </svg>
+            {t('settings.paymentMethodsTitle')}
           </button>
         )}
         {accessRole === 'owner' && (
@@ -1600,13 +1509,13 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
             className={`settings-tab ${activeTab === 'sharing' ? 'active' : ''}`}
             onClick={() => setActiveTab('sharing')}
           >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-          {t('sharing.tab')}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            {t('sharing.tab')}
           </button>
         )}
         <button
@@ -1626,12 +1535,12 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
             className={`settings-tab ${activeTab === 'backup' ? 'active' : ''}`}
             onClick={() => setActiveTab('backup')}
           >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          {t('settings.dataBackup')}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            {t('settings.dataBackup')}
           </button>
         )}
       </div>

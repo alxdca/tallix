@@ -10,13 +10,24 @@ All endpoints are under `/api`. Most require authentication and budget context.
 - `GET /api/auth/setup`
 - `POST /api/auth/change-password`
 
+## Yearly budgets and sharing
+
+- `GET /api/budgets` — list accessible yearly budgets with `year`, role and owner details.
+- `POST /api/budgets` — create an owned budget with `{ year, description? }`; returns the selected budget shape. Years must be integers from 1900 through 9999.
+- `GET /api/budgets/current/shares`
+- `POST /api/budgets/current/shares` — grant access by `{ email, role: "read" | "write" }`.
+- `PUT /api/budgets/current/shares/:shareId`
+- `DELETE /api/budgets/current/shares/:shareId`
+
+Use `X-Budget-Id` to select the budget for data and sharing endpoints. Share management is owner-only.
+Each budget has one year; requests for another year return 404. Multiple budgets may use the same year.
+
 ## Budget
 
-- `GET /api/budget` (current year)
+- `GET /api/budget` (selected budget year)
 - `GET /api/budget/year/:year`
-- `GET /api/budget/summary`
+- `GET /api/budget/summary?year=:year` (selected budget year)
 - `GET /api/budget/years`
-- `POST /api/budget/years`
 - `PUT /api/budget/years/:id`
 - `GET /api/budget/months`
 - `POST /api/budget/groups`
@@ -30,7 +41,8 @@ All endpoints are under `/api`. Most require authentication and budget context.
 - `DELETE /api/budget/items/:id`
 - `PUT /api/budget/items/:itemId/months/:month`
 - `GET /api/budget/start-year`
-- `PUT /api/budget/start-year`
+
+`POST /api/budget/years` and `PUT /api/budget/start-year` return 410. Create a separate budget using `POST /api/budgets`.
 
 ## Transactions
 

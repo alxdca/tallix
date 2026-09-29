@@ -1,12 +1,15 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import type { DbClient } from '../db/index.js';
 import { budgetShares, budgets, users } from '../db/schema.js';
+import { createYear } from './budget.js';
 
 export type BudgetAccessRole = 'owner' | 'read' | 'write';
 
 export interface AccessibleBudget {
   id: number;
   description: string | null;
+  year: number;
+  startYear: number;
   ownerId: string;
   ownerName: string | null;
   ownerEmail: string;
@@ -54,13 +57,18 @@ export async function getOrCreateDefaultBudget(tx: DbClient, userId: string) {
     })
     .returning();
 
+  await tx.execute(sql`SELECT set_config('app.budget_id', ${String(created.id)}, true)`);
+  await createYear(tx, created.startYear, 0, created.id, userId);
+
   return created;
 }
 
 export async function listAccessibleBudgets(tx: DbClient, userId: string): Promise<AccessibleBudget[]> {
   const accessible = await tx.query.budgets.findMany({
     orderBy: [asc(budgets.id)],
-    with: { user: true },
+    with: {
+      user: true,
+    },
   });
   const shares = await tx.query.budgetShares.findMany({
     where: eq(budgetShares.userId, userId),
@@ -70,11 +78,52 @@ export async function listAccessibleBudgets(tx: DbClient, userId: string): Promi
   return accessible.map((budget) => ({
     id: budget.id,
     description: budget.description,
+    year: budget.startYear,
+    startYear: budget.startYear,
     ownerId: budget.userId,
     ownerName: budget.user.name,
     ownerEmail: budget.user.email,
     role: budget.userId === userId ? 'owner' : roleByBudgetId.get(budget.id) === 'write' ? 'write' : 'read',
   }));
+}
+
+export async function createYearlyBudget(
+  tx: DbClient,
+  userId: string,
+  year: number,
+  description: string | null = null
+): Promise<AccessibleBudget> {
+  const [createdBudget] = await tx
+    .insert(budgets)
+    .values({
+      userId,
+      description,
+      startYear: year,
+    })
+    .returning();
+
+  await tx.execute(sql`SELECT set_config('app.budget_id', ${String(createdBudget.id)}, true)`);
+  await createYear(tx, year, 0, createdBudget.id, userId);
+
+  const createdWithUser = await tx.query.budgets.findFirst({
+    where: eq(budgets.id, createdBudget.id),
+    with: { user: true },
+  });
+
+  if (!createdWithUser) {
+    throw new Error('Failed to create budget');
+  }
+
+  return {
+    id: createdWithUser.id,
+    description: createdWithUser.description,
+    year,
+    startYear: createdWithUser.startYear,
+    ownerId: createdWithUser.userId,
+    ownerName: createdWithUser.user.name,
+    ownerEmail: createdWithUser.user.email,
+    role: 'owner',
+  };
 }
 
 export async function getAccessibleBudget(tx: DbClient, userId: string, budgetId: number) {

@@ -13,6 +13,13 @@ function parseRole(value: unknown): 'read' | 'write' {
   return value;
 }
 
+function parseYear(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1900 || value > 9999) {
+    throw new AppError(400, 'year must be an integer between 1900 and 9999');
+  }
+  return value;
+}
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -20,6 +27,19 @@ router.get(
     const ownBudget = await withUserContext(userId, (tx) => budgetsSvc.getOrCreateDefaultBudget(tx, userId));
     const budgets = await withUserContext(userId, (tx) => budgetsSvc.listAccessibleBudgets(tx, userId));
     res.json({ budgets, defaultBudgetId: ownBudget.id });
+  })
+);
+
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const year = parseYear(req.body.year);
+    const description =
+      typeof req.body.description === 'string' && req.body.description.trim() ? req.body.description.trim() : null;
+
+    const budget = await withUserContext(userId, (tx) => budgetsSvc.createYearlyBudget(tx, userId, year, description));
+    res.status(201).json(budget);
   })
 );
 

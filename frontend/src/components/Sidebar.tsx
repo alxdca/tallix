@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { type AccessibleBudget, fetchAvailableYears } from '../api';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
+import type { AccessibleBudget } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
-import { logger } from '../utils/logger';
+import { getErrorMessage } from '../utils/errorMessages';
 
 interface SidebarProps {
   activeView: string;
@@ -11,6 +11,7 @@ interface SidebarProps {
   budgets: AccessibleBudget[];
   activeBudgetId: number | null;
   onBudgetChange: (budgetId: number) => void;
+  onCreateBudget: (year: number, description: string) => Promise<void>;
 }
 
 export default function Sidebar({
@@ -20,38 +21,19 @@ export default function Sidebar({
   budgets,
   activeBudgetId,
   onBudgetChange,
+  onCreateBudget,
 }: SidebarProps) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [showArchiveDropdown, setShowArchiveDropdown] = useState(false);
-  const [availableYears, setAvailableYears] = useState<number[]>([]);
+  const [newBudgetYear, setNewBudgetYear] = useState(String(new Date().getFullYear() + 1));
+  const [newBudgetDescription, setNewBudgetDescription] = useState('');
+  const [showCreateBudget, setShowCreateBudget] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreatingBudget, setIsCreatingBudget] = useState(false);
+  const yearInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const activeBudgetRole = budgets.find((budget) => budget.id === activeBudgetId)?.role;
-
-  // Fetch available years
-  const loadAvailableYears = useCallback(async () => {
-    try {
-      const { years } = await fetchAvailableYears();
-      console.log('Available years:', years);
-      console.log('Current year:', currentYear);
-      setAvailableYears(years || []);
-    } catch (error) {
-      logger.error('Failed to fetch available years', error);
-      setAvailableYears([]);
-    }
-  }, [currentYear]);
-
-  useEffect(() => {
-    if (activeBudgetId !== null) loadAvailableYears();
-  }, [activeBudgetId, loadAvailableYears]);
-
-  // Reload available years when returning from settings or when activeView changes
-  useEffect(() => {
-    if (activeView === 'current' || activeView === 'settings') {
-      loadAvailableYears();
-    }
-  }, [activeView, loadAvailableYears]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -69,9 +51,40 @@ export default function Sidebar({
     };
   }, [showUserMenu]);
 
-  // Get past years (years before current year)
-  const pastYears = (availableYears || []).filter((year) => year < currentYear).sort((a, b) => b - a);
-  console.log('Past years:', pastYears);
+  useEffect(() => {
+    if (showCreateBudget) yearInputRef.current?.focus();
+  }, [showCreateBudget]);
+
+  const handleCreateBudget = async (event: FormEvent) => {
+    event.preventDefault();
+    if (isCreatingBudget) return;
+    const year = Number(newBudgetYear);
+    if (!Number.isInteger(year) || year < 1900 || year > 9999) {
+      setCreateError(t('sharing.invalidYear'));
+      return;
+    }
+
+    setCreateError(null);
+    setIsCreatingBudget(true);
+    try {
+      await onCreateBudget(year, newBudgetDescription.trim());
+      setNewBudgetYear(String(Math.min(year + 1, 9999)));
+      setNewBudgetDescription('');
+      setShowCreateBudget(false);
+    } catch (error) {
+      setCreateError(getErrorMessage(error, t));
+    } finally {
+      setIsCreatingBudget(false);
+    }
+  };
+
+  const formatBudgetLabel = (budget: AccessibleBudget) => {
+    const ownerLabel =
+      budget.role === 'owner'
+        ? t('sharing.myBudget')
+        : t('sharing.sharedBy', { owner: budget.ownerName || budget.ownerEmail });
+    return budget.description ? `${budget.year} - ${budget.description}` : `${budget.year} - ${ownerLabel}`;
+  };
 
   return (
     <aside className="sidebar">
@@ -101,17 +114,26 @@ export default function Sidebar({
               </svg>
               <select
                 id="active-budget"
-                value={activeBudgetId ?? ''}
-                onChange={(event) => onBudgetChange(Number(event.target.value))}
+                value={showCreateBudget ? 'create' : (activeBudgetId ?? '')}
+                disabled={isCreatingBudget}
+                onChange={(event) => {
+                  if (event.target.value === 'create') {
+                    setShowCreateBudget(true);
+                    setCreateError(null);
+                    return;
+                  }
+                  setShowCreateBudget(false);
+                  onBudgetChange(Number(event.target.value));
+                }}
               >
-                {budgets.map((budget) => (
-                  <option key={budget.id} value={budget.id}>
-                    {budget.description ||
-                      (budget.role === 'owner'
-                        ? t('sharing.myBudget')
-                        : t('sharing.sharedBy', { owner: budget.ownerName || budget.ownerEmail }))}
-                  </option>
-                ))}
+                {[...budgets]
+                  .sort((a, b) => b.year - a.year || a.id - b.id)
+                  .map((budget) => (
+                    <option key={budget.id} value={budget.id}>
+                      {formatBudgetLabel(budget)}
+                    </option>
+                  ))}
+                <option value="create">{t('sharing.createBudget')}</option>
               </select>
               <svg
                 className="budget-select-chevron"
@@ -135,12 +157,65 @@ export default function Sidebar({
                   : t('sharing.readAccess')}
               </span>
             )}
+            {showCreateBudget && (
+              <form className="budget-create-form" onSubmit={handleCreateBudget}>
+                <label htmlFor="new-budget-year">{t('sharing.newBudgetYear')}</label>
+                <input
+                  ref={yearInputRef}
+                  id="new-budget-year"
+                  className="form-input"
+                  required
+                  type="number"
+                  min="1900"
+                  max="9999"
+                  value={newBudgetYear}
+                  onChange={(event) => {
+                    setNewBudgetYear(event.target.value);
+                    setCreateError(null);
+                  }}
+                  disabled={isCreatingBudget}
+                />
+                <label htmlFor="new-budget-description">{t('sharing.description')}</label>
+                <input
+                  id="new-budget-description"
+                  className="form-input"
+                  maxLength={255}
+                  placeholder={t('sharing.descriptionPlaceholder')}
+                  type="text"
+                  value={newBudgetDescription}
+                  onChange={(event) => {
+                    setNewBudgetDescription(event.target.value);
+                    setCreateError(null);
+                  }}
+                  disabled={isCreatingBudget}
+                />
+                <p className="setting-help-text">{t('sharing.createHelp')}</p>
+                {createError && (
+                  <p className="form-error" role="alert">
+                    {createError}
+                  </p>
+                )}
+                <div className="budget-create-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={isCreatingBudget}
+                    onClick={() => setShowCreateBudget(false)}
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button type="submit" className="btn-primary" disabled={isCreatingBudget}>
+                    {t(isCreatingBudget ? 'common.saving' : 'sharing.createBudget')}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         )}
       </div>
 
       <nav className="sidebar-nav">
-        {/* Current Year with sub-items */}
+        {/* Selected budget year with sub-items */}
         <div className="nav-group">
           <button
             className={`nav-item ${activeView === 'current' ? 'active' : ''}`}
@@ -230,70 +305,6 @@ export default function Sidebar({
           </span>
           <span className="nav-label">{t('nav.assets')}</span>
         </button>
-
-        {/* Archive - Collapsible with past years */}
-        <div className="nav-group">
-          <button
-            className={`nav-item ${activeView.startsWith('archive-') ? 'active' : ''} ${pastYears.length === 0 ? 'disabled' : ''}`}
-            onClick={() => pastYears.length > 0 && setShowArchiveDropdown(!showArchiveDropdown)}
-            disabled={pastYears.length === 0}
-          >
-            <span className="nav-icon">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="21 8 21 21 3 21 3 8" />
-                <rect x="1" y="3" width="22" height="5" />
-                <line x1="10" y1="12" x2="14" y2="12" />
-              </svg>
-            </span>
-            <span className="nav-label">{t('nav.archive')}</span>
-            {pastYears.length > 0 && (
-              <svg
-                className={`nav-chevron ${showArchiveDropdown ? 'open' : ''}`}
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            )}
-          </button>
-
-          {/* Past year sub-items */}
-          {showArchiveDropdown &&
-            pastYears.length > 0 &&
-            pastYears.map((year) => (
-              <div key={year} className="nav-sub-group">
-                <div className="nav-year-label">{year}</div>
-                <button
-                  className={`nav-item nav-sub-item ${activeView === `archive-${year}-transactions` ? 'active' : ''}`}
-                  onClick={() => onViewChange(`archive-${year}-transactions`)}
-                >
-                  <span className="nav-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="12" y1="1" x2="12" y2="23" />
-                      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                    </svg>
-                  </span>
-                  <span className="nav-label">{t('nav.transactions')}</span>
-                </button>
-                <button
-                  className={`nav-item nav-sub-item ${activeView === `archive-${year}-accounts` ? 'active' : ''}`}
-                  onClick={() => onViewChange(`archive-${year}-accounts`)}
-                >
-                  <span className="nav-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="2" y="5" width="20" height="14" rx="2" />
-                      <line x1="2" y1="10" x2="22" y2="10" />
-                    </svg>
-                  </span>
-                  <span className="nav-label">{t('nav.accounts')}</span>
-                </button>
-              </div>
-            ))}
-        </div>
 
         {/* Settings */}
         {activeBudgetRole !== 'read' && (

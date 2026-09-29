@@ -18,15 +18,15 @@ This section explains how to use Tallix day to day. It focuses on workflows, not
 - [Assets, Debts, and Net Worth](assets.md)
 - [Imports (Spreadsheet, PDF, AI)](imports.md)
 - [Settings and Preferences](settings.md)
-- [Archive and Past Years](archive.md)
+- [Yearly Budgets and Sharing](yearly-budgets.md)
 - [Troubleshooting](troubleshooting.md)
 
 ## Key concepts
 
-- **Budget year**: Tallix organizes budgets by year. You can switch between current and archived years.
+- **Budget year**: Each yearly budget has its own data and sharing settings. Use the Budget dropdown to create or switch budgets.
 - **Groups and items**: Categories are grouped into income and expense sections.
 - **Payment methods**: Card or bank accounts used to pay. They can be linked to accounts and savings.
 - **Transactions**: Each transaction belongs to a budget year and optionally a category item.
-- **Assets and debts**: A separate multi-year view tracks non-transaction assets and liabilities.
+- **Assets and debts**: The Assets view tracks non-transaction assets and liabilities for the selected yearly budget.
 
 If you are looking for technical details, see the [Developer Documentation](../developer/README.md).

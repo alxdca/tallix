@@ -17,8 +17,8 @@ Tallix is a single-page application with a REST backend and a Postgres database.
 ## Core entities
 
 - **Users**: Authentication and profile preferences.
-- **Budgets**: Root entity per user with a start year.
-- **Years**: Generated per budget year for planning and transactions.
+- **Budgets**: Independently shareable yearly root entities. Each owner may have multiple budgets, including several for the same year.
+- **Years**: One row per budget, matching its `start_year`, for planning and transactions.
 - **Budget groups/items**: Categories for income and expenses.
 - **Payment methods**: Accounts or cards with optional institution and savings flags.
 - **Transactions**: Individual financial events.

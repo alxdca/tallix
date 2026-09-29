@@ -36,3 +36,13 @@ RLS policies are created in migration files and enforced at runtime. See:
 - `docs/rls/README.md`
 - `docs/rls/RLS_IMPLEMENTATION.md`
 - `docs/rls/RLS_ENFORCEMENT_GUIDE.md`
+
+## Independent yearly budgets
+
+Migration `0032_split_yearly_budgets.sql` separates legacy multi-year budgets before
+using the yearly budget selector. It retains one existing budget ID and creates
+budgets for the other years, preserving year and item IDs. Groups and asset
+hierarchies are copied into each new budget, and existing collaborator access is
+preserved. Access can then be changed independently for each yearly budget.
+
+Apply migrations with the normal migration command before starting the updated app.

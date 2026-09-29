@@ -2,6 +2,7 @@ import { eq, inArray } from 'drizzle-orm';
 import type { DbClient } from '../db/index.js';
 import {
   paymentMethods,
+  budgets,
   budgetYears,
   budgetGroups,
   budgetItems,
@@ -120,6 +121,22 @@ export interface BackupPayload {
   assetValues: BackupAssetValue[];
   transfers: BackupTransfer[];
   accountBalances: BackupAccountBalance[];
+}
+
+function paymentMethodNaturalKey(pm: Pick<BackupPaymentMethod, 'name' | 'institution'>): string {
+  return `${pm.name}\u0000${pm.institution ?? ''}`;
+}
+
+function paymentMethodDefinitionsMatch(
+  existing: typeof paymentMethods.$inferSelect,
+  backup: BackupPaymentMethod
+): boolean {
+  return (
+    existing.sortOrder === backup.sortOrder &&
+    existing.isSavingsAccount === backup.isSavingsAccount &&
+    existing.savingsType === backup.savingsType &&
+    existing.settlementDay === backup.settlementDay
+  );
 }
 
 export interface ImportSummary {
@@ -474,6 +491,63 @@ export async function importBackup(
 ): Promise<ImportSummary> {
   validateBackupPayload(payload);
 
+  if (payload.budgetYears.length !== 1) {
+    throw new AppError(400, 'Backup import supports exactly one budget year. Import each yearly budget separately.', {
+      code: 'BACKUP_SINGLE_YEAR_REQUIRED',
+    });
+  }
+
+  const [payloadYear] = payload.budgetYears;
+  const selectedBudget = await tx.query.budgets.findFirst({
+    where: eq(budgets.id, budgetId),
+    columns: { startYear: true },
+  });
+  if (!selectedBudget) {
+    throw new AppError(404, 'Budget not found', { code: 'BUDGET_NOT_FOUND' });
+  }
+  if (payloadYear.year !== selectedBudget.startYear) {
+    throw new AppError(400, 'Backup year does not match the selected budget year.', {
+      code: 'BACKUP_YEAR_MISMATCH',
+      params: { backupYear: payloadYear.year, budgetYear: selectedBudget.startYear },
+    });
+  }
+
+  const existingPaymentMethods = await tx.query.paymentMethods.findMany({
+    where: eq(paymentMethods.userId, userId),
+  });
+  const existingPaymentMethodByKey = new Map(
+    existingPaymentMethods.map((method) => [paymentMethodNaturalKey(method), method])
+  );
+  const backupPaymentMethodById = new Map(payload.paymentMethods.map((method) => [method.id, method]));
+
+  for (const pm of payload.paymentMethods) {
+    const existing = existingPaymentMethodByKey.get(paymentMethodNaturalKey(pm));
+    if (!existing) continue;
+
+    if (!paymentMethodDefinitionsMatch(existing, pm)) {
+      throw new AppError(409, `Payment method "${pm.name}" already exists with different settings.`, {
+        code: 'BACKUP_PAYMENT_METHOD_CONFLICT',
+        params: { name: pm.name },
+      });
+    }
+
+    const linkedBackup = pm.linkedPaymentMethodId !== null ? backupPaymentMethodById.get(pm.linkedPaymentMethodId) : null;
+    const linkedExisting = linkedBackup ? existingPaymentMethodByKey.get(paymentMethodNaturalKey(linkedBackup)) : null;
+    if (linkedBackup && !linkedExisting) {
+      throw new AppError(409, `Payment method "${pm.name}" already exists with different linked account settings.`, {
+        code: 'BACKUP_PAYMENT_METHOD_CONFLICT',
+        params: { name: pm.name },
+      });
+    }
+    const expectedLinkedId = linkedBackup ? linkedExisting?.id : null;
+    if ((existing.linkedPaymentMethodId ?? null) !== (expectedLinkedId ?? null)) {
+      throw new AppError(409, `Payment method "${pm.name}" already exists with different linked account settings.`, {
+        code: 'BACKUP_PAYMENT_METHOD_CONFLICT',
+        params: { name: pm.name },
+      });
+    }
+  }
+
   // ── Step 0: Delete all existing data in reverse dependency order ──
 
   // Get existing year IDs and item IDs for cascading deletes
@@ -527,28 +601,36 @@ export async function importBackup(
   }
   await tx.delete(assets).where(eq(assets.budgetId, budgetId));
 
-  // Payment methods (user-scoped)
-  await tx.delete(paymentMethods).where(eq(paymentMethods.userId, userId));
-
   // ── Step 1: Payment methods (two-pass for linkedPaymentMethodId) ──
+  // Payment methods are user-scoped and can be referenced by sibling yearly
+  // budgets, so importing one selected budget reuses matching definitions
+  // rather than deleting or mutating all of the user's payment methods.
 
   const pmIdMap = new Map<number, number>();
+  const insertedPaymentMethodIds = new Set<number>();
 
   for (const pm of payload.paymentMethods) {
-    const [inserted] = await tx
-      .insert(paymentMethods)
-      .values({
-        userId,
-        name: pm.name,
-        institution: pm.institution,
-        sortOrder: pm.sortOrder,
-        isSavingsAccount: pm.isSavingsAccount,
-        savingsType: pm.savingsType,
-        settlementDay: pm.settlementDay,
-        linkedPaymentMethodId: null, // set in pass 2
-      })
-      .returning();
-    pmIdMap.set(pm.id, inserted.id);
+    const existing = existingPaymentMethodByKey.get(paymentMethodNaturalKey(pm));
+
+    if (existing) {
+      pmIdMap.set(pm.id, existing.id);
+    } else {
+      const [inserted] = await tx
+        .insert(paymentMethods)
+        .values({
+          userId,
+          name: pm.name,
+          institution: pm.institution,
+          sortOrder: pm.sortOrder,
+          isSavingsAccount: pm.isSavingsAccount,
+          savingsType: pm.savingsType,
+          settlementDay: pm.settlementDay,
+          linkedPaymentMethodId: null, // set in pass 2
+        })
+        .returning();
+      pmIdMap.set(pm.id, inserted.id);
+      insertedPaymentMethodIds.add(inserted.id);
+    }
   }
 
   // Pass 2: update linked payment method references
@@ -556,10 +638,12 @@ export async function importBackup(
     if (pm.linkedPaymentMethodId !== null) {
       const newId = pmIdMap.get(pm.id)!;
       const linkedNewId = pmIdMap.get(pm.linkedPaymentMethodId)!;
-      await tx
-        .update(paymentMethods)
-        .set({ linkedPaymentMethodId: linkedNewId })
-        .where(eq(paymentMethods.id, newId));
+      if (insertedPaymentMethodIds.has(newId)) {
+        await tx
+          .update(paymentMethods)
+          .set({ linkedPaymentMethodId: linkedNewId })
+          .where(eq(paymentMethods.id, newId));
+      }
     }
   }
 

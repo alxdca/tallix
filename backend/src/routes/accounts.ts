@@ -1,4 +1,4 @@
-import { type Router as RouterType, Router } from 'express';
+import { type Request, type Router as RouterType, Router } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { withTenantContext } from '../db/context.js';
 import * as accountsSvc from '../services/accounts.js';
@@ -6,14 +6,22 @@ import { requireBudgetOwner } from '../middleware/budget.js';
 
 const router: RouterType = Router();
 
+function parseSelectedYear(req: Request): number {
+  const year = parseInt(req.params.year, 10);
+  if (Number.isNaN(year)) {
+    throw new AppError(400, 'Invalid year');
+  }
+  if (year !== req.budget!.startYear) {
+    throw new AppError(404, 'Budget year not found');
+  }
+  return year;
+}
+
 // GET /api/accounts/:year - Get all accounts with balances for a year
 router.get(
   '/:year',
   asyncHandler(async (req, res) => {
-    const year = parseInt(req.params.year, 10);
-    if (Number.isNaN(year)) {
-      throw new AppError(400, 'Invalid year');
-    }
+    const year = parseSelectedYear(req);
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const ownerId = req.budget!.userId;
@@ -28,10 +36,7 @@ router.get(
 router.put(
   '/:year/balance',
   asyncHandler(async (req, res) => {
-    const year = parseInt(req.params.year, 10);
-    if (Number.isNaN(year)) {
-      throw new AppError(400, 'Invalid year');
-    }
+    const year = parseSelectedYear(req);
 
     const { paymentMethodId, initialBalance } = req.body;
     if (!paymentMethodId || initialBalance === undefined) {

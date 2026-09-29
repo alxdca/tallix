@@ -7,13 +7,11 @@ This guide walks through the first time setup for a new budget.
 - Use the signup/login screen to create your account.
 - The app stores your language and country preferences for formatting and AI imports.
 
-## 2. Configure your start year
+## 2. Choose your yearly budget
 
-Tallix uses a start year to generate the list of budget years.
-
-- Go to Settings > Preferences.
-- Set the start year to the first year you want to track.
-- The app generates missing years between the start year and the current year.
+The Budget dropdown shows your own budgets and budgets shared with you.
+Choose **Create new budget** to add a past, current or future year and an optional description.
+Each yearly budget has its own categories, transactions and sharing permissions.
 
 ## 3. Set up categories
 

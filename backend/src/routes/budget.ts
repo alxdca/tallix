@@ -9,12 +9,12 @@ const router: RouterType = Router();
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const currentYear = new Date().getFullYear();
+    const selectedYear = req.budget!.startYear;
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const ownerId = req.budget!.userId;
     const data = await withTenantContext(userId, budgetId, (tx) =>
-      budget.getBudgetDataForYear(tx, currentYear, budgetId, ownerId)
+      budget.getBudgetDataForYear(tx, selectedYear, budgetId, ownerId)
     );
     res.json(data);
   })
@@ -27,6 +27,9 @@ router.get(
     const year = parseInt(req.params.year, 10);
     if (Number.isNaN(year)) {
       throw new AppError(400, 'Invalid year');
+    }
+    if (year !== req.budget!.startYear) {
+      throw new AppError(404, 'Budget year not found');
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
@@ -47,12 +50,18 @@ router.get('/months', (_req, res) => {
 router.get(
   '/summary',
   asyncHandler(async (req, res) => {
-    const currentYear = new Date().getFullYear();
+    const requestedYear = req.query.year ? parseInt(String(req.query.year), 10) : req.budget!.startYear;
+    if (Number.isNaN(requestedYear)) {
+      throw new AppError(400, 'Invalid year');
+    }
+    if (requestedYear !== req.budget!.startYear) {
+      throw new AppError(404, 'Budget year not found');
+    }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const ownerId = req.budget!.userId;
     const summary = await withTenantContext(userId, budgetId, (tx) =>
-      budget.getBudgetSummary(tx, currentYear, budgetId, ownerId)
+      budget.getBudgetSummary(tx, requestedYear, budgetId, ownerId)
     );
     res.json(summary);
   })
@@ -76,18 +85,8 @@ router.get(
 // POST /api/budget/years - Create a new year
 router.post(
   '/years',
-  asyncHandler(async (req, res) => {
-    const { year, initialBalance = 0 } = req.body;
-    if (!year) {
-      throw new AppError(400, 'Year is required');
-    }
-    const budgetId = req.budget!.id;
-    const userId = req.user!.id;
-    const ownerId = req.budget!.userId;
-    const newYear = await withTenantContext(userId, budgetId, (tx) =>
-      budget.createYear(tx, year, initialBalance, budgetId, ownerId)
-    );
-    res.status(201).json(newYear);
+  asyncHandler(async () => {
+    throw new AppError(410, 'Create a new budget instead of adding years to the current budget');
   })
 );
 
@@ -329,28 +328,8 @@ router.get(
 // PUT /api/budget/start-year - Update budget start year
 router.put(
   '/start-year',
-  asyncHandler(async (req, res) => {
-    const { startYear } = req.body;
-
-    if (!startYear || typeof startYear !== 'number' || !Number.isInteger(startYear)) {
-      throw new AppError(400, 'startYear must be an integer');
-    }
-
-    const budgetId = req.budget!.id;
-    const userId = req.user!.id;
-    const ownerId = req.budget!.userId;
-
-    try {
-      const result = await withTenantContext(userId, budgetId, (tx) =>
-        budget.updateStartYear(tx, budgetId, ownerId, startYear)
-      );
-      res.json(result);
-    } catch (err: unknown) {
-      if (err instanceof Error && err.message.includes('older years exist')) {
-        throw new AppError(409, err.message);
-      }
-      throw err;
-    }
+  asyncHandler(async () => {
+    throw new AppError(410, 'Create a new budget instead of changing the current budget year');
   })
 );
 

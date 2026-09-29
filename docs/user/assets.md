@@ -1,6 +1,6 @@
 # Assets, Debts, and Net Worth
 
-The Assets view is a multi-year ledger for assets and liabilities that are not tracked as transactions.
+The Assets view tracks assets and liabilities for the budget selected in the Budget dropdown. Select another yearly budget to review its historical values.
 
 ## Sections
 

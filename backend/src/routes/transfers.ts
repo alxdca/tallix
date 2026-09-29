@@ -1,18 +1,26 @@
-import { type Router as RouterType, Router } from 'express';
+import { type Request, type Router as RouterType, Router } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { withTenantContext } from '../db/context.js';
 import * as transfersSvc from '../services/transfers.js';
 
 const router: RouterType = Router();
 
+function parseSelectedYear(req: Request): number {
+  const year = parseInt(req.params.year, 10);
+  if (Number.isNaN(year)) {
+    throw new AppError(400, 'Invalid year');
+  }
+  if (year !== req.budget!.startYear) {
+    throw new AppError(404, 'Budget year not found');
+  }
+  return year;
+}
+
 // Get all transfers for a year
 router.get(
   '/:year',
   asyncHandler(async (req, res) => {
-    const year = parseInt(req.params.year, 10);
-    if (Number.isNaN(year)) {
-      throw new AppError(400, 'Invalid year');
-    }
+    const year = parseSelectedYear(req);
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const ownerId = req.budget!.userId;
@@ -27,6 +35,7 @@ router.get(
 router.get(
   '/:year/accounts',
   asyncHandler(async (req, res) => {
+    parseSelectedYear(req);
     const userId = req.user!.id;
     const budgetId = req.budget!.id;
     const ownerId = req.budget!.userId;
@@ -41,10 +50,7 @@ router.get(
 router.post(
   '/:year',
   asyncHandler(async (req, res) => {
-    const year = parseInt(req.params.year, 10);
-    if (Number.isNaN(year)) {
-      throw new AppError(400, 'Invalid year');
-    }
+    const year = parseSelectedYear(req);
 
     const { date, amount, description, sourceAccountId, destinationAccountId, accountingMonth, accountingYear } =
       req.body;

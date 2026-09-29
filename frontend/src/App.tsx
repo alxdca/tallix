@@ -1,15 +1,15 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ACTIVE_BUDGET_KEY,
   type AccessibleBudget,
   type Account,
+  createBudget,
   fetchAccounts,
   fetchBudgetData,
   fetchBudgetSummary,
   fetchBudgets,
 } from './api';
 import Accounts from './components/Accounts';
-import Archive from './components/Archive';
 import Assets from './components/Assets';
 import BudgetPlanning from './components/BudgetPlanning';
 import BudgetPlayground from './components/BudgetPlayground';
@@ -49,10 +49,6 @@ function AppContent() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [lastActiveMonth, setLastActiveMonth] = useState<number>(0);
   const [activeView, setActiveView] = useState('current');
-  const [selectedYear] = useState<number>(new Date().getFullYear());
-  const [archiveBudgetData, setArchiveBudgetData] = useState<BudgetData | null>(null);
-  const [archiveLoading, setArchiveLoading] = useState(false);
-  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [availableBudgets, setAvailableBudgets] = useState<AccessibleBudget[]>([]);
@@ -60,6 +56,7 @@ function AppContent() {
     const stored = Number.parseInt(localStorage.getItem(ACTIVE_BUDGET_KEY) || '', 10);
     return Number.isNaN(stored) ? null : stored;
   });
+  const requestVersion = useRef(0);
   const [budgetsReady, setBudgetsReady] = useState(false);
   const { t, monthNames } = useI18n();
 
@@ -109,6 +106,9 @@ function AppContent() {
       .map((_, i) => paymentAccounts.reduce((sum, account) => sum + (account.monthlyBalances[i] || 0), 0));
   }, [paymentAccounts]);
 
+  const activeBudget = availableBudgets.find((budget) => budget.id === activeBudgetId) ?? null;
+  const selectedYear = activeBudget?.year ?? new Date().getFullYear();
+
   const expectedBreakdown = useMemo<ExpectedBreakdownByType>(() => {
     const empty: ExpectedBreakdownByType = {
       income: { monthlyByMonth: Array(12).fill(0), monthlyExpected: 0, yearlyRemaining: 0 },
@@ -147,93 +147,69 @@ function AppContent() {
   }, [budgetData]);
 
   const loadData = useCallback(
-    async (year?: number) => {
+    async (silent = false) => {
+      if (localStorage.getItem(ACTIVE_BUDGET_KEY) !== String(activeBudgetId)) return;
+      const version = ++requestVersion.current;
+      if (!silent) setLoading(true);
       try {
-        setLoading(true);
-        const yearToFetch = year || selectedYear;
-        const [data, summaryData] = await Promise.all([
-          fetchBudgetData(yearToFetch),
-          fetchBudgetSummary(), // Summary is always for current year
+        const [data, summaryData, accountsResponse] = await Promise.all([
+          fetchBudgetData(selectedYear),
+          fetchBudgetSummary(selectedYear),
+          fetchAccounts(selectedYear),
         ]);
+        if (version !== requestVersion.current) return;
         setBudgetData(data);
         setSummary(summaryData);
-
-        // Fetch accounts for the year (needed for funds summary)
-        const accountsResponse = await fetchAccounts(data.year);
         setAccounts(accountsResponse.accounts);
         setLastActiveMonth(accountsResponse.lastActiveMonth);
-
         setError(null);
       } catch (err) {
-        setError(getErrorMessage(err, t));
+        if (version !== requestVersion.current) return;
+        if (silent) logger.error('Failed to refresh data', err);
+        else setError(getErrorMessage(err, t));
       } finally {
-        setLoading(false);
+        if (version === requestVersion.current) setLoading(false);
       }
     },
-    [t, selectedYear]
+    [t, selectedYear, activeBudgetId]
   );
 
-  const loadArchiveData = useCallback(
-    async (year: number) => {
-      try {
-        setArchiveLoading(true);
-        const data = await fetchBudgetData(year);
-        setArchiveBudgetData(data);
-        setArchiveError(null);
-      } catch (err) {
-        setArchiveError(getErrorMessage(err, t));
-      } finally {
-        setArchiveLoading(false);
-      }
-    },
-    [t]
-  );
-
-  // Silent refresh that doesn't show loading spinner (for inline updates)
-  const refreshData = useCallback(async () => {
-    try {
-      const [data, summaryData] = await Promise.all([fetchBudgetData(selectedYear), fetchBudgetSummary()]);
-      setBudgetData(data);
-      setSummary(summaryData);
-
-      // Fetch accounts for the year (needed for funds summary)
-      const accountsResponse = await fetchAccounts(data.year);
-      setAccounts(accountsResponse.accounts);
-      setLastActiveMonth(accountsResponse.lastActiveMonth);
-    } catch (err) {
-      logger.error('Failed to refresh data', err);
-    }
-  }, [selectedYear]);
+  const refreshData = useCallback(() => loadData(true), [loadData]);
 
   useEffect(() => {
     if (budgetsReady && activeBudgetId !== null) loadData();
+    return () => {
+      requestVersion.current += 1;
+    };
   }, [budgetsReady, activeBudgetId, loadData]);
 
   useEffect(() => {
     setMonths(monthNames);
   }, [monthNames]);
 
-  // Handle archive view changes - extract year and load data for that year (without switching current year)
-  useEffect(() => {
-    if (activeView.startsWith('archive-')) {
-      const match = activeView.match(/^archive-(\d+)-(transactions|accounts)$/);
-      if (match) {
-        const archiveYear = parseInt(match[1], 10);
-        loadArchiveData(archiveYear);
-      }
-    }
-  }, [activeView, loadArchiveData]);
-
-  const currentYear = budgetData?.year || new Date().getFullYear();
+  const currentYear = selectedYear;
   const yearId = budgetData?.yearId || 0;
-  const activeBudget = availableBudgets.find((budget) => budget.id === activeBudgetId) ?? null;
 
   const handleBudgetChange = useCallback((budgetId: number) => {
+    requestVersion.current += 1;
+    setLoading(true);
+    setError(null);
+    setBudgetData(null);
+    setSummary(null);
+    setAccounts([]);
     localStorage.setItem(ACTIVE_BUDGET_KEY, String(budgetId));
     setActiveBudgetId(budgetId);
-    setArchiveBudgetData(null);
     setActiveView('current');
   }, []);
+
+  const handleCreateBudget = useCallback(
+    async (year: number, description: string) => {
+      const budget = await createBudget(year, description.trim());
+      setAvailableBudgets((current) => [...current, budget]);
+      handleBudgetChange(budget.id);
+    },
+    [handleBudgetChange]
+  );
 
   const protectReadOnly = (content: ReactNode) =>
     activeBudget?.role === 'read' ? (
@@ -244,31 +220,9 @@ function AppContent() {
       content
     );
 
-  // Refresh budget data when transactions might have changed
-  const handleTransactionsChanged = useCallback(async () => {
-    try {
-      const [data, summaryData] = await Promise.all([fetchBudgetData(selectedYear), fetchBudgetSummary()]);
-      setBudgetData(data);
-      setSummary(summaryData);
-
-      // Also refresh accounts for updated fund balances
-      const accountsResponse = await fetchAccounts(data.year);
-      setAccounts(accountsResponse.accounts);
-      setLastActiveMonth(accountsResponse.lastActiveMonth);
-    } catch (err) {
-      logger.error('Failed to refresh budget data', err);
-    }
-  }, [selectedYear]);
-
-  // Handle year selection from Archive
-  const handleYearSelected = useCallback((year: number) => {
-    setActiveView(`archive-${year}-transactions`);
-  }, []);
-
   // Views that should show the budget header with balance boxes
   const budgetViews = ['current', 'budget-planning', 'playground', 'transactions', 'accounts', 'assets'];
-  const isArchiveView = activeView.startsWith('archive-');
-  const showBudgetHeader = (budgetViews.includes(activeView) || isArchiveView) && !loading && !error;
+  const showBudgetHeader = budgetViews.includes(activeView) && !loading && !error;
 
   const renderContent = () => {
     if (loading) {
@@ -291,50 +245,6 @@ function AppContent() {
       );
     }
 
-    // Handle archive views (e.g., archive-2023-transactions)
-    if (activeView.startsWith('archive-')) {
-      const match = activeView.match(/^archive-(\d+)-(transactions|accounts)$/);
-      if (match) {
-        const archiveYear = parseInt(match[1], 10);
-        const archiveSubView = match[2];
-
-        if (archiveLoading) {
-          return (
-            <div className="content-loading">
-              <div className="loading-spinner" />
-              <p>{t('app.loadingBudget')}</p>
-            </div>
-          );
-        }
-
-        if (archiveError) {
-          return (
-            <div className="content-error">
-              <p>
-                {t('app.error')}: {archiveError}
-              </p>
-              <button onClick={() => loadArchiveData(archiveYear)}>{t('app.retry')}</button>
-            </div>
-          );
-        }
-
-        if (archiveSubView === 'transactions') {
-          return (
-            <Transactions
-              year={archiveYear}
-              yearId={archiveBudgetData?.yearId || 0}
-              groups={archiveBudgetData?.groups || []}
-              onTransactionsChanged={() => loadArchiveData(archiveYear)}
-              readOnly={activeBudget?.role === 'read'}
-            />
-          );
-        } else if (archiveSubView === 'accounts') {
-          return protectReadOnly(<Accounts year={archiveYear} months={months} onDataChanged={refreshData} />);
-        }
-      }
-      return null;
-    }
-
     switch (activeView) {
       case 'current':
         return (
@@ -349,15 +259,13 @@ function AppContent() {
             />
           </div>
         );
-      case 'archive':
-        return <Archive selectedYear={selectedYear} onYearSelected={handleYearSelected} />;
       case 'transactions':
         return (
           <Transactions
             year={currentYear}
             yearId={yearId}
             groups={budgetData?.groups || []}
-            onTransactionsChanged={handleTransactionsChanged}
+            onTransactionsChanged={refreshData}
             readOnly={activeBudget?.role === 'read'}
           />
         );
@@ -381,7 +289,7 @@ function AppContent() {
             groups={budgetData?.groups || []}
             months={months}
             onDataChanged={refreshData}
-          />,
+          />
         );
       case 'playground':
         return (
@@ -408,12 +316,13 @@ function AppContent() {
         budgets={availableBudgets}
         activeBudgetId={activeBudgetId}
         onBudgetChange={handleBudgetChange}
+        onCreateBudget={handleCreateBudget}
       />
-      <main className="main-content">
+      <main className="main-content" key={activeBudgetId}>
         {activeBudget?.role === 'read' && <div className="read-only-banner">{t('sharing.readOnlyBanner')}</div>}
         {showBudgetHeader && (
           <Header
-            year={selectedYear}
+            year={currentYear}
             initialBalance={summary?.initialBalance || 0}
             totalIncome={summary?.totalIncome || { budget: 0, actual: 0 }}
             totalSavings={summary?.totalSavings || { budget: 0, actual: 0 }}
@@ -430,7 +339,7 @@ function AppContent() {
         )}
         {renderContent()}
       </main>
-      <CopilotWidget />
+      <CopilotWidget key={`copilot-${activeBudgetId}`} />
     </div>
   );
 }
