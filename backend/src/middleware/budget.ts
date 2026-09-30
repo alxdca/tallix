@@ -11,6 +11,7 @@ declare global {
         userId: string;
         description: string | null;
         startYear: number;
+        parentBudgetId: number | null;
         role: BudgetAccessRole;
       };
     }
@@ -58,6 +59,7 @@ export async function requireBudget(req: Request, res: Response, next: NextFunct
       userId: access.budget.userId,
       description: access.budget.description,
       startYear: access.budget.startYear,
+      parentBudgetId: access.budget.parentBudgetId,
       role: access.role,
     };
 

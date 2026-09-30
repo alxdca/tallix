@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ACTIVE_BUDGET_KEY, createBudget, fetchAccounts, fetchBudgetData, fetchBudgetSummary } from './api';
+import {
+  ACTIVE_BUDGET_KEY,
+  createBudget,
+  deleteBudget,
+  fetchAccounts,
+  fetchBudgetData,
+  fetchBudgetSummary,
+} from './api';
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
@@ -64,6 +71,7 @@ describe('budget api year routing', () => {
       jsonResponse({
         id: 8,
         year: 2026,
+        parentBudgetId: null,
         description: 'Second 2026',
         ownerId: 'owner-1',
         ownerName: null,
@@ -81,6 +89,74 @@ describe('budget api year routing', () => {
         'Content-Type': 'application/json',
         'X-Budget-Id': '42',
       },
+    });
+  });
+
+  it('sends parentBudgetId only when creating from a parent budget', async () => {
+    localStorage.setItem(ACTIVE_BUDGET_KEY, '42');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: 9,
+        year: 2027,
+        parentBudgetId: 8,
+        description: 'Child 2027',
+        ownerId: 'owner-1',
+        ownerName: null,
+        ownerEmail: 'owner@example.com',
+        role: 'owner',
+      })
+    );
+
+    await createBudget(2027, 'Child 2027', 8);
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/budgets', {
+      method: 'POST',
+      body: JSON.stringify({ year: 2027, description: 'Child 2027', parentBudgetId: 8 }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Budget-Id': '42',
+      },
+    });
+  });
+
+  it('deletes the budget identified by the path id while preserving the active budget header', async () => {
+    localStorage.setItem(ACTIVE_BUDGET_KEY, '42');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        budgets: [
+          {
+            id: 8,
+            year: 2026,
+            parentBudgetId: null,
+            description: 'Replacement',
+            ownerId: 'owner-1',
+            ownerName: null,
+            ownerEmail: 'owner@example.com',
+            role: 'owner',
+          },
+        ],
+        defaultBudgetId: 8,
+      })
+    );
+
+    const result = await deleteBudget(7);
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/budgets/7', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Budget-Id': '42',
+      },
+    });
+    expect(result.defaultBudgetId).toBe(8);
+  });
+
+  it('rejects delete budget responses that are not ok', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'No token provided' }, { status: 401 }));
+
+    await expect(deleteBudget(7)).rejects.toMatchObject({
+      code: 'AUTH_NO_TOKEN',
+      status: 401,
     });
   });
 });

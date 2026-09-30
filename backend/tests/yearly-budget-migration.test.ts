@@ -1,10 +1,10 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import { expect, test } from 'vitest';
 import { withTenantContext, withUserContext } from '../src/db/context.js';
 import * as schema from '../src/db/schema.js';
 import { createYearlyBudget, getAccessibleBudget, shareBudgetWithUser } from '../src/services/budgets.js';
@@ -40,7 +40,9 @@ function buildSuperuserUrl(databaseName?: string) {
   return url.toString();
 }
 
-async function withIsolatedMigratedDb<T>(fn: (db: ReturnType<typeof drizzle<typeof schema>>) => Promise<T>): Promise<T> {
+async function withIsolatedMigratedDb<T>(
+  fn: (db: ReturnType<typeof drizzle<typeof schema>>) => Promise<T>
+): Promise<T> {
   const databaseName = `tallix_yearly_migration_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const admin = postgres(buildSuperuserUrl(), { max: 1 });
   let isolatedClient: postgres.Sql | null = null;
@@ -49,7 +51,9 @@ async function withIsolatedMigratedDb<T>(fn: (db: ReturnType<typeof drizzle<type
     await admin.unsafe(`CREATE DATABASE ${databaseName}`);
     isolatedClient = postgres(buildSuperuserUrl(databaseName), { max: 1 });
 
-    for (const file of readdirSync(drizzleDir).filter((name) => /^\d+_.*\.sql$/.test(name)).sort()) {
+    for (const file of readdirSync(drizzleDir)
+      .filter((name) => /^\d+_.*\.sql$/.test(name))
+      .sort()) {
       if (file >= '0032_split_yearly_budgets.sql') break;
       await isolatedClient.unsafe(readFileSync(resolve(drizzleDir, file), 'utf8'));
     }
@@ -73,10 +77,11 @@ test('yearly split migration preserves moved year data and copied shares', async
       .values({ email: 'yearly-migration-collab@test.com', passwordHash: 'hash', name: 'Collaborator' })
       .returning();
 
-    const [budget] = await db
-      .insert(budgets)
-      .values({ userId: owner.id, description: 'Legacy household', startYear: 9024 })
-      .returning();
+    const [budget] = await db.execute<{ id: number }>(sql`
+      INSERT INTO budgets (user_id, description, start_year)
+      VALUES (${owner.id}, 'Legacy household', 9024)
+      RETURNING id
+    `);
     await db.insert(budgetShares).values({ budgetId: budget.id, userId: collaborator.id, role: 'write' });
 
     const [year2024] = await db.insert(budgetYears).values({ budgetId: budget.id, year: 9024 }).returning();
@@ -131,10 +136,11 @@ test('yearly split migration preserves moved year data and copied shares', async
         createdByUserId: owner.id,
       })
       .returning();
-    const [balance] = await db
-      .insert(accountBalances)
-      .values({ yearId: year2024.id, paymentMethodId: account.id, initialBalance: '345.67' })
-      .returning();
+    const [balance] = await db.execute<{ id: number }>(sql`
+      INSERT INTO account_balances (year_id, payment_method_id, initial_balance)
+      VALUES (${year2024.id}, ${account.id}, '345.67')
+      RETURNING id
+    `);
     const [transfer] = await db
       .insert(transfers)
       .values({
@@ -176,7 +182,11 @@ test('yearly split migration preserves moved year data and copied shares', async
 
     await db.execute(sql.raw(migrationSql));
 
-    const ownerBudgets = await db.select().from(budgets).where(eq(budgets.userId, owner.id)).orderBy(budgets.startYear);
+    const ownerBudgets = await db
+      .select({ id: budgets.id, startYear: budgets.startYear })
+      .from(budgets)
+      .where(eq(budgets.userId, owner.id))
+      .orderBy(budgets.startYear);
     expect(ownerBudgets.map((row) => row.startYear)).toEqual([9024, 9025]);
 
     const movedBudget = ownerBudgets[0];
@@ -279,7 +289,15 @@ test('yearly split migration preserves moved year data and copied shares', async
     ]);
 
     const [updatedTransaction] = await db.select().from(transactions).where(eq(transactions.id, transaction.id));
-    const [updatedBalance] = await db.select().from(accountBalances).where(eq(accountBalances.id, balance.id));
+    const [updatedBalance] = await db
+      .select({
+        id: accountBalances.id,
+        yearId: accountBalances.yearId,
+        paymentMethodId: accountBalances.paymentMethodId,
+        initialBalance: accountBalances.initialBalance,
+      })
+      .from(accountBalances)
+      .where(eq(accountBalances.id, balance.id));
     const [updatedTransfer] = await db.select().from(transfers).where(eq(transfers.id, transfer.id));
     const movedOrderRows = await db
       .select()
@@ -392,10 +410,11 @@ test('yearly split migration keeps the current calendar year on the original bud
       .insert(users)
       .values({ email: 'yearly-migration-current-owner@test.com', passwordHash: 'hash', name: 'Owner' })
       .returning();
-    const [budget] = await db
-      .insert(budgets)
-      .values({ userId: owner.id, description: 'Current year wins', startYear: currentYear - 1 })
-      .returning();
+    const [budget] = await db.execute<{ id: number }>(sql`
+      INSERT INTO budgets (user_id, description, start_year)
+      VALUES (${owner.id}, 'Current year wins', ${currentYear - 1})
+      RETURNING id
+    `);
     const [pastYear] = await db
       .insert(budgetYears)
       .values({ budgetId: budget.id, year: currentYear - 1 })
@@ -411,7 +430,10 @@ test('yearly split migration keeps the current calendar year on the original bud
 
     await db.execute(sql.raw(migrationSql));
 
-    const migratedBudgets = await db.select().from(budgets).where(eq(budgets.userId, owner.id));
+    const migratedBudgets = await db
+      .select({ id: budgets.id, startYear: budgets.startYear })
+      .from(budgets)
+      .where(eq(budgets.userId, owner.id));
     const [updatedOriginalBudget] = migratedBudgets.filter((row) => row.id === budget.id);
     const [updatedPastYear] = await db.select().from(budgetYears).where(eq(budgetYears.id, pastYear.id));
     const [updatedCurrentYear] = await db.select().from(budgetYears).where(eq(budgetYears.id, keptCurrentYear.id));

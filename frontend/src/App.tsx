@@ -4,6 +4,7 @@ import {
   type AccessibleBudget,
   type Account,
   createBudget,
+  deleteBudget,
   fetchAccounts,
   fetchBudgetData,
   fetchBudgetSummary,
@@ -190,7 +191,7 @@ function AppContent() {
   const currentYear = selectedYear;
   const yearId = budgetData?.yearId || 0;
 
-  const handleBudgetChange = useCallback((budgetId: number) => {
+  const handleBudgetChange = useCallback((budgetId: number, view = 'current') => {
     requestVersion.current += 1;
     setLoading(true);
     setError(null);
@@ -199,14 +200,26 @@ function AppContent() {
     setAccounts([]);
     localStorage.setItem(ACTIVE_BUDGET_KEY, String(budgetId));
     setActiveBudgetId(budgetId);
-    setActiveView('current');
+    setActiveView(view);
   }, []);
 
   const handleCreateBudget = useCallback(
-    async (year: number, description: string) => {
-      const budget = await createBudget(year, description.trim());
+    async (year: number, description: string, parentBudgetId: number | null) => {
+      const budget = await createBudget(year, description.trim(), parentBudgetId);
       setAvailableBudgets((current) => [...current, budget]);
       handleBudgetChange(budget.id);
+    },
+    [handleBudgetChange]
+  );
+
+  const handleDeleteBudget = useCallback(
+    async (budgetId: number) => {
+      const { budgets, defaultBudgetId } = await deleteBudget(budgetId);
+      setAvailableBudgets(budgets);
+      const selectedId = Number(localStorage.getItem(ACTIVE_BUDGET_KEY));
+      if (!budgets.some((budget) => budget.id === selectedId)) {
+        handleBudgetChange(defaultBudgetId, 'user-settings');
+      }
     },
     [handleBudgetChange]
   );
@@ -225,6 +238,17 @@ function AppContent() {
   const showBudgetHeader = budgetViews.includes(activeView) && !loading && !error;
 
   const renderContent = () => {
+    if (activeView === 'user-settings') {
+      return (
+        <UserSettings
+          budgets={availableBudgets}
+          activeBudgetId={activeBudgetId}
+          onCreateBudget={handleCreateBudget}
+          onDeleteBudget={handleDeleteBudget}
+        />
+      );
+    }
+
     if (loading) {
       return (
         <div className="content-loading">
@@ -300,8 +324,6 @@ function AppContent() {
             paymentAccountsInitialBalance={paymentAccountsInitialBalance}
           />
         );
-      case 'user-settings':
-        return <UserSettings />;
       default:
         return null;
     }
@@ -316,7 +338,6 @@ function AppContent() {
         budgets={availableBudgets}
         activeBudgetId={activeBudgetId}
         onBudgetChange={handleBudgetChange}
-        onCreateBudget={handleCreateBudget}
       />
       <main className="main-content" key={activeBudgetId}>
         {activeBudget?.role === 'read' && <div className="read-only-banner">{t('sharing.readOnlyBanner')}</div>}

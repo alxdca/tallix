@@ -17,6 +17,7 @@ vi.mock('./contexts/AuthContext', () => ({
 vi.mock('./api', () => ({
   ACTIVE_BUDGET_KEY: 'tallix_active_budget_id',
   createBudget: vi.fn(),
+  deleteBudget: vi.fn(),
   fetchAccounts: vi.fn(),
   fetchBudgetData: vi.fn(),
   fetchBudgetSummary: vi.fn(),
@@ -46,8 +47,8 @@ vi.mock('./components/Sidebar', () => ({
       <button type="button" onClick={() => props.onViewChange('settings')}>
         Settings
       </button>
-      <button type="button" onClick={() => void props.onCreateBudget?.(2030, 'Roadtrip')?.catch(() => undefined)}>
-        Create 2030
+      <button type="button" onClick={() => props.onViewChange('user-settings')}>
+        My account
       </button>
     </aside>
   ),
@@ -110,7 +111,26 @@ vi.mock('./components/Transactions', () => ({
 }));
 
 vi.mock('./components/UserSettings', () => ({
-  default: () => <div>User settings</div>,
+  default: (props: any) => (
+    <div data-testid="user-settings">
+      User settings active {props.activeBudgetId}
+      <button type="button" onClick={() => void props.onCreateBudget(2030, 'Roadtrip', null).catch(() => undefined)}>
+        Create 2030
+      </button>
+      <button type="button" onClick={() => void props.onCreateBudget(2031, 'Roadtrip child', 1).catch(() => undefined)}>
+        Create 2031 from 1
+      </button>
+      {props.budgets.map((budget: any) => (
+        <button
+          key={budget.id}
+          type="button"
+          onClick={() => void props.onDeleteBudget(budget.id).catch(() => undefined)}
+        >
+          Delete {budget.id}
+        </button>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock('./utils/logger', () => ({
@@ -147,6 +167,7 @@ function budget(overrides: any) {
     ownerId: 'owner-1',
     ownerName: null,
     ownerEmail: 'owner@example.com',
+    parentBudgetId: null,
     role: 'owner',
     ...overrides,
   };
@@ -200,6 +221,7 @@ function setupApi() {
   mockedApi.fetchBudgetSummary.mockImplementation(async (year = 2026) => summary(year));
   mockedApi.fetchAccounts.mockImplementation(async (year: number) => accounts(year));
   mockedApi.createBudget.mockResolvedValue(budget({ id: 4, year: 2030, description: 'Roadtrip' }) as any);
+  mockedApi.deleteBudget.mockResolvedValue({ budgets: accessibleBudgets.slice(1) as any, defaultBudgetId: 2 });
 }
 
 async function renderApp() {
@@ -301,18 +323,37 @@ describe('yearly budget selection', () => {
     expect(container.textContent).toContain('You have read-only access to this budget');
   });
 
-  it('creates a yearly budget from the budget selector and selects the returned budget', async () => {
+  it('creates a yearly budget from user settings and selects the returned budget', async () => {
     const { container } = await renderApp();
     await waitForText(container, 'Header 2026 remaining 2726');
 
+    click(container, 'My account');
+    await waitForText(container, 'User settings active 1');
     click(container, 'Create 2030');
     await waitForText(container, 'Header 2030 remaining 2730');
 
-    expect(mockedApi.createBudget).toHaveBeenCalledWith(2030, 'Roadtrip');
+    expect(mockedApi.createBudget).toHaveBeenCalledWith(2030, 'Roadtrip', null);
     expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('4');
     expect(mockedApi.fetchBudgetData).toHaveBeenCalledWith(2030);
     expect(mockedApi.fetchBudgetSummary).toHaveBeenCalledWith(2030);
     expect(mockedApi.fetchAccounts).toHaveBeenCalledWith(2030);
+  });
+
+  it('passes the selected parent budget when creating from user settings', async () => {
+    mockedApi.createBudget.mockResolvedValueOnce(
+      budget({ id: 6, year: 2031, description: 'Roadtrip child', parentBudgetId: 1 }) as any
+    );
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026 remaining 2726');
+
+    click(container, 'My account');
+    await waitForText(container, 'User settings active 1');
+    click(container, 'Create 2031 from 1');
+    await waitForText(container, 'Header 2031 remaining 2731');
+
+    expect(mockedApi.createBudget).toHaveBeenCalledWith(2031, 'Roadtrip child', 1);
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('6');
+    expect(mockedApi.fetchBudgetData).toHaveBeenCalledWith(2031);
   });
 
   it('keeps the current budget selected when budget creation fails', async () => {
@@ -320,12 +361,14 @@ describe('yearly budget selection', () => {
     const { container } = await renderApp();
     await waitForText(container, 'Header 2026 remaining 2726');
 
+    click(container, 'My account');
+    await waitForText(container, 'User settings active 1');
     click(container, 'Create 2030');
     await flush();
 
-    expect(mockedApi.createBudget).toHaveBeenCalledWith(2030, 'Roadtrip');
+    expect(mockedApi.createBudget).toHaveBeenCalledWith(2030, 'Roadtrip', null);
     expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('1');
-    expect(container.textContent).toContain('Header 2026 remaining 2726');
+    expect(container.textContent).toContain('User settings active 1');
     expect(container.textContent).not.toContain('Header 2030');
   });
 
@@ -384,5 +427,95 @@ describe('yearly budget selection', () => {
     expect(mockedApi.fetchBudgetData.mock.calls.filter(([year]) => year === 2026)).toHaveLength(2);
     expect(mockedApi.fetchBudgetSummary.mock.calls.filter(([year]) => year === 2026)).toHaveLength(2);
     expect(mockedApi.fetchAccounts.mock.calls.filter(([year]) => year === 2026)).toHaveLength(2);
+  });
+
+  it('stays in user settings and selects the fallback budget after deleting the active budget', async () => {
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026 remaining 2726');
+
+    click(container, 'My account');
+    await waitForText(container, 'User settings active 1');
+    click(container, 'Delete 1');
+    await flush();
+
+    expect(mockedApi.deleteBudget).toHaveBeenCalledWith(1);
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('2');
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="Budget"]')?.value).toBe('2');
+    expect(container.textContent).toContain('User settings active 2');
+    expect(mockedApi.fetchBudgetData).toHaveBeenCalledWith(2025);
+    expect(mockedApi.fetchBudgetSummary).toHaveBeenCalledWith(2025);
+  });
+
+  it('keeps the current budget selected without reloading data after deleting an inactive budget', async () => {
+    mockedApi.deleteBudget.mockResolvedValueOnce({
+      budgets: [accessibleBudgets[0], accessibleBudgets[2]],
+      defaultBudgetId: 1,
+    } as any);
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026 remaining 2726');
+    const loadsBeforeDelete = mockedApi.fetchBudgetData.mock.calls.length;
+
+    click(container, 'My account');
+    await waitForText(container, 'User settings active 1');
+    click(container, 'Delete 2');
+    await flush();
+
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('1');
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="Budget"]')?.value).toBe('1');
+    expect(container.textContent).toContain('User settings active 1');
+    expect(mockedApi.fetchBudgetData).toHaveBeenCalledTimes(loadsBeforeDelete);
+  });
+
+  it('preserves the available budgets and current selection when deleting a budget fails', async () => {
+    mockedApi.deleteBudget.mockRejectedValueOnce(new Error('network down'));
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026 remaining 2726');
+
+    click(container, 'My account');
+    await waitForText(container, 'Delete 2');
+    click(container, 'Delete 2');
+    await flush();
+
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('1');
+    expect(container.textContent).toContain('User settings active 1');
+    expect(container.textContent).toContain('Delete 2');
+  });
+
+  it('selects the replacement budget returned after deleting the last owned budget', async () => {
+    const replacement = budget({ id: 9, year: 2026, description: 'Fresh start', role: 'owner' });
+    mockedApi.fetchBudgets.mockResolvedValueOnce({ budgets: [accessibleBudgets[0]], defaultBudgetId: 1 } as any);
+    mockedApi.deleteBudget.mockResolvedValueOnce({ budgets: [replacement], defaultBudgetId: 9 } as any);
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026 remaining 2726');
+
+    click(container, 'My account');
+    await waitForText(container, 'User settings active 1');
+    click(container, 'Delete 1');
+    await flush();
+
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('9');
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="Budget"]')?.value).toBe('9');
+    expect(container.textContent).toContain('User settings active 9');
+    expect(mockedApi.fetchBudgetData).toHaveBeenCalledWith(2026);
+  });
+
+  it('honors the latest selected budget when a delete response arrives after the user switches budgets', async () => {
+    const pendingDelete = deferred<{ budgets: typeof accessibleBudgets; defaultBudgetId: number }>();
+    mockedApi.deleteBudget.mockReturnValueOnce(pendingDelete.promise as any);
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026 remaining 2726');
+
+    click(container, 'My account');
+    await waitForText(container, 'User settings active 1');
+    click(container, 'Delete 1');
+    changeBudget(container, '3');
+    await waitForText(container, 'Header 2027 remaining 2727');
+    pendingDelete.resolve({ budgets: [accessibleBudgets[1], accessibleBudgets[2]], defaultBudgetId: 2 });
+    await flush();
+
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('3');
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="Budget"]')?.value).toBe('3');
+    expect(container.textContent).toContain('Header 2027 remaining 2727');
+    expect(mockedApi.fetchBudgetData).not.toHaveBeenCalledWith(2025);
   });
 });

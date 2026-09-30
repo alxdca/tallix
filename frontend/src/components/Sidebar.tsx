@@ -1,8 +1,7 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AccessibleBudget } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
-import { getErrorMessage } from '../utils/errorMessages';
 
 interface SidebarProps {
   activeView: string;
@@ -11,7 +10,6 @@ interface SidebarProps {
   budgets: AccessibleBudget[];
   activeBudgetId: number | null;
   onBudgetChange: (budgetId: number) => void;
-  onCreateBudget: (year: number, description: string) => Promise<void>;
 }
 
 export default function Sidebar({
@@ -21,17 +19,10 @@ export default function Sidebar({
   budgets,
   activeBudgetId,
   onBudgetChange,
-  onCreateBudget,
 }: SidebarProps) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [newBudgetYear, setNewBudgetYear] = useState(String(new Date().getFullYear() + 1));
-  const [newBudgetDescription, setNewBudgetDescription] = useState('');
-  const [showCreateBudget, setShowCreateBudget] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [isCreatingBudget, setIsCreatingBudget] = useState(false);
-  const yearInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const activeBudgetRole = budgets.find((budget) => budget.id === activeBudgetId)?.role;
 
@@ -50,33 +41,6 @@ export default function Sidebar({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showUserMenu]);
-
-  useEffect(() => {
-    if (showCreateBudget) yearInputRef.current?.focus();
-  }, [showCreateBudget]);
-
-  const handleCreateBudget = async (event: FormEvent) => {
-    event.preventDefault();
-    if (isCreatingBudget) return;
-    const year = Number(newBudgetYear);
-    if (!Number.isInteger(year) || year < 1900 || year > 9999) {
-      setCreateError(t('sharing.invalidYear'));
-      return;
-    }
-
-    setCreateError(null);
-    setIsCreatingBudget(true);
-    try {
-      await onCreateBudget(year, newBudgetDescription.trim());
-      setNewBudgetYear(String(Math.min(year + 1, 9999)));
-      setNewBudgetDescription('');
-      setShowCreateBudget(false);
-    } catch (error) {
-      setCreateError(getErrorMessage(error, t));
-    } finally {
-      setIsCreatingBudget(false);
-    }
-  };
 
   const formatBudgetLabel = (budget: AccessibleBudget) => {
     const ownerLabel =
@@ -114,15 +78,8 @@ export default function Sidebar({
               </svg>
               <select
                 id="active-budget"
-                value={showCreateBudget ? 'create' : (activeBudgetId ?? '')}
-                disabled={isCreatingBudget}
+                value={activeBudgetId ?? ''}
                 onChange={(event) => {
-                  if (event.target.value === 'create') {
-                    setShowCreateBudget(true);
-                    setCreateError(null);
-                    return;
-                  }
-                  setShowCreateBudget(false);
                   onBudgetChange(Number(event.target.value));
                 }}
               >
@@ -133,7 +90,6 @@ export default function Sidebar({
                       {formatBudgetLabel(budget)}
                     </option>
                   ))}
-                <option value="create">{t('sharing.createBudget')}</option>
               </select>
               <svg
                 className="budget-select-chevron"
@@ -156,59 +112,6 @@ export default function Sidebar({
                   ? t('sharing.writeAccess')
                   : t('sharing.readAccess')}
               </span>
-            )}
-            {showCreateBudget && (
-              <form className="budget-create-form" onSubmit={handleCreateBudget}>
-                <label htmlFor="new-budget-year">{t('sharing.newBudgetYear')}</label>
-                <input
-                  ref={yearInputRef}
-                  id="new-budget-year"
-                  className="form-input"
-                  required
-                  type="number"
-                  min="1900"
-                  max="9999"
-                  value={newBudgetYear}
-                  onChange={(event) => {
-                    setNewBudgetYear(event.target.value);
-                    setCreateError(null);
-                  }}
-                  disabled={isCreatingBudget}
-                />
-                <label htmlFor="new-budget-description">{t('sharing.description')}</label>
-                <input
-                  id="new-budget-description"
-                  className="form-input"
-                  maxLength={255}
-                  placeholder={t('sharing.descriptionPlaceholder')}
-                  type="text"
-                  value={newBudgetDescription}
-                  onChange={(event) => {
-                    setNewBudgetDescription(event.target.value);
-                    setCreateError(null);
-                  }}
-                  disabled={isCreatingBudget}
-                />
-                <p className="setting-help-text">{t('sharing.createHelp')}</p>
-                {createError && (
-                  <p className="form-error" role="alert">
-                    {createError}
-                  </p>
-                )}
-                <div className="budget-create-actions">
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    disabled={isCreatingBudget}
-                    onClick={() => setShowCreateBudget(false)}
-                  >
-                    {t('common.cancel')}
-                  </button>
-                  <button type="submit" className="btn-primary" disabled={isCreatingBudget}>
-                    {t(isCreatingBudget ? 'common.saving' : 'sharing.createBudget')}
-                  </button>
-                </div>
-              </form>
             )}
           </div>
         )}

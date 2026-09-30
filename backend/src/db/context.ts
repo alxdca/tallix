@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { sql } from 'drizzle-orm';
-import { rawDb as db, type DbClient } from './index.js';
 import logger from '../logger.js';
+import { type DbClient, rawDb as db, inheritedBalanceReadDb } from './index.js';
 
 /**
  * Tenant context stored in AsyncLocalStorage for RLS enforcement
@@ -78,10 +78,7 @@ export async function withTenantContext<T>(
  * @param callback - Async function to execute within the transaction
  * @returns Result of the callback function
  */
-export async function withUserContext<T>(
-  userId: string,
-  callback: (tx: DbClient) => Promise<T>
-): Promise<T> {
+export async function withUserContext<T>(userId: string, callback: (tx: DbClient) => Promise<T>): Promise<T> {
   return await db.transaction(async (tx) => {
     // Set RLS context variable for user
     // Note: SET LOCAL does not support parameterized queries, so we use sql.raw
@@ -101,6 +98,29 @@ export async function withUserContext<T>(
   });
 }
 
+export async function withInheritedBalanceReadContext<T>(
+  userId: string,
+  parentBudgetId: number,
+  callback: (tx: DbClient) => Promise<T>
+): Promise<T> {
+  return await inheritedBalanceReadDb.transaction(async (tx) => {
+    await tx.execute(sql.raw('SET TRANSACTION READ ONLY'));
+    await tx.execute(sql.raw(`SET LOCAL app.user_id = '${userId}'`));
+    await tx.execute(sql.raw(`SET LOCAL app.budget_id = ${parentBudgetId}`));
+
+    const context: TenantContext = { userId, budgetId: parentBudgetId, transaction: tx };
+
+    return await tenantContextStorage.run(context, async () => {
+      try {
+        return await callback(tx);
+      } catch (error) {
+        logger.error({ error, userId, budgetId: parentBudgetId }, 'Error in inherited balance read context');
+        throw error;
+      }
+    });
+  });
+}
+
 /**
  * Assert that tenant context is set.
  * Throws if context is missing.
@@ -112,4 +132,3 @@ export function assertContextSet(): TenantContext {
   }
   return context;
 }
-

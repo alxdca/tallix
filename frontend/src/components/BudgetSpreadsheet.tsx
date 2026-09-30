@@ -18,7 +18,6 @@ interface FundsSummary {
   startOfMonth: MonthlyValue[]; // Funds at start of each month (index 0 = Jan)
   endOfMonth: MonthlyValue[]; // Funds at end of each month
   expectedEndOfMonth: number[]; // Expected end of month using max(budget, actual) for current month
-  monthHasActivity: boolean[]; // Whether each month has any actual transaction activity
 }
 
 // Determine variance class based on budget vs actual
@@ -75,20 +74,14 @@ export default function BudgetSpreadsheet({
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(new Set());
 
-  // Show actual values for months with settled transactions, and always for the current month.
-  // lastActiveMonth is 1-indexed (1=Jan), but monthIndex in renderMonthCell is 0-indexed.
+  // Future months stay budget-only, even when transactions are already assigned to them.
+  // Historical years retain their last active month (1-indexed).
   const now = new Date();
   const isCurrentYear = year === now.getFullYear();
   const currentMonthIndex = now.getMonth();
-  const maxActualMonth = Math.max(lastActiveMonth - 1, isCurrentYear ? currentMonthIndex : -1);
+  const maxActualMonth = year > now.getFullYear() ? -1 : isCurrentYear ? currentMonthIndex : lastActiveMonth - 1;
 
-  // Determine if a month should be shown as "actual" (has real data) vs "future" (budget only)
-  const isMonthActual = (monthIndex: number) => {
-    if (isCurrentYear) {
-      return monthIndex <= currentMonthIndex || fundsSummary.monthHasActivity[monthIndex];
-    }
-    return monthIndex <= maxActualMonth;
-  };
+  const isMonthActual = (monthIndex: number) => monthIndex <= maxActualMonth;
 
   // Render a single cell with either budget or actual, with variance coloring
   const renderMonthCell = (
@@ -200,7 +193,6 @@ export default function BudgetSpreadsheet({
     const startOfMonth: MonthlyValue[] = [];
     const endOfMonth: MonthlyValue[] = [];
     const expectedEndOfMonth: number[] = [];
-    const monthHasActivity: boolean[] = [];
 
     const hasAccountBalances = paymentAccountsMonthlyBalances && paymentAccountsMonthlyBalances.length > 0;
     let cumulativeActual = paymentAccountsInitialBalance;
@@ -228,7 +220,7 @@ export default function BudgetSpreadsheet({
       const actualStart = hasAccountBalances
         ? i === 0
           ? paymentAccountsInitialBalance
-          : paymentAccountsMonthlyBalances?.[i - 1] ?? paymentAccountsInitialBalance
+          : (paymentAccountsMonthlyBalances?.[i - 1] ?? paymentAccountsInitialBalance)
         : cumulativeActual;
 
       startOfMonth.push({
@@ -250,9 +242,7 @@ export default function BudgetSpreadsheet({
         budgetEndOfMonth += incomeRemainingYearlyBudget - expenseRemainingYearlyBudget - savingsRemainingYearlyBudget;
       }
 
-      const actualEnd = hasAccountBalances
-        ? paymentAccountsMonthlyBalances?.[i] ?? actualStart
-        : cumulativeActual;
+      const actualEnd = hasAccountBalances ? (paymentAccountsMonthlyBalances?.[i] ?? actualStart) : cumulativeActual;
 
       endOfMonth.push({
         budget: budgetEndOfMonth,
@@ -268,16 +258,13 @@ export default function BudgetSpreadsheet({
 
       // For current month or earlier, start from actual balance.
       // For future months, chain from the previous month's expected end balance.
-      const expectedStart = !isCurrentYear || i <= currentMonthIndex
-        ? startOfMonth[i].actual
-        : expectedEndOfMonth[i - 1];
+      const expectedStart =
+        !isCurrentYear || i <= currentMonthIndex ? startOfMonth[i].actual : expectedEndOfMonth[i - 1];
       const expected = expectedStart + expectedIncome - expectedExpense - expectedSavings;
       expectedEndOfMonth.push(expected);
-
-      monthHasActivity.push(monthIncomeActual !== 0 || monthExpenseActual !== 0 || monthSavingsActual !== 0);
     }
 
-    return { startOfMonth, endOfMonth, expectedEndOfMonth, monthHasActivity };
+    return { startOfMonth, endOfMonth, expectedEndOfMonth };
   }, [sections, paymentAccountsInitialBalance, paymentAccountsMonthlyBalances, currentMonthIndex, isCurrentYear]);
 
   const toggleSection = (sectionType: string) => {
@@ -359,7 +346,8 @@ export default function BudgetSpreadsheet({
                 const showAsActual = isMonthActual(i);
                 const isAfterCurrent = isCurrentYear && i > currentMonthIndex;
                 const value = isAfterCurrent ? m.budget : m.actual;
-                const tooltip = showAsActual && !isAfterCurrent ? buildTooltip(m.budget, m.actual, formatCurrency, t) : '';
+                const tooltip =
+                  showAsActual && !isAfterCurrent ? buildTooltip(m.budget, m.actual, formatCurrency, t) : '';
                 return (
                   <td
                     key={i}
@@ -423,7 +411,9 @@ export default function BudgetSpreadsheet({
                     </td>
                     <td className="cell budget">{formatCurrency(sectionTotals.annual.budget, true)}</td>
                     <td className="cell actual">{formatCurrency(sectionTotals.annual.actual, true)}</td>
-                    {sectionTotals.months.map((m, i) => renderMonthCell(m.budget, m.actual, i, moreIsGood, i, section.type))}
+                    {sectionTotals.months.map((m, i) =>
+                      renderMonthCell(m.budget, m.actual, i, moreIsGood, i, section.type)
+                    )}
                   </tr>
 
                   {/* Groups and Items */}

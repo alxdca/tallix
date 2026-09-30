@@ -1,5 +1,7 @@
 # Accounts and Payment Methods
 
+An opening balance marked **Linked** follows the same account's December closing balance in the parent budget. If that parent balance changes, the child's opening balance updates. Editing a linked opening balance in the child replaces it with your own value and stops the link for that account. Deleting the parent keeps the child's latest opening balances as fixed values.
+
 Payment methods represent how you pay (cards, bank accounts, etc). They also power account balances and projections.
 
 ## Add payment methods

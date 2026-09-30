@@ -225,6 +225,20 @@
       "when": 1790632800000,
       "tag": "0032_split_yearly_budgets",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790726400000,
+      "tag": "0033_add_budget_parent",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790812800000,
+      "tag": "0034_add_inherited_account_balances",
+      "breakpoints": true
     }
   ]
 }

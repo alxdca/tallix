@@ -19,10 +19,16 @@ All endpoints are under `/api`.
 Budget-scoped endpoints accept an `X-Budget-Id` header. If omitted, the authenticated user's own default budget is used.
 
 - `GET /api/budgets`
+- `POST /api/budgets` (optional `parentBudgetId` to copy categories and link opening balances)
+- `DELETE /api/budgets/:budgetId` (owner only; selects the budget by path ID)
 - `GET /api/budgets/current/shares` (owner only)
 - `POST /api/budgets/current/shares` (owner only)
 - `PUT /api/budgets/current/shares/:shareId` (owner only)
 - `DELETE /api/budgets/current/shares/:shareId` (owner only)
+
+Deleting a budget permanently removes its budget-scoped data and shares while preserving
+the user's payment methods. The response is `{ budgets, defaultBudgetId }`. If the last
+owned budget is deleted, a new empty default budget is created in the same transaction.
 
 - `GET /api/budget` (current year)
 - `GET /api/budget/year/:year`

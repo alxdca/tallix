@@ -1,15 +1,17 @@
 import Decimal from 'decimal.js';
 import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { withInheritedBalanceReadContext } from '../db/context.js';
+import type { DbClient } from '../db/index.js';
 import {
   accountBalances,
   budgetGroups,
   budgetItems,
+  budgets,
   budgetYears,
   paymentMethods,
   transactions,
   transfers,
 } from '../db/schema.js';
-import type { DbClient } from '../db/index.js';
 
 // Configure Decimal.js for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -21,6 +23,7 @@ export interface Account {
   sortOrder: number;
   isSavingsAccount: boolean;
   initialBalance: number;
+  inheritedFromParent: boolean;
   monthlyBalances: number[]; // Expected balance at end of each month (1-12)
 }
 
@@ -30,7 +33,13 @@ export interface AccountsResponse {
 }
 
 // Get all accounts for a year with their balances
-export async function getAccountsForYear(tx: DbClient, year: number, budgetId: number, userId: string): Promise<AccountsResponse> {
+export async function getAccountsForYear(
+  tx: DbClient,
+  year: number,
+  budgetId: number,
+  userId: string,
+  visitedBudgetIds = new Set<number>()
+): Promise<AccountsResponse> {
   // Get year ID for this budget
   const budgetYear = await tx.query.budgetYears.findFirst({
     where: and(eq(budgetYears.year, year), eq(budgetYears.budgetId, budgetId)),
@@ -58,7 +67,7 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
   // Use only non-linked payment methods as accounts
   // Linked payment methods (e.g., Twint linked to a checking account) should not appear
   // as separate accounts - their transactions affect the parent account's balance instead
-  const paymentMethodAccounts = allPaymentMethods.filter(pm => !pm.linkedPaymentMethodId);
+  const paymentMethodAccounts = allPaymentMethods.filter((pm) => !pm.linkedPaymentMethodId);
 
   // Build reverse map: account ID -> list of payment method names that are linked to it
   const accountLinkedMethods = new Map<number, string[]>();
@@ -74,9 +83,31 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
   const balances = await tx.select().from(accountBalances).where(eq(accountBalances.yearId, yearId));
 
   // Use Decimal for precise balance calculations
+  const balanceRowsByPaymentMethod = new Map(balances.map((balance) => [balance.paymentMethodId, balance]));
+  const requestedInheritedPaymentMethodIds = paymentMethodAccounts
+    .filter((pm) => balanceRowsByPaymentMethod.get(pm.id)?.inheritedFromParent !== false)
+    .map((pm) => pm.id);
+  const inheritedBalanceMap =
+    requestedInheritedPaymentMethodIds.length > 0
+      ? await getInheritedOpeningBalances(tx, budgetId, userId, requestedInheritedPaymentMethodIds, visitedBudgetIds)
+      : new Map<number, Decimal>();
   const balanceMap = new Map<number, Decimal>();
-  for (const b of balances) {
-    balanceMap.set(b.paymentMethodId, new Decimal(b.initialBalance));
+  const inheritedFromParentMap = new Map<number, boolean>();
+
+  for (const pm of paymentMethodAccounts) {
+    const balanceRow = balanceRowsByPaymentMethod.get(pm.id);
+    const inheritedBalance = inheritedBalanceMap.get(pm.id);
+
+    if (inheritedBalance) {
+      balanceMap.set(pm.id, inheritedBalance);
+      inheritedFromParentMap.set(pm.id, true);
+      continue;
+    }
+
+    if (balanceRow) {
+      balanceMap.set(pm.id, new Decimal(balanceRow.initialBalance));
+      inheritedFromParentMap.set(pm.id, false);
+    }
   }
 
   // Calculate monthly transaction totals for payment method accounts
@@ -178,9 +209,9 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
     // Get IDs of payment methods that affect this account
     // Include this payment method's ID and any linked payment method IDs
     const affectingMethodIds = [pm.id, ...(accountLinkedMethods.get(pm.id) || []).map(() => pm.id)];
-    
+
     // Also include payment methods that are linked TO this account
-    const linkedToThis = allPaymentMethods.filter(m => m.linkedPaymentMethodId === pm.id).map(m => m.id);
+    const linkedToThis = allPaymentMethods.filter((m) => m.linkedPaymentMethodId === pm.id).map((m) => m.id);
     affectingMethodIds.push(...linkedToThis);
 
     // Calculate cumulative balance per month
@@ -228,7 +259,7 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
 
     // Build display name: "Name (Institution)" or just "Name" if no institution
     const displayName = pm.institution ? `${pm.name} (${pm.institution})` : pm.name;
-    
+
     accounts.push({
       id: pm.id,
       name: displayName,
@@ -236,6 +267,7 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
       sortOrder: pm.sortOrder,
       isSavingsAccount: pm.isSavingsAccount,
       initialBalance: initialBalance.toNumber(),
+      inheritedFromParent: inheritedFromParentMap.get(pm.id) ?? false,
       monthlyBalances,
     });
   }
@@ -257,7 +289,14 @@ export async function getAccountsForYear(tx: DbClient, year: number, budgetId: n
 }
 
 // Set initial balance for an account
-export async function setAccountBalance(tx: DbClient, year: number, paymentMethodId: number, initialBalance: number, budgetId: number, userId: string): Promise<void> {
+export async function setAccountBalance(
+  tx: DbClient,
+  year: number,
+  paymentMethodId: number,
+  initialBalance: number,
+  budgetId: number,
+  userId: string
+): Promise<void> {
   // Verify payment method belongs to user
   const pm = await tx.query.paymentMethods.findFirst({
     where: and(eq(paymentMethods.id, paymentMethodId), eq(paymentMethods.userId, userId)),
@@ -284,14 +323,115 @@ export async function setAccountBalance(tx: DbClient, year: number, paymentMetho
       yearId,
       paymentMethodId,
       initialBalance: initialBalance.toString(),
+      inheritedFromParent: false,
     })
     .onConflictDoUpdate({
       target: [accountBalances.yearId, accountBalances.paymentMethodId],
       set: {
         initialBalance: initialBalance.toString(),
+        inheritedFromParent: false,
         updatedAt: new Date(),
       },
     });
+}
+
+export async function getEffectiveInitialBalanceMap(
+  tx: DbClient,
+  year: number,
+  budgetId: number,
+  userId: string
+): Promise<Map<number, Decimal>> {
+  const { accounts } = await getAccountsForYear(tx, year, budgetId, userId);
+  return new Map(accounts.map((account) => [account.id, new Decimal(String(account.initialBalance))]));
+}
+
+async function getInheritedOpeningBalances(
+  tx: DbClient,
+  budgetId: number,
+  userId: string,
+  paymentMethodIds: number[],
+  visitedBudgetIds: Set<number>
+): Promise<Map<number, Decimal>> {
+  const childBudget = await tx.query.budgets.findFirst({
+    where: and(eq(budgets.id, budgetId), eq(budgets.userId, userId)),
+    columns: { id: true, parentBudgetId: true },
+  });
+
+  if (!childBudget?.parentBudgetId) {
+    return new Map();
+  }
+
+  if (visitedBudgetIds.has(budgetId)) {
+    return new Map();
+  }
+
+  const nextVisitedBudgetIds = new Set(visitedBudgetIds);
+  nextVisitedBudgetIds.add(budgetId);
+
+  const [contextRow] = await tx.execute(sql<{ userId: string | null }>`
+    SELECT current_setting('app.user_id', true) AS "userId"
+  `);
+  const previousUserId = contextRow?.userId ?? null;
+
+  if (previousUserId !== userId) {
+    return await withInheritedBalanceReadContext(userId, childBudget.parentBudgetId, async (ownerTx) =>
+      readParentInheritedOpeningBalances(
+        ownerTx,
+        childBudget.parentBudgetId!,
+        userId,
+        paymentMethodIds,
+        nextVisitedBudgetIds
+      )
+    );
+  }
+
+  await tx.execute(sql`SELECT set_config('app.budget_id', ${String(childBudget.parentBudgetId)}, true)`);
+  try {
+    return await readParentInheritedOpeningBalances(
+      tx,
+      childBudget.parentBudgetId,
+      userId,
+      paymentMethodIds,
+      nextVisitedBudgetIds
+    );
+  } finally {
+    await tx.execute(sql`SELECT set_config('app.budget_id', ${String(budgetId)}, true)`);
+  }
+}
+
+async function readParentInheritedOpeningBalances(
+  tx: DbClient,
+  parentBudgetId: number,
+  userId: string,
+  paymentMethodIds: number[],
+  visitedBudgetIds: Set<number>
+): Promise<Map<number, Decimal>> {
+  const parentBudget = await tx.query.budgets.findFirst({
+    where: and(eq(budgets.id, parentBudgetId), eq(budgets.userId, userId)),
+    columns: { id: true, startYear: true },
+  });
+
+  if (!parentBudget) {
+    return new Map();
+  }
+
+  const parentAccounts = await getAccountsForYear(
+    tx,
+    parentBudget.startYear,
+    parentBudget.id,
+    userId,
+    visitedBudgetIds
+  );
+  const requestedIds = new Set(paymentMethodIds);
+  const inheritedBalances = new Map<number, Decimal>();
+
+  for (const account of parentAccounts.accounts) {
+    if (requestedIds.has(account.id)) {
+      inheritedBalances.set(account.id, new Decimal(String(account.monthlyBalances[11] ?? 0)).toDecimalPlaces(2));
+    }
+  }
+
+  return inheritedBalances;
 }
 
 // Update payment method isSavingsAccount flag

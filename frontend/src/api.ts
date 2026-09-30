@@ -84,6 +84,7 @@ export interface AccessibleBudget {
   id: number;
   description: string | null;
   year: number;
+  parentBudgetId: number | null;
   ownerId: string;
   ownerName: string | null;
   ownerEmail: string;
@@ -104,12 +105,24 @@ export async function fetchBudgets(): Promise<{ budgets: AccessibleBudget[]; def
   return response.json();
 }
 
-export async function createBudget(year: number, description?: string): Promise<AccessibleBudget> {
+export async function createBudget(
+  year: number,
+  description?: string,
+  parentBudgetId?: number | null
+): Promise<AccessibleBudget> {
   const response = await authFetch(`${API_BASE}/budgets`, {
     method: 'POST',
-    body: JSON.stringify({ year, description }),
+    body: JSON.stringify({ year, description, ...(parentBudgetId != null ? { parentBudgetId } : {}) }),
   });
   await ensureOk(response, 'Failed to create budget');
+  return response.json();
+}
+
+export async function deleteBudget(
+  budgetId: number
+): Promise<{ budgets: AccessibleBudget[]; defaultBudgetId: number }> {
+  const response = await authFetch(`${API_BASE}/budgets/${budgetId}`, { method: 'DELETE' });
+  await ensureOk(response, 'Failed to delete budget');
   return response.json();
 }
 
@@ -598,6 +611,7 @@ export interface Account {
   sortOrder: number;
   isSavingsAccount: boolean;
   initialBalance: number;
+  inheritedFromParent?: boolean;
   monthlyBalances: number[]; // Expected balance at end of each month (1-12)
 }
 

@@ -1,17 +1,17 @@
 import { eq, inArray } from 'drizzle-orm';
 import type { DbClient } from '../db/index.js';
 import {
-  paymentMethods,
-  budgets,
-  budgetYears,
-  budgetGroups,
-  budgetItems,
-  monthlyValues,
-  transactions,
+  accountBalances,
   assets,
   assetValues,
+  budgetGroups,
+  budgetItems,
+  budgets,
+  budgetYears,
+  monthlyValues,
+  paymentMethods,
+  transactions,
   transfers,
-  accountBalances,
 } from '../db/schema.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { invalidateThirdPartySuggestionCache } from './transactions.js';
@@ -106,6 +106,7 @@ export interface BackupAccountBalance {
   yearId: number;
   paymentMethodId: number;
   initialBalance: string;
+  inheritedFromParent?: boolean;
 }
 
 export interface BackupPayload {
@@ -154,11 +155,7 @@ export interface ImportSummary {
 
 // ── Export ─────────────────────────────────────────────────────────────
 
-export async function exportBackup(
-  tx: DbClient,
-  userId: string,
-  budgetId: number
-): Promise<BackupPayload> {
+export async function exportBackup(tx: DbClient, userId: string, budgetId: number): Promise<BackupPayload> {
   // Payment methods (user-scoped)
   const pms = await tx
     .select()
@@ -167,11 +164,7 @@ export async function exportBackup(
     .orderBy(paymentMethods.sortOrder);
 
   // Budget years
-  const years = await tx
-    .select()
-    .from(budgetYears)
-    .where(eq(budgetYears.budgetId, budgetId))
-    .orderBy(budgetYears.year);
+  const years = await tx.select().from(budgetYears).where(eq(budgetYears.budgetId, budgetId)).orderBy(budgetYears.year);
 
   const yearIds = years.map((y) => y.id);
 
@@ -185,68 +178,34 @@ export async function exportBackup(
   // Budget items (for all years)
   const items =
     yearIds.length > 0
-      ? await tx
-          .select()
-          .from(budgetItems)
-          .where(inArray(budgetItems.yearId, yearIds))
-          .orderBy(budgetItems.sortOrder)
+      ? await tx.select().from(budgetItems).where(inArray(budgetItems.yearId, yearIds)).orderBy(budgetItems.sortOrder)
       : [];
 
   const itemIds = items.map((i) => i.id);
 
   // Monthly values
   const mvs =
-    itemIds.length > 0
-      ? await tx
-          .select()
-          .from(monthlyValues)
-          .where(inArray(monthlyValues.itemId, itemIds))
-      : [];
+    itemIds.length > 0 ? await tx.select().from(monthlyValues).where(inArray(monthlyValues.itemId, itemIds)) : [];
 
   // Transactions
   const txns =
-    yearIds.length > 0
-      ? await tx
-          .select()
-          .from(transactions)
-          .where(inArray(transactions.yearId, yearIds))
-      : [];
+    yearIds.length > 0 ? await tx.select().from(transactions).where(inArray(transactions.yearId, yearIds)) : [];
 
   // Assets
-  const assetRows = await tx
-    .select()
-    .from(assets)
-    .where(eq(assets.budgetId, budgetId))
-    .orderBy(assets.sortOrder);
+  const assetRows = await tx.select().from(assets).where(eq(assets.budgetId, budgetId)).orderBy(assets.sortOrder);
 
   const assetIds = assetRows.map((a) => a.id);
 
   // Asset values
   const avs =
-    assetIds.length > 0
-      ? await tx
-          .select()
-          .from(assetValues)
-          .where(inArray(assetValues.assetId, assetIds))
-      : [];
+    assetIds.length > 0 ? await tx.select().from(assetValues).where(inArray(assetValues.assetId, assetIds)) : [];
 
   // Transfers
-  const xfers =
-    yearIds.length > 0
-      ? await tx
-          .select()
-          .from(transfers)
-          .where(inArray(transfers.yearId, yearIds))
-      : [];
+  const xfers = yearIds.length > 0 ? await tx.select().from(transfers).where(inArray(transfers.yearId, yearIds)) : [];
 
   // Account balances
   const balances =
-    yearIds.length > 0
-      ? await tx
-          .select()
-          .from(accountBalances)
-          .where(inArray(accountBalances.yearId, yearIds))
-      : [];
+    yearIds.length > 0 ? await tx.select().from(accountBalances).where(inArray(accountBalances.yearId, yearIds)) : [];
 
   return {
     schemaVersion: 1,
@@ -330,6 +289,7 @@ export async function exportBackup(
       yearId: ab.yearId,
       paymentMethodId: ab.paymentMethodId,
       initialBalance: ab.initialBalance,
+      inheritedFromParent: ab.inheritedFromParent,
     })),
   };
 }
@@ -388,9 +348,13 @@ export function validateBackupPayload(payload: unknown): asserts payload is Back
       });
     }
     if (item.savingsAccountId !== null && !pmIds.has(item.savingsAccountId)) {
-      throw new AppError(400, `Budget item "${item.name}" references unknown payment method backup ID: ${item.savingsAccountId}`, {
-        code: 'BACKUP_INVALID_REFERENCE',
-      });
+      throw new AppError(
+        400,
+        `Budget item "${item.name}" references unknown payment method backup ID: ${item.savingsAccountId}`,
+        {
+          code: 'BACKUP_INVALID_REFERENCE',
+        }
+      );
     }
   }
 
@@ -474,9 +438,13 @@ export function validateBackupPayload(payload: unknown): asserts payload is Back
 
   for (const pm of p.paymentMethods as BackupPaymentMethod[]) {
     if (pm.linkedPaymentMethodId !== null && !pmIds.has(pm.linkedPaymentMethodId)) {
-      throw new AppError(400, `Payment method "${pm.name}" references unknown linked payment method backup ID: ${pm.linkedPaymentMethodId}`, {
-        code: 'BACKUP_INVALID_REFERENCE',
-      });
+      throw new AppError(
+        400,
+        `Payment method "${pm.name}" references unknown linked payment method backup ID: ${pm.linkedPaymentMethodId}`,
+        {
+          code: 'BACKUP_INVALID_REFERENCE',
+        }
+      );
     }
   }
 }
@@ -531,7 +499,8 @@ export async function importBackup(
       });
     }
 
-    const linkedBackup = pm.linkedPaymentMethodId !== null ? backupPaymentMethodById.get(pm.linkedPaymentMethodId) : null;
+    const linkedBackup =
+      pm.linkedPaymentMethodId !== null ? backupPaymentMethodById.get(pm.linkedPaymentMethodId) : null;
     const linkedExisting = linkedBackup ? existingPaymentMethodByKey.get(paymentMethodNaturalKey(linkedBackup)) : null;
     if (linkedBackup && !linkedExisting) {
       throw new AppError(409, `Payment method "${pm.name}" already exists with different linked account settings.`, {
@@ -569,10 +538,7 @@ export async function importBackup(
   // Get existing item IDs
   const existingItems =
     existingYearIds.length > 0
-      ? await tx
-          .select({ id: budgetItems.id })
-          .from(budgetItems)
-          .where(inArray(budgetItems.yearId, existingYearIds))
+      ? await tx.select({ id: budgetItems.id }).from(budgetItems).where(inArray(budgetItems.yearId, existingYearIds))
       : [];
   const existingItemIds = existingItems.map((i) => i.id);
 
@@ -590,10 +556,7 @@ export async function importBackup(
   await tx.delete(budgetYears).where(eq(budgetYears.budgetId, budgetId));
 
   // Asset values → assets
-  const existingAssets = await tx
-    .select({ id: assets.id })
-    .from(assets)
-    .where(eq(assets.budgetId, budgetId));
+  const existingAssets = await tx.select({ id: assets.id }).from(assets).where(eq(assets.budgetId, budgetId));
   const existingAssetIds = existingAssets.map((a) => a.id);
 
   if (existingAssetIds.length > 0) {
@@ -639,10 +602,7 @@ export async function importBackup(
       const newId = pmIdMap.get(pm.id)!;
       const linkedNewId = pmIdMap.get(pm.linkedPaymentMethodId)!;
       if (insertedPaymentMethodIds.has(newId)) {
-        await tx
-          .update(paymentMethods)
-          .set({ linkedPaymentMethodId: linkedNewId })
-          .where(eq(paymentMethods.id, newId));
+        await tx.update(paymentMethods).set({ linkedPaymentMethodId: linkedNewId }).where(eq(paymentMethods.id, newId));
       }
     }
   }
@@ -695,8 +655,7 @@ export async function importBackup(
         slug: item.slug,
         sortOrder: item.sortOrder,
         yearlyBudget: item.yearlyBudget,
-        savingsAccountId:
-          item.savingsAccountId !== null ? pmIdMap.get(item.savingsAccountId)! : null,
+        savingsAccountId: item.savingsAccountId !== null ? pmIdMap.get(item.savingsAccountId)! : null,
       })
       .returning();
     itemIdMap.set(item.id, inserted.id);
@@ -764,10 +723,7 @@ export async function importBackup(
     if (a.parentAssetId !== null) {
       const newId = assetIdMap.get(a.id)!;
       const parentNewId = assetIdMap.get(a.parentAssetId)!;
-      await tx
-        .update(assets)
-        .set({ parentAssetId: parentNewId })
-        .where(eq(assets.id, newId));
+      await tx.update(assets).set({ parentAssetId: parentNewId }).where(eq(assets.id, newId));
     }
   }
 
@@ -791,6 +747,7 @@ export async function importBackup(
         yearId: yearIdMap.get(ab.yearId)!,
         paymentMethodId: pmIdMap.get(ab.paymentMethodId)!,
         initialBalance: ab.initialBalance,
+        inheritedFromParent: ab.inheritedFromParent ?? false,
       }))
     );
   }

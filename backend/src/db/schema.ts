@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   boolean,
   date,
   decimal,
@@ -31,6 +32,7 @@ export const budgets = pgTable('budgets', {
   userId: uuid('user_id')
     .references(() => users.id, { onDelete: 'cascade' })
     .notNull(),
+  parentBudgetId: integer('parent_budget_id').references((): AnyPgColumn => budgets.id, { onDelete: 'set null' }),
   description: varchar('description', { length: 500 }),
   startYear: integer('start_year').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -214,6 +216,7 @@ export const accountBalances = pgTable(
       .references(() => paymentMethods.id, { onDelete: 'cascade' })
       .notNull(),
     initialBalance: decimal('initial_balance', { precision: 12, scale: 2 }).notNull().default('0'),
+    inheritedFromParent: boolean('inherited_from_parent').notNull().default(false),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -349,6 +352,12 @@ export const budgetsRelations = relations(budgets, ({ one, many }) => ({
     fields: [budgets.userId],
     references: [users.id],
   }),
+  parentBudget: one(budgets, {
+    fields: [budgets.parentBudgetId],
+    references: [budgets.id],
+    relationName: 'budgetParent',
+  }),
+  childBudgets: many(budgets, { relationName: 'budgetParent' }),
   shares: many(budgetShares),
   years: many(budgetYears),
   groups: many(budgetGroups),

@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import type { DbClient } from '../db/index.js';
 import {
-  accountBalances,
   budgetGroups,
   budgetItems,
   budgets,
@@ -11,8 +11,8 @@ import {
   transactions,
   transfers,
 } from '../db/schema.js';
-import type { DbClient } from '../db/index.js';
 import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, BudgetSummary, MonthlyValue } from '../types.js';
+import * as accountsSvc from './accounts.js';
 
 // Configure Decimal.js for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -500,11 +500,11 @@ export async function getBudgetSummary(
 
   const paymentMethodIds = new Set(paymentMethodAccounts.map((pm) => pm.id));
 
-  const allBalances = await tx.select().from(accountBalances).where(eq(accountBalances.yearId, data.yearId));
+  const effectiveInitialBalances = await accountsSvc.getEffectiveInitialBalanceMap(tx, year, budgetId, userId);
 
-  const initialBalance = allBalances
-    .filter((b) => paymentMethodIds.has(b.paymentMethodId))
-    .reduce((sum, b) => sum + parseFloat(b.initialBalance), 0);
+  const initialBalance = Array.from(effectiveInitialBalances.entries())
+    .filter(([paymentMethodId]) => paymentMethodIds.has(paymentMethodId))
+    .reduce((sum, [, balance]) => sum + balance.toNumber(), 0);
 
   const remainingBalance = new Decimal(initialBalance)
     .plus(expectedTotals.income)
@@ -714,9 +714,7 @@ export async function deleteGroup(tx: DbClient, id: number, budgetId: number): P
     await tx.delete(monthlyValues).where(eq(monthlyValues.itemId, item.id));
   }
 
-  await tx
-    .delete(budgetItems)
-    .where(and(eq(budgetItems.groupId, id), itemInBudgetScope(budgetId)));
+  await tx.delete(budgetItems).where(and(eq(budgetItems.groupId, id), itemInBudgetScope(budgetId)));
   await tx.delete(budgetGroups).where(and(eq(budgetGroups.id, id), eq(budgetGroups.budgetId, budgetId)));
 
   return true;

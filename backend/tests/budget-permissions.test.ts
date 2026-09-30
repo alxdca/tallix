@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import type { DbClient } from '../src/db/index.js';
-import { budgetGroups, budgetItems, budgetYears, budgets, monthlyValues } from '../src/db/schema.js';
+import { budgetGroups, budgetItems, budgets, budgetYears, monthlyValues } from '../src/db/schema.js';
 import { requireBudgetOwner, requireBudgetWrite } from '../src/middleware/budget.js';
 import { getExpectedBudgetMonthIndex } from '../src/services/budget.js';
 import {
@@ -14,7 +14,7 @@ import {
 function createRequest(method: string, role: 'owner' | 'read' | 'write'): Request {
   return {
     method,
-    budget: { id: 1, userId: 'owner-id', description: null, startYear: 2026, role },
+    budget: { id: 1, userId: 'owner-id', description: null, startYear: 2026, parentBudgetId: null, role },
   } as Request;
 }
 
@@ -82,6 +82,7 @@ describe('yearly budget collaboration', () => {
               id: 10,
               description: 'Household',
               startYear: 2026,
+              parentBudgetId: null,
               userId: 'owner-id',
               user: { name: 'Owner', email: 'owner@example.com' },
             },
@@ -89,6 +90,7 @@ describe('yearly budget collaboration', () => {
               id: 11,
               description: 'Travel',
               startYear: 2026,
+              parentBudgetId: null,
               userId: 'friend-id',
               user: { name: 'Friend', email: 'friend@example.com' },
             },
@@ -106,6 +108,7 @@ describe('yearly budget collaboration', () => {
         description: 'Household',
         year: 2026,
         startYear: 2026,
+        parentBudgetId: null,
         ownerId: 'owner-id',
         ownerName: 'Owner',
         ownerEmail: 'owner@example.com',
@@ -116,6 +119,7 @@ describe('yearly budget collaboration', () => {
         description: 'Travel',
         year: 2026,
         startYear: 2026,
+        parentBudgetId: null,
         ownerId: 'friend-id',
         ownerName: 'Friend',
         ownerEmail: 'friend@example.com',
@@ -131,6 +135,7 @@ describe('yearly budget collaboration', () => {
         userId: 'owner-id',
         description: 'Travel',
         startYear: 2026,
+        parentBudgetId: null,
       },
     ]);
     const insertBudgetValues = vi.fn().mockReturnValue({ returning: insertBudgetReturning });
@@ -163,6 +168,7 @@ describe('yearly budget collaboration', () => {
               userId: 'owner-id',
               description: 'Travel',
               startYear: 2026,
+              parentBudgetId: null,
               user: { name: 'Owner', email: 'owner@example.com' },
             }),
         },
@@ -170,9 +176,9 @@ describe('yearly budget collaboration', () => {
           findFirst: vi.fn().mockResolvedValue(null),
         },
         paymentMethods: {
-          findMany: vi.fn().mockResolvedValue([
-            { id: 12, name: 'Savings', institution: 'Bank', isSavingsAccount: true },
-          ]),
+          findMany: vi
+            .fn()
+            .mockResolvedValue([{ id: 12, name: 'Savings', institution: 'Bank', isSavingsAccount: true }]),
         },
         budgetGroups: {
           findFirst: vi.fn().mockResolvedValue(null),
@@ -185,6 +191,7 @@ describe('yearly budget collaboration', () => {
       description: 'Travel',
       year: 2026,
       startYear: 2026,
+      parentBudgetId: null,
       ownerId: 'owner-id',
       ownerName: 'Owner',
       ownerEmail: 'owner@example.com',
@@ -193,6 +200,7 @@ describe('yearly budget collaboration', () => {
 
     expect(insertBudgetValues).toHaveBeenCalledWith({
       userId: 'owner-id',
+      parentBudgetId: null,
       description: 'Travel',
       startYear: 2026,
     });

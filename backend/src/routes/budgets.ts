@@ -20,6 +20,27 @@ function parseYear(value: unknown): number {
   return value;
 }
 
+function parseBudgetId(value: string | undefined): number {
+  if (!value || !/^[1-9]\d*$/.test(value)) {
+    throw new AppError(400, 'Invalid budget ID');
+  }
+  const budgetId = Number(value);
+  if (!Number.isSafeInteger(budgetId) || budgetId > 2147483647) {
+    throw new AppError(400, 'Invalid budget ID');
+  }
+  return budgetId;
+}
+
+function parseOptionalBudgetId(value: unknown, fieldName: string): number | null {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 2147483647) {
+    throw new AppError(400, `${fieldName} must be a positive integer`);
+  }
+  return value;
+}
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -37,9 +58,44 @@ router.post(
     const year = parseYear(req.body.year);
     const description =
       typeof req.body.description === 'string' && req.body.description.trim() ? req.body.description.trim() : null;
+    const parentBudgetId = parseOptionalBudgetId(req.body.parentBudgetId, 'parentBudgetId');
 
-    const budget = await withUserContext(userId, (tx) => budgetsSvc.createYearlyBudget(tx, userId, year, description));
+    let budget: budgetsSvc.AccessibleBudget;
+    try {
+      budget = await withUserContext(userId, (tx) =>
+        budgetsSvc.createYearlyBudget(tx, userId, year, description, parentBudgetId)
+      );
+    } catch (error) {
+      if (error instanceof budgetsSvc.ParentBudgetNotFoundError) {
+        throw new AppError(404, error.message, { code: 'PARENT_BUDGET_NOT_FOUND' });
+      }
+      if (error instanceof budgetsSvc.ParentBudgetYearMismatchError) {
+        throw new AppError(400, error.message, {
+          code: 'PARENT_BUDGET_YEAR_MISMATCH',
+          params: { year: error.expectedYear },
+        });
+      }
+      throw error;
+    }
     res.status(201).json(budget);
+  })
+);
+
+router.delete(
+  '/:budgetId',
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const budgetId = parseBudgetId(req.params.budgetId);
+    const result = await withUserContext(userId, (tx) => budgetsSvc.deleteOwnedBudget(tx, userId, budgetId));
+
+    if (result.status === 'shared') {
+      throw new AppError(403, 'Only the budget owner can delete this budget');
+    }
+    if (result.status === 'not-found') {
+      throw new AppError(404, 'Budget not found');
+    }
+
+    res.json({ budgets: result.budgets, defaultBudgetId: result.defaultBudgetId });
   })
 );
 

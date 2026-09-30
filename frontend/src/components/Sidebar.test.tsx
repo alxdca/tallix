@@ -43,6 +43,7 @@ function budget(overrides: Partial<AccessibleBudget> & { year: number }): Access
     ownerId: 'owner-1',
     ownerName: null,
     ownerEmail: 'owner@example.com',
+    parentBudgetId: null,
     role: 'owner',
     ...overrides,
   } as AccessibleBudget;
@@ -54,7 +55,6 @@ async function renderSidebar(
     currentYear: number;
     activeBudgetId: number | null;
     onBudgetChange: (budgetId: number) => void;
-    onCreateBudget: (year: number, description: string) => Promise<void>;
   }> = {}
 ) {
   const container = document.createElement('div');
@@ -62,7 +62,6 @@ async function renderSidebar(
 
   const onViewChange = vi.fn();
   const onBudgetChange = props.onBudgetChange ?? vi.fn();
-  const onCreateBudget = props.onCreateBudget ?? vi.fn().mockResolvedValue(undefined);
   let root: Root;
 
   await act(async () => {
@@ -77,13 +76,12 @@ async function renderSidebar(
           budgets={budgets}
           activeBudgetId={props.activeBudgetId ?? 1}
           onBudgetChange={onBudgetChange}
-          onCreateBudget={onCreateBudget}
         />
       </I18nProvider>
     );
   });
 
-  return { container, onBudgetChange, onCreateBudget, onViewChange };
+  return { container, onBudgetChange, onViewChange };
 }
 
 function selectBudget(container: HTMLElement, value: string) {
@@ -94,37 +92,6 @@ function selectBudget(container: HTMLElement, value: string) {
     select.dispatchEvent(new Event('change', { bubbles: true }));
   });
   return select;
-}
-
-function inputByLabel(container: HTMLElement, label: RegExp) {
-  const labels = Array.from(container.querySelectorAll('label'));
-  const match = labels.find((element) => label.test(element.textContent || ''));
-  if (!match) throw new Error(`Missing label ${label}`);
-  const id = match.getAttribute('for');
-  if (!id) throw new Error(`Label ${label} is not associated to an input`);
-  const input = container.querySelector<HTMLInputElement>(`#${id}`);
-  if (!input) throw new Error(`Missing input for ${label}`);
-  return input;
-}
-
-function change(element: HTMLInputElement, value: string) {
-  act(() => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(element, value);
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-}
-
-function submit(form: HTMLFormElement) {
-  act(() => {
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  });
-}
-
-async function flush() {
-  await act(async () => {
-    await Promise.resolve();
-  });
 }
 
 beforeEach(() => {
@@ -159,79 +126,18 @@ describe('shareable budget selector', () => {
       { value: '1', label: '2026 - Family budget' },
       { value: '2', label: '2025 - Taxes' },
     ]);
-    expect(options[options.length - 1]?.value).toBe('create');
+    expect(options.map((option) => option.value)).not.toContain('create');
   });
 
-  it('opens the inline budget creation form from the dropdown create option', async () => {
-    const { container } = await renderSidebar();
+  it('changes budgets from the dropdown without opening a creation form', async () => {
+    const onBudgetChange = vi.fn();
+    const { container } = await renderSidebar({ onBudgetChange });
 
-    selectBudget(container, 'create');
+    selectBudget(container, '2');
 
-    expect(inputByLabel(container, /year/i)).toBeInstanceOf(HTMLInputElement);
-    expect(inputByLabel(container, /description/i)).toBeInstanceOf(HTMLInputElement);
-  });
-
-  it('calls onCreateBudget with the entered year and optional description', async () => {
-    const onCreateBudget = vi.fn().mockResolvedValue(undefined);
-    const { container } = await renderSidebar({ onCreateBudget });
-
-    selectBudget(container, 'create');
-    change(inputByLabel(container, /year/i), '2028');
-    change(inputByLabel(container, /description/i), 'Summer plan');
-    submit(container.querySelector('form')!);
-    await flush();
-
-    expect(onCreateBudget).toHaveBeenCalledWith(2028, 'Summer plan');
-  });
-
-  it('allows creating another owned budget for a year that already appears in the dropdown', async () => {
-    const onCreateBudget = vi.fn().mockResolvedValue(undefined);
-    const { container } = await renderSidebar({ activeBudgetId: 3, onCreateBudget });
-
-    selectBudget(container, 'create');
-    change(inputByLabel(container, /year/i), '2026');
-    submit(container.querySelector('form')!);
-    await flush();
-
-    expect(onCreateBudget).toHaveBeenCalledWith(2026, '');
-  });
-
-  it('accepts 1900 as the earliest supported budget year', async () => {
-    const onCreateBudget = vi.fn().mockResolvedValue(undefined);
-    const { container } = await renderSidebar({ onCreateBudget });
-
-    selectBudget(container, 'create');
-    change(inputByLabel(container, /year/i), '1900');
-    submit(container.querySelector('form')!);
-    await flush();
-
-    expect(onCreateBudget).toHaveBeenCalledWith(1900, '');
-  });
-
-  it('accepts 9999 as the latest supported budget year', async () => {
-    const onCreateBudget = vi.fn().mockResolvedValue(undefined);
-    const { container } = await renderSidebar({ onCreateBudget });
-
-    selectBudget(container, 'create');
-    change(inputByLabel(container, /year/i), '9999');
-    submit(container.querySelector('form')!);
-    await flush();
-
-    expect(onCreateBudget).toHaveBeenCalledWith(9999, '');
-  });
-
-  it('keeps the creation form open when creating a budget fails', async () => {
-    const onCreateBudget = vi.fn().mockRejectedValue(new Error('network down'));
-    const { container } = await renderSidebar({ onCreateBudget });
-
-    selectBudget(container, 'create');
-    change(inputByLabel(container, /year/i), '2028');
-    submit(container.querySelector('form')!);
-    await flush();
-
-    expect(onCreateBudget).toHaveBeenCalledWith(2028, '');
-    expect(inputByLabel(container, /year/i)).toBeInstanceOf(HTMLInputElement);
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Something went wrong');
+    expect(onBudgetChange).toHaveBeenCalledWith(2);
+    expect(container.querySelector('form')).toBeNull();
+    expect(container.textContent).not.toContain('Create new budget');
   });
 
   it('does not render archive navigation now that yearly budgets are selected from the budget dropdown', async () => {

@@ -3,8 +3,8 @@ import {
   Chart as ChartJS,
   Filler,
   Legend,
-  LineElement,
   LinearScale,
+  LineElement,
   PointElement,
   Title,
   Tooltip,
@@ -312,9 +312,16 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                         <span
                           className="balance-value editable"
                           onClick={() => startEditBalance(account)}
-                          title={t('accounts.clickToEdit')}
+                          title={t(
+                            account.inheritedFromParent ? 'accounts.editInheritedBalance' : 'accounts.clickToEdit'
+                          )}
                         >
                           {formatCurrency(account.initialBalance, true)}
+                        </span>
+                      )}
+                      {account.inheritedFromParent && (
+                        <span className="account-balance-link" title={t('accounts.inheritedBalanceHelp')}>
+                          {t('accounts.inheritedBalance')}
                         </span>
                       )}
                     </td>

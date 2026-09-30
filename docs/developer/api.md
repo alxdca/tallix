@@ -13,7 +13,8 @@ All endpoints are under `/api`. Most require authentication and budget context.
 ## Yearly budgets and sharing
 
 - `GET /api/budgets` — list accessible yearly budgets with `year`, role and owner details.
-- `POST /api/budgets` — create an owned budget with `{ year, description? }`; returns the selected budget shape. Years must be integers from 1900 through 9999.
+- `POST /api/budgets` — create an owned budget with `{ year, description?, parentBudgetId? }`; returns the selected budget shape, including `parentBudgetId`. Years must be integers from 1900 through 9999. The optional parent must be owned by the caller and be from the immediately previous year. Its category structure is copied without planned amounts or transactions. Each child opening account balance follows the parent's computed December balance until explicitly overridden in the child; deleting the parent freezes the latest effective balances.
+- `DELETE /api/budgets/:budgetId` — permanently delete an owned budget and its budget-scoped data; returns `{ budgets, defaultBudgetId }`. Payment methods are retained. If no owned budget remains, a new empty default budget is created atomically. The path ID selects the target independently of `X-Budget-Id`. Collaborators receive 403; nonexistent or inaccessible budgets receive 404.
 - `GET /api/budgets/current/shares`
 - `POST /api/budgets/current/shares` — grant access by `{ email, role: "read" | "write" }`.
 - `PUT /api/budgets/current/shares/:shareId`
