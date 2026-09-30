@@ -260,21 +260,6 @@ input[type="number"]::-webkit-inner-spin-button {
   line-height: 1;
 }
 
-.nav-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.nav-sub-item {
-  padding-left: 44px;
-  font-size: 0.875rem;
-}
-
-.nav-sub-item .nav-icon {
-  width: 20px;
-  height: 20px;
-}
-
 .sidebar-footer {
   padding: 16px 20px;
   border-top: 1px solid var(--border-subtle);

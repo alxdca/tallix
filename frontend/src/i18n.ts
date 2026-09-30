@@ -46,6 +46,7 @@ const translations: Record<Locale, Record<string, any>> = {
       chart: 'Chart',
     },
     nav: {
+      budget: 'Budget',
       transactions: 'Transactions',
       accounts: 'Accounts',
       assets: 'Assets',
@@ -670,6 +671,7 @@ const translations: Record<Locale, Record<string, any>> = {
       chart: 'Graphique',
     },
     nav: {
+      budget: 'Budget',
       transactions: 'Transactions',
       accounts: 'Comptes',
       assets: 'Patrimoine',

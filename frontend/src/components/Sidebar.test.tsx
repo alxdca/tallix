@@ -52,7 +52,6 @@ function budget(overrides: Partial<AccessibleBudget> & { year: number }): Access
 async function renderSidebar(
   props: Partial<{
     activeView: string;
-    currentYear: number;
     activeBudgetId: number | null;
     onBudgetChange: (budgetId: number) => void;
   }> = {}
@@ -72,7 +71,6 @@ async function renderSidebar(
         <Sidebar
           activeView={props.activeView ?? 'current'}
           onViewChange={onViewChange}
-          currentYear={props.currentYear ?? 2026}
           budgets={budgets}
           activeBudgetId={props.activeBudgetId ?? 1}
           onBudgetChange={onBudgetChange}
@@ -141,12 +139,36 @@ describe('shareable budget selector', () => {
   });
 
   it('does not render archive navigation now that yearly budgets are selected from the budget dropdown', async () => {
-    const { container, onViewChange } = await renderSidebar({ currentYear: 2027 });
+    const { container, onViewChange } = await renderSidebar();
 
     expect(Array.from(container.querySelectorAll('button'), (button) => button.textContent?.trim())).not.toContain(
       'Archive'
     );
     expect(container.textContent).not.toContain('2025TransactionsAccounts');
     expect(onViewChange).not.toHaveBeenCalledWith(expect.stringContaining('archive-'));
+  });
+
+  it('shows flat navigation without a year and keeps the budget view reachable', async () => {
+    const { container, onViewChange } = await renderSidebar();
+    const nav = container.querySelector('nav');
+    const buttons = Array.from(nav?.querySelectorAll('button') ?? []);
+
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual([
+      'Budget',
+      'Transactions',
+      'Accounts',
+      'Planning',
+      'Playground',
+      'Assets',
+      'Settings',
+    ]);
+    expect(nav?.textContent).not.toContain('2026');
+    expect(nav?.querySelector('.nav-group, .nav-sub-item')).toBeNull();
+    expect(buttons.every((button) => button.parentElement === nav)).toBe(true);
+
+    act(() => {
+      buttons[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onViewChange).toHaveBeenCalledWith('current');
   });
 });

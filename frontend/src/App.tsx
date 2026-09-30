@@ -334,7 +334,6 @@ function AppContent() {
       <Sidebar
         activeView={activeView}
         onViewChange={setActiveView}
-        currentYear={selectedYear}
         budgets={availableBudgets}
         activeBudgetId={activeBudgetId}
         onBudgetChange={handleBudgetChange}
