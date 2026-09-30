@@ -142,6 +142,7 @@ function mergeStoredTransactionPriorities(yearId: number, entries: Transaction[]
 export interface TransactionsFilters {
   dateFrom: Date | null;
   dateTo: Date | null;
+  accountingPeriod: string;
   thirdParty: string;
   description: string;
   paymentMethods: number[]; // Multiple payment method IDs can be selected
@@ -177,6 +178,7 @@ export default function Transactions({
   const [filters, setFilters] = useState<Filters>({
     dateFrom: null,
     dateTo: null,
+    accountingPeriod: '',
     thirdParty: '',
     description: '',
     paymentMethods: [],
@@ -376,9 +378,19 @@ export default function Transactions({
       });
   }, [transactions, transfers]);
 
+  const accountingPeriods = Array.from(
+    new Map(
+      unifiedEntries.map(({ accountingMonth, accountingYear }) => [
+        `${accountingYear}-${accountingMonth}`,
+        { month: accountingMonth, year: accountingYear },
+      ])
+    ).values()
+  ).sort((a, b) => a.year - b.year || a.month - b.month);
+
   const hasActiveFilters =
     filters.dateFrom ||
     filters.dateTo ||
+    filters.accountingPeriod ||
     filters.thirdParty ||
     filters.description ||
     filters.paymentMethods.length > 0 ||
@@ -406,6 +418,11 @@ export default function Transactions({
         }
         return true;
       });
+    }
+    if (filters.accountingPeriod) {
+      result = result.filter(
+        (entry) => `${entry.accountingYear}-${entry.accountingMonth}` === filters.accountingPeriod
+      );
     }
     if (filters.thirdParty) {
       const search = filters.thirdParty.toLowerCase();
@@ -792,6 +809,7 @@ export default function Transactions({
     setFilters({
       dateFrom: null,
       dateTo: null,
+      accountingPeriod: '',
       thirdParty: '',
       description: '',
       paymentMethods: [],
@@ -1192,10 +1210,10 @@ export default function Transactions({
                 <th className="col-accounting" title={t('transactions.accountingMonth')}>
                   {t('transactions.accounting')}
                 </th>
-                <th className="sortable" onClick={() => handleSort('thirdParty')}>
+                <th className="col-third-party sortable" onClick={() => handleSort('thirdParty')}>
                   {t('transactions.thirdParty')} <SortIcon field="thirdParty" />
                 </th>
-                <th className="sortable" onClick={() => handleSort('description')}>
+                <th className="col-description sortable" onClick={() => handleSort('description')}>
                   {t('transactions.description')} <SortIcon field="description" />
                 </th>
                 <th>{t('transactions.comment')}</th>
@@ -1230,7 +1248,21 @@ export default function Transactions({
                     />
                   </div>
                 </th>
-                <th></th>
+                <th>
+                  <select
+                    aria-label={t('transactions.accountingMonth')}
+                    value={filters.accountingPeriod}
+                    onChange={(e) => setFilters((f) => ({ ...f, accountingPeriod: e.target.value }))}
+                    className="column-filter accounting-period-filter"
+                  >
+                    <option value="">{t('transactions.all')}</option>
+                    {accountingPeriods.map(({ month, year }) => (
+                      <option key={`${year}-${month}`} value={`${year}-${month}`}>
+                        {formatAccountingPeriod(month, year, monthNames)}
+                      </option>
+                    ))}
+                  </select>
+                </th>
                 <th>
                   <input
                     type="text"

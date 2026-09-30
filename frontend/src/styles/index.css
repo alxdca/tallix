@@ -2556,6 +2556,14 @@ td.zero {
   text-align: center;
 }
 
+.transactions-table .col-third-party {
+  width: 130px;
+}
+
+.transactions-table .col-description {
+  min-width: 220px;
+}
+
 .accounting-edit-cell {
   display: flex;
   gap: 4px;
@@ -2584,7 +2592,7 @@ td.zero {
 }
 
 .transactions-table .third-party-cell {
-  max-width: 150px;
+  max-width: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2592,8 +2600,7 @@ td.zero {
 
 /* Transfer rows need more space for source → destination */
 .transactions-table tr.transfer .third-party-cell {
-  max-width: none;
-  min-width: 280px;
+  max-width: 220px;
 }
 
 .transactions-table .comment-cell {

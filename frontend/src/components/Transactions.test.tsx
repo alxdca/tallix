@@ -256,6 +256,44 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+describe('transaction filters', () => {
+  it('filters transactions and transfers by accounting month and year, then clears the filter', async () => {
+    const { container } = await renderTransactions(
+      [
+        transaction({ id: 1, description: 'February purchase' }),
+        transaction({ id: 2, description: 'Next-year purchase', accountingYear: 2027 }),
+        transaction({ id: 3, description: 'March purchase', accountingMonth: 3 }),
+      ],
+      [transfer({ description: 'February transfer' })]
+    );
+
+    const accountingFilter = selectByClass(container, 'accounting-period-filter');
+    expect(Array.from(accountingFilter.options).map((option) => option.value)).toEqual([
+      '',
+      '2026-2',
+      '2026-3',
+      '2027-2',
+    ]);
+
+    change(accountingFilter, '2026-2');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(2);
+    expect(container.textContent).toContain('February purchase');
+    expect(container.textContent).toContain('February transfer');
+    expect(container.textContent).not.toContain('Next-year purchase');
+    expect(container.textContent).not.toContain('March purchase');
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('.btn-clear-filters')!.click();
+    });
+    expect(accountingFilter.value).toBe('');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(4);
+
+    change(accountingFilter, '2027-2');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+    expect(container.textContent).toContain('Next-year purchase');
+  });
+});
+
 describe('new transaction form', () => {
   it('creates a transaction with trimmed optional fields and keeps the entered date after success', async () => {
     const onTransactionsChanged = vi.fn();
