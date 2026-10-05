@@ -7,11 +7,13 @@ This guide walks through the first time setup for a new budget.
 - Use the signup/login screen to create your account.
 - The app stores your language and country preferences for formatting and AI imports.
 
-## 2. Choose your yearly budget
+## 2. Choose your budget and year
 
 The Budget dropdown shows your own budgets and budgets shared with you.
-Choose **Create new budget** to add a past, current or future year and an optional description.
-Each yearly budget has its own categories, transactions and sharing permissions.
+Select a named budget, then use the Year dropdown to choose a year inside it.
+In **My account**, use **Create new budget** to create a named budget with an initial year,
+or **Add year to selected budget** to extend an existing budget.
+Sharing applies to all years in the selected budget.
 
 ## 3. Set up categories
 

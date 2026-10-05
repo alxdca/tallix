@@ -8,14 +8,31 @@ import ConfirmDialog from './ConfirmDialog';
 
 const COUNTRY_LIST = ['', 'CH', 'FR', 'DE', 'IT', 'AT', 'BE', 'NL', 'LU', 'ES', 'PT', 'GB', 'US', 'CA'];
 
+function sortedBudgetYears(years: number[]) {
+  return [...years].sort((a, b) => a - b);
+}
+
+function nextBudgetYear(years: number[]) {
+  const sortedYears = sortedBudgetYears(years);
+  const nextYear = sortedYears.length > 0 ? Math.max(...sortedYears) + 1 : new Date().getFullYear() + 1;
+  return String(Math.min(nextYear, 9999));
+}
+
 interface UserSettingsProps {
   budgets: AccessibleBudget[];
   activeBudgetId: number | null;
   onCreateBudget: (year: number, description: string, parentBudgetId: number | null) => Promise<void>;
+  onCreateYear: (year: number) => Promise<void>;
   onDeleteBudget: (budgetId: number) => Promise<void>;
 }
 
-export default function UserSettings({ budgets, activeBudgetId, onCreateBudget, onDeleteBudget }: UserSettingsProps) {
+export default function UserSettings({
+  budgets,
+  activeBudgetId,
+  onCreateBudget,
+  onCreateYear,
+  onDeleteBudget,
+}: UserSettingsProps) {
   const { user, updateUser } = useAuth();
   const { t, locale, setLocale } = useI18n();
   const [language, setLanguage] = useState(user?.language || 'fr');
@@ -31,17 +48,26 @@ export default function UserSettings({ budgets, activeBudgetId, onCreateBudget, 
   const [deletingBudgetId, setDeletingBudgetId] = useState<number | null>(null);
   const [budgetError, setBudgetError] = useState<string | null>(null);
   const [budgetSuccess, setBudgetSuccess] = useState<string | null>(null);
-  const [newBudgetYear, setNewBudgetYear] = useState(String(Math.min(new Date().getFullYear() + 1, 9999)));
+  const [newBudgetYear, setNewBudgetYear] = useState(String(new Date().getFullYear()));
   const [newBudgetDescription, setNewBudgetDescription] = useState('');
-  const [parentBudgetId, setParentBudgetId] = useState('');
   const [isCreatingBudget, setIsCreatingBudget] = useState(false);
   const [createBudgetError, setCreateBudgetError] = useState<string | null>(null);
+  const [newYear, setNewYear] = useState('');
+  const [isCreatingYear, setIsCreatingYear] = useState(false);
+  const [createYearError, setCreateYearError] = useState<string | null>(null);
   const ownedBudgets = budgets
     .filter((budget) => budget.role === 'owner')
-    .sort((a, b) => b.year - a.year || a.id - b.id);
-  const eligibleParentBudgets = ownedBudgets.filter((budget) => budget.year < 9999);
+    .sort((a, b) => budgetName(a).localeCompare(budgetName(b)) || a.id - b.id);
+  const activeBudget = budgets.find((budget) => budget.id === activeBudgetId) ?? null;
+  const canAddYear = activeBudget?.role === 'owner' || activeBudget?.role === 'write';
+  const nextYearForActiveBudget = nextBudgetYear(activeBudget?.years ?? []);
+
+  function budgetName(budget: AccessibleBudget) {
+    return budget.description || t('userSettings.unnamedBudget', { id: budget.id });
+  }
+
   const budgetLabel = (budget: AccessibleBudget) =>
-    `${budget.year} — ${budget.description || t('userSettings.unnamedBudget', { id: budget.id })}`;
+    `${budgetName(budget)} — ${sortedBudgetYears(budget.years).join(', ')}`;
 
   const languageOptions = useMemo(
     () => [
@@ -70,6 +96,11 @@ export default function UserSettings({ budgets, activeBudgetId, onCreateBudget, 
       setCountry(user.country || '');
     }
   }, [user]);
+
+  React.useEffect(() => {
+    setNewYear(nextYearForActiveBudget);
+    setCreateYearError(null);
+  }, [nextYearForActiveBudget]);
 
   const handleSaveSettings = async () => {
     setIsSavingSettings(true);
@@ -152,27 +183,43 @@ export default function UserSettings({ budgets, activeBudgetId, onCreateBudget, 
       setCreateBudgetError(t('sharing.invalidYear'));
       return;
     }
-    const parent = parentBudgetId ? eligibleParentBudgets.find((budget) => budget.id === Number(parentBudgetId)) : null;
-    if (parentBudgetId && !parent) {
-      setCreateBudgetError(t('userSettings.invalidParentBudget'));
-      return;
-    }
-    if (parent && year !== parent.year + 1) {
-      setCreateBudgetError(t('userSettings.parentYearMismatch', { year: parent.year + 1 }));
-      return;
-    }
 
     setCreateBudgetError(null);
     setIsCreatingBudget(true);
     try {
-      await onCreateBudget(year, newBudgetDescription.trim(), parent?.id ?? null);
+      await onCreateBudget(year, newBudgetDescription.trim(), null);
       setNewBudgetDescription('');
-      setParentBudgetId('');
     } catch (err) {
       logger.error('Failed to create budget', err);
       setCreateBudgetError(getErrorMessage(err, t));
     } finally {
       setIsCreatingBudget(false);
+    }
+  };
+
+  const handleCreateYear = async (event: FormEvent) => {
+    event.preventDefault();
+    if (isCreatingYear || !activeBudget || !canAddYear) return;
+    const year = Number(newYear);
+    if (!Number.isInteger(year) || year < 1900 || year > 9999) {
+      setCreateYearError(t('sharing.invalidYear'));
+      return;
+    }
+    if (activeBudget.years.includes(year)) {
+      setCreateYearError(t('userSettings.yearAlreadyExists', { year }));
+      return;
+    }
+
+    setCreateYearError(null);
+    setIsCreatingYear(true);
+    try {
+      await onCreateYear(year);
+      setNewYear(String(Math.min(year + 1, 9999)));
+    } catch (err) {
+      logger.error('Failed to add budget year', err);
+      setCreateYearError(getErrorMessage(err, t));
+    } finally {
+      setIsCreatingYear(false);
     }
   };
 
@@ -299,30 +346,7 @@ export default function UserSettings({ budgets, activeBudgetId, onCreateBudget, 
           <p className="user-settings-budget-help">{t('userSettings.createBudgetHelp')}</p>
           <form className="password-form user-settings-create-form" onSubmit={handleCreateBudget}>
             <div className="form-group">
-              <label htmlFor="new-budget-parent">{t('userSettings.parentBudget')}</label>
-              <select
-                id="new-budget-parent"
-                className="language-select"
-                value={parentBudgetId}
-                onChange={(event) => {
-                  const id = event.target.value;
-                  setParentBudgetId(id);
-                  const parent = eligibleParentBudgets.find((budget) => budget.id === Number(id));
-                  if (parent) setNewBudgetYear(String(parent.year + 1));
-                  setCreateBudgetError(null);
-                }}
-                disabled={isCreatingBudget}
-              >
-                <option value="">{t('userSettings.noParentBudget')}</option>
-                {eligibleParentBudgets.map((budget) => (
-                  <option key={budget.id} value={budget.id}>
-                    {budgetLabel(budget)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label htmlFor="new-budget-year">{t('sharing.newBudgetYear')}</label>
+              <label htmlFor="new-budget-year">{t('userSettings.initialYear')}</label>
               <input
                 id="new-budget-year"
                 type="number"
@@ -363,6 +387,45 @@ export default function UserSettings({ budgets, activeBudgetId, onCreateBudget, 
             </button>
           </form>
         </div>
+
+        {activeBudget && canAddYear && (
+          <div className="user-settings-section">
+            <h3 className="section-title">
+              <span className="section-indicator"></span>
+              {t('userSettings.addYearTitle')}
+            </h3>
+            <p className="user-settings-budget-help">
+              {t('userSettings.addYearHelp', { budget: budgetName(activeBudget) })}
+            </p>
+            <form className="password-form user-settings-add-year-form" onSubmit={handleCreateYear}>
+              <div className="form-group">
+                <label htmlFor="new-budget-year-only">{t('sharing.year')}</label>
+                <input
+                  id="new-budget-year-only"
+                  type="number"
+                  required
+                  min="1900"
+                  max="9999"
+                  step="1"
+                  value={newYear}
+                  onChange={(event) => {
+                    setNewYear(event.target.value);
+                    setCreateYearError(null);
+                  }}
+                  disabled={isCreatingYear}
+                />
+              </div>
+              {createYearError && (
+                <p className="form-error" role="alert">
+                  {createYearError}
+                </p>
+              )}
+              <button type="submit" className="btn-primary" disabled={isCreatingYear}>
+                {t(isCreatingYear ? 'userSettings.addingYear' : 'userSettings.addYear')}
+              </button>
+            </form>
+          </div>
+        )}
 
         <div className="user-settings-section">
           <h3 className="section-title">

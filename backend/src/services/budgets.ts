@@ -21,6 +21,7 @@ export interface AccessibleBudget {
   description: string | null;
   year: number;
   startYear: number;
+  years: number[];
   parentBudgetId: number | null;
   ownerId: string;
   ownerName: string | null;
@@ -109,17 +110,42 @@ export async function listAccessibleBudgets(tx: DbClient, userId: string): Promi
   });
   const roleByBudgetId = new Map(shares.map((share) => [share.budgetId, share.role]));
 
-  return accessible.map((budget) => ({
-    id: budget.id,
-    description: budget.description,
-    year: budget.startYear,
-    startYear: budget.startYear,
-    parentBudgetId: budget.parentBudgetId,
-    ownerId: budget.userId,
-    ownerName: budget.user.name,
-    ownerEmail: budget.user.email,
-    role: budget.userId === userId ? 'owner' : roleByBudgetId.get(budget.id) === 'write' ? 'write' : 'read',
-  }));
+  const budgetsWithYears: AccessibleBudget[] = [];
+  for (const budget of accessible) {
+    const years = await listBudgetYearsInContext(tx, budget.id);
+    budgetsWithYears.push({
+      id: budget.id,
+      description: budget.description,
+      year: budget.startYear,
+      startYear: budget.startYear,
+      years,
+      parentBudgetId: budget.parentBudgetId,
+      ownerId: budget.userId,
+      ownerName: budget.user.name,
+      ownerEmail: budget.user.email,
+      role: budget.userId === userId ? 'owner' : roleByBudgetId.get(budget.id) === 'write' ? 'write' : 'read',
+    });
+  }
+  return budgetsWithYears;
+}
+
+async function listBudgetYearsInContext(tx: DbClient, budgetId: number): Promise<number[]> {
+  const [contextRow] = await tx.execute(sql<{ budgetId: string | null }>`
+    SELECT current_setting('app.budget_id', true) AS "budgetId"
+  `);
+  const previousBudgetId = contextRow?.budgetId ?? null;
+
+  await tx.execute(sql`SELECT set_config('app.budget_id', ${String(budgetId)}, true)`);
+  try {
+    const years = await tx.query.budgetYears.findMany({
+      where: eq(budgetYears.budgetId, budgetId),
+      orderBy: [asc(budgetYears.year)],
+      columns: { year: true },
+    });
+    return years.map((budgetYear) => budgetYear.year);
+  } finally {
+    await tx.execute(sql`SELECT set_config('app.budget_id', ${previousBudgetId ?? ''}, true)`);
+  }
 }
 
 export async function createYearlyBudget(
@@ -179,6 +205,7 @@ export async function createYearlyBudget(
     description: createdWithUser.description,
     year,
     startYear: createdWithUser.startYear,
+    years: [year],
     parentBudgetId: createdWithUser.parentBudgetId,
     ownerId: createdWithUser.userId,
     ownerName: createdWithUser.user.name,

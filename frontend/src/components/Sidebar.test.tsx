@@ -24,7 +24,7 @@ vi.mock('../utils/logger', () => ({
 const mountedRoots: Root[] = [];
 
 const budgets = [
-  budget({ id: 1, year: 2026, description: 'Family budget', role: 'owner' }),
+  budget({ id: 1, year: 2026, years: [2025, 2026, 2027], description: 'Family budget', role: 'owner' }),
   budget({ id: 2, year: 2025, description: 'Taxes', role: 'owner' }),
   budget({
     id: 3,
@@ -44,6 +44,7 @@ function budget(overrides: Partial<AccessibleBudget> & { year: number }): Access
     ownerName: null,
     ownerEmail: 'owner@example.com',
     parentBudgetId: null,
+    years: [overrides.year],
     role: 'owner',
     ...overrides,
   } as AccessibleBudget;
@@ -54,6 +55,7 @@ async function renderSidebar(
     activeView: string;
     activeBudgetId: number | null;
     onBudgetChange: (budgetId: number) => void;
+    onYearChange: (year: number) => void;
   }> = {}
 ) {
   const container = document.createElement('div');
@@ -74,6 +76,8 @@ async function renderSidebar(
           budgets={budgets}
           activeBudgetId={props.activeBudgetId ?? 1}
           onBudgetChange={onBudgetChange}
+          selectedYear={2026}
+          onYearChange={props.onYearChange ?? vi.fn()}
         />
       </I18nProvider>
     );
@@ -110,7 +114,7 @@ afterEach(() => {
 });
 
 describe('shareable budget selector', () => {
-  it('shows each accessible budget by year and label inside the active budget dropdown', async () => {
+  it('shows each named budget once without a year in its label', async () => {
     const { container } = await renderSidebar();
     const options = Array.from(container.querySelectorAll<HTMLOptionElement>('#active-budget option')).map(
       (option) => ({
@@ -120,11 +124,24 @@ describe('shareable budget selector', () => {
     );
 
     expect(options.slice(0, 3)).toEqual([
-      { value: '3', label: '2027 - Shared by Morgan Lee' },
-      { value: '1', label: '2026 - Family budget' },
-      { value: '2', label: '2025 - Taxes' },
+      { value: '1', label: 'Family budget' },
+      { value: '2', label: 'Taxes' },
+      { value: '3', label: 'Shared by Morgan Lee' },
     ]);
     expect(options.map((option) => option.value)).not.toContain('create');
+  });
+
+  it('shows only the selected budget years in descending order', async () => {
+    const onYearChange = vi.fn();
+    const { container, onBudgetChange } = await renderSidebar({ onYearChange });
+    const select = container.querySelector<HTMLSelectElement>('#active-year')!;
+    expect(Array.from(select.options, (option) => option.value)).toEqual(['2027', '2026', '2025']);
+    act(() => {
+      select.value = '2025';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(onYearChange).toHaveBeenCalledWith(2025);
+    expect(onBudgetChange).not.toHaveBeenCalled();
   });
 
   it('changes budgets from the dropdown without opening a creation form', async () => {

@@ -1,9 +1,20 @@
 import { Router, type Router as RouterType } from 'express';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { withTenantContext } from '../db/context.js';
+import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import * as budgetSvc from '../services/budget.js';
 import * as copilot from '../services/copilot.js';
 
 const router: RouterType = Router();
+
+function parseSelectedYear(value: unknown, fallbackYear: number): number {
+  if (value === undefined || value === null || value === '') {
+    return fallbackYear;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1900 || value > 9999) {
+    throw new AppError(400, 'year must be an integer between 1900 and 9999');
+  }
+  return value;
+}
 
 // POST /api/copilot/ask - Ask a question about the budget
 router.post(
@@ -50,7 +61,13 @@ router.post(
     const budgetId = req.budget!.id;
     const language = req.user!.language || 'en';
     const country = req.user!.country || 'US';
-    const currentYear = req.budget!.startYear;
+    const currentYear = parseSelectedYear(req.body.year, req.budget!.startYear);
+    const existingYear = await withTenantContext(userId, budgetId, (tx) =>
+      budgetSvc.getBudgetYear(tx, currentYear, budgetId)
+    );
+    if (!existingYear) {
+      throw new AppError(404, 'Budget year not found');
+    }
 
     const context: copilot.CopilotContext = {
       userId,
@@ -61,9 +78,7 @@ router.post(
       conversationHistory: conversationHistory as copilot.ConversationMessage[] | undefined,
     };
 
-    const answer = await withTenantContext(userId, budgetId, (tx) =>
-      copilot.askCopilot(tx, question.trim(), context)
-    );
+    const answer = await withTenantContext(userId, budgetId, (tx) => copilot.askCopilot(tx, question.trim(), context));
 
     res.json(answer);
   })

@@ -1,6 +1,6 @@
 # Assets, Debts, and Net Worth
 
-The Assets view tracks assets and liabilities for the budget selected in the Budget dropdown. Select another yearly budget to review its historical values.
+The Assets view tracks assets and liabilities for the budget selected in the Budget dropdown. Its columns show historical values across the years inside that budget.
 
 ## Sections
 

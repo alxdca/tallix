@@ -10,9 +10,9 @@ All endpoints are under `/api`. Most require authentication and budget context.
 - `GET /api/auth/setup`
 - `POST /api/auth/change-password`
 
-## Yearly budgets and sharing
+## Budgets, years and sharing
 
-- `GET /api/budgets` — list accessible yearly budgets with `year`, role and owner details.
+- `GET /api/budgets` — list accessible named budgets with `years`, role and owner details. `year`/`startYear` remain initial-year metadata for compatibility.
 - `POST /api/budgets` — create an owned budget with `{ year, description?, parentBudgetId? }`; returns the selected budget shape, including `parentBudgetId`. Years must be integers from 1900 through 9999. The optional parent must be owned by the caller and be from the immediately previous year. Its category structure is copied without planned amounts or transactions. Each child opening account balance follows the parent's computed December balance until explicitly overridden in the child; deleting the parent freezes the latest effective balances.
 - `DELETE /api/budgets/:budgetId` — permanently delete an owned budget and its budget-scoped data; returns `{ budgets, defaultBudgetId }`. Payment methods are retained. If no owned budget remains, a new empty default budget is created atomically. The path ID selects the target independently of `X-Budget-Id`. Collaborators receive 403; nonexistent or inaccessible budgets receive 404.
 - `GET /api/budgets/current/shares`
@@ -21,14 +21,15 @@ All endpoints are under `/api`. Most require authentication and budget context.
 - `DELETE /api/budgets/current/shares/:shareId`
 
 Use `X-Budget-Id` to select the budget for data and sharing endpoints. Share management is owner-only.
-Each budget has one year; requests for another year return 404. Multiple budgets may use the same year.
+Each budget contains multiple years. Sharing applies to all existing and future years within the selected budget. Requests for a year outside that budget return 404. Multiple budgets may use the same year.
 
 ## Budget
 
-- `GET /api/budget` (selected budget year)
+- `GET /api/budget` (initial year, retained for legacy clients)
 - `GET /api/budget/year/:year`
-- `GET /api/budget/summary?year=:year` (selected budget year)
+- `GET /api/budget/summary?year=:year` (explicit year; defaults to initial year if omitted)
 - `GET /api/budget/years`
+- `POST /api/budget/years` — add `{ year }` to the selected budget (owner or editor); duplicate years return 409. Categories carry forward from the preceding year without copying planned amounts or transactions.
 - `PUT /api/budget/years/:id`
 - `GET /api/budget/months`
 - `POST /api/budget/groups`
@@ -43,7 +44,7 @@ Each budget has one year; requests for another year return 404. Multiple budgets
 - `PUT /api/budget/items/:itemId/months/:month`
 - `GET /api/budget/start-year`
 
-`POST /api/budget/years` and `PUT /api/budget/start-year` return 410. Create a separate budget using `POST /api/budgets`.
+`PUT /api/budget/start-year` returns 410. Use `POST /api/budget/years` to add years and `POST /api/budgets` to create a separate budget.
 
 ## Transactions
 
@@ -104,3 +105,5 @@ Each budget has one year; requests for another year return 404. Multiple budgets
 ## Health
 
 - `GET /api/health`
+
+Copilot accepts an optional `year` in `POST /api/copilot/ask` as the default context year. It must belong to the selected budget; explicit dates in the question remain supported.

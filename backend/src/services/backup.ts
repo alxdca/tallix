@@ -329,6 +329,12 @@ export function validateBackupPayload(payload: unknown): asserts payload is Back
     }
   }
 
+  if ((p.budgetYears as BackupBudgetYear[]).length === 0) {
+    throw new AppError(400, 'Backup payload must contain at least one budget year', {
+      code: 'BACKUP_INVALID_SCHEMA',
+    });
+  }
+
   // Validate internal referential integrity
   const pmIds = new Set((p.paymentMethods as BackupPaymentMethod[]).map((pm) => pm.id));
   const yearIds = new Set((p.budgetYears as BackupBudgetYear[]).map((y) => y.id));
@@ -459,13 +465,6 @@ export async function importBackup(
 ): Promise<ImportSummary> {
   validateBackupPayload(payload);
 
-  if (payload.budgetYears.length !== 1) {
-    throw new AppError(400, 'Backup import supports exactly one budget year. Import each yearly budget separately.', {
-      code: 'BACKUP_SINGLE_YEAR_REQUIRED',
-    });
-  }
-
-  const [payloadYear] = payload.budgetYears;
   const selectedBudget = await tx.query.budgets.findFirst({
     where: eq(budgets.id, budgetId),
     columns: { startYear: true },
@@ -473,12 +472,10 @@ export async function importBackup(
   if (!selectedBudget) {
     throw new AppError(404, 'Budget not found', { code: 'BUDGET_NOT_FOUND' });
   }
-  if (payloadYear.year !== selectedBudget.startYear) {
-    throw new AppError(400, 'Backup year does not match the selected budget year.', {
-      code: 'BACKUP_YEAR_MISMATCH',
-      params: { backupYear: payloadYear.year, budgetYear: selectedBudget.startYear },
-    });
-  }
+  const importedYears = payload.budgetYears.map((year) => year.year);
+  const nextStartYear = importedYears.includes(selectedBudget.startYear)
+    ? selectedBudget.startYear
+    : Math.min(...importedYears);
 
   const existingPaymentMethods = await tx.query.paymentMethods.findMany({
     where: eq(paymentMethods.userId, userId),
@@ -621,6 +618,10 @@ export async function importBackup(
       })
       .returning();
     yearIdMap.set(y.id, inserted.id);
+  }
+
+  if (nextStartYear !== selectedBudget.startYear) {
+    await tx.update(budgets).set({ startYear: nextStartYear }).where(eq(budgets.id, budgetId));
   }
 
   // ── Step 3: Budget groups ──

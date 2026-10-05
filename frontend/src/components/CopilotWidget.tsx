@@ -1,6 +1,6 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { askCopilot, type ConversationMessage, type CopilotAnswer } from '../api';
 import { useI18n } from '../contexts/I18nContext';
-import { askCopilot, type CopilotAnswer, type ConversationMessage } from '../api';
 
 interface Message {
   id: string;
@@ -17,7 +17,7 @@ const MIN_HEIGHT = 400;
 const DEFAULT_BOTTOM = 90;
 const DEFAULT_RIGHT = 20;
 
-export default function CopilotWidget() {
+export default function CopilotWidget({ year }: { year: number }) {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -34,11 +34,7 @@ export default function CopilotWidget() {
   const dragStartRef = useRef({ x: 0, y: 0, bottom: 0, right: 0 });
 
   const suggestions = useMemo(() => {
-    return [
-      t('copilot.suggestionOverspend'),
-      t('copilot.suggestionChange'),
-      t('copilot.suggestionYtd'),
-    ];
+    return [t('copilot.suggestionOverspend'), t('copilot.suggestionChange'), t('copilot.suggestionYtd')];
   }, [t]);
 
   // Auto-scroll to bottom when new message is added
@@ -85,17 +81,20 @@ export default function CopilotWidget() {
   }, [isOpen]);
 
   // Handle resize from top-left corner
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizing(true);
-    resizeStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      width: panelSize.width,
-      height: panelSize.height,
-    };
-  }, [panelSize]);
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsResizing(true);
+      resizeStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        width: panelSize.width,
+        height: panelSize.height,
+      };
+    },
+    [panelSize]
+  );
 
   useEffect(() => {
     if (!isResizing) return;
@@ -106,7 +105,10 @@ export default function CopilotWidget() {
       const deltaY = resizeStartRef.current.y - e.clientY;
 
       const newWidth = Math.max(MIN_WIDTH, Math.min(resizeStartRef.current.width + deltaX, window.innerWidth - 40));
-      const newHeight = Math.max(MIN_HEIGHT, Math.min(resizeStartRef.current.height + deltaY, window.innerHeight - 120));
+      const newHeight = Math.max(
+        MIN_HEIGHT,
+        Math.min(resizeStartRef.current.height + deltaY, window.innerHeight - 120)
+      );
 
       setPanelSize({ width: newWidth, height: newHeight });
     };
@@ -125,20 +127,23 @@ export default function CopilotWidget() {
   }, [isResizing]);
 
   // Handle drag from header
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    // Don't start drag if clicking on buttons
-    if ((e.target as HTMLElement).closest('button')) {
-      return;
-    }
-    e.preventDefault();
-    setIsDragging(true);
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      bottom: panelPosition.bottom,
-      right: panelPosition.right,
-    };
-  }, [panelPosition]);
+  const handleDragStart = useCallback(
+    (e: React.MouseEvent) => {
+      // Don't start drag if clicking on buttons
+      if ((e.target as HTMLElement).closest('button')) {
+        return;
+      }
+      e.preventDefault();
+      setIsDragging(true);
+      dragStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        bottom: panelPosition.bottom,
+        right: panelPosition.right,
+      };
+    },
+    [panelPosition]
+  );
 
   useEffect(() => {
     if (!isDragging) return;
@@ -149,7 +154,10 @@ export default function CopilotWidget() {
       const deltaY = e.clientY - dragStartRef.current.y;
 
       const newRight = Math.max(0, Math.min(dragStartRef.current.right - deltaX, window.innerWidth - panelSize.width));
-      const newBottom = Math.max(0, Math.min(dragStartRef.current.bottom - deltaY, window.innerHeight - panelSize.height));
+      const newBottom = Math.max(
+        0,
+        Math.min(dragStartRef.current.bottom - deltaY, window.innerHeight - panelSize.height)
+      );
 
       setPanelPosition({ bottom: newBottom, right: newRight });
     };
@@ -195,7 +203,7 @@ export default function CopilotWidget() {
         content: msg.type === 'question' ? msg.content : msg.answer?.summary || msg.content,
       }));
 
-      const answer = await askCopilot(trimmedQuestion, conversationHistory);
+      const answer = await askCopilot(trimmedQuestion, conversationHistory, year);
 
       // Add answer to messages
       const answerMessage: Message = {
@@ -275,10 +283,7 @@ export default function CopilotWidget() {
           }}
         >
           {/* Top-left resize handle */}
-          <div
-            className="copilot-widget-resize-handle"
-            onMouseDown={handleResizeStart}
-          />
+          <div className="copilot-widget-resize-handle" onMouseDown={handleResizeStart} />
           <div
             className="copilot-widget-header"
             onMouseDown={handleDragStart}
@@ -357,7 +362,8 @@ export default function CopilotWidget() {
                                   {item.reason}
                                   {item.value !== undefined && item.metric && (
                                     <span className="copilot-widget-metric">
-                                      {' '}({item.metric}: {item.value})
+                                      {' '}
+                                      ({item.metric}: {item.value})
                                     </span>
                                   )}
                                 </li>
@@ -402,11 +408,7 @@ export default function CopilotWidget() {
             )}
           </div>
 
-          {error && (
-            <div className="copilot-widget-error">
-              {error}
-            </div>
-          )}
+          {error && <div className="copilot-widget-error">{error}</div>}
 
           <div className="copilot-widget-input">
             <form onSubmit={handleSubmit}>
@@ -419,15 +421,17 @@ export default function CopilotWidget() {
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={handleKeyDown}
               />
-              <button
-                type="submit"
-                className="copilot-widget-submit"
-                disabled={isLoading || !question.trim()}
-              >
+              <button type="submit" className="copilot-widget-submit" disabled={isLoading || !question.trim()}>
                 {isLoading ? (
                   <svg className="copilot-widget-spinner" width="20" height="20" viewBox="0 0 24 24">
                     <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-                    <path d="M12 2a10 10 0 0 1 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <path
+                      d="M12 2a10 10 0 0 1 10 10"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
                   </svg>
                 ) : (
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

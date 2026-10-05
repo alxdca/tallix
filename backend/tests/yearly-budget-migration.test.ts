@@ -7,7 +7,13 @@ import postgres from 'postgres';
 import { expect, test } from 'vitest';
 import { withTenantContext, withUserContext } from '../src/db/context.js';
 import * as schema from '../src/db/schema.js';
-import { createYearlyBudget, getAccessibleBudget, shareBudgetWithUser } from '../src/services/budgets.js';
+import { createYear } from '../src/services/budget.js';
+import {
+  createYearlyBudget,
+  getAccessibleBudget,
+  listAccessibleBudgets,
+  shareBudgetWithUser,
+} from '../src/services/budgets.js';
 
 const {
   users,
@@ -500,6 +506,90 @@ test('same-year budgets remain independently shareable under RLS', async () => {
     await expect(
       withUserContext(collaborator.id, (tx) => getAccessibleBudget(tx, collaborator.id, budgetB.id))
     ).resolves.toBeNull();
+  } finally {
+    await superuserDb.delete(users).where(sql`email IN (${ownerEmail}, ${collaboratorEmail})`);
+    await superuserClient.end();
+  }
+});
+
+test('accessible budget listing loads years for owned and shared budgets under RLS', async () => {
+  const superuserClient = postgres(buildSuperuserUrl(), { max: 1 });
+  const superuserDb = drizzle(superuserClient, { schema });
+  const ownerEmail = `yearly-list-owner-${Date.now()}@test.com`;
+  const collaboratorEmail = `yearly-list-collab-${Date.now()}@test.com`;
+  try {
+    const [owner] = await superuserDb.insert(users).values({ email: ownerEmail, passwordHash: 'hash' }).returning();
+    const [collaborator] = await superuserDb
+      .insert(users)
+      .values({ email: collaboratorEmail, passwordHash: 'hash' })
+      .returning();
+
+    const household = await withUserContext(owner.id, (tx) => createYearlyBudget(tx, owner.id, 9050, 'Household'));
+    const personal = await withUserContext(owner.id, (tx) => createYearlyBudget(tx, owner.id, 9052, 'Personal'));
+    await superuserDb.insert(budgetYears).values({ budgetId: household.id, year: 9051 });
+
+    await withTenantContext(owner.id, household.id, (tx) =>
+      shareBudgetWithUser(tx, household.id, owner.id, collaboratorEmail, 'read')
+    );
+
+    const ownerBudgets = await withUserContext(owner.id, (tx) => listAccessibleBudgets(tx, owner.id));
+    expect(ownerBudgets.find((budget) => budget.id === household.id)?.years).toEqual([9050, 9051]);
+    expect(ownerBudgets.find((budget) => budget.id === personal.id)?.years).toEqual([9052]);
+
+    const collaboratorBudgets = await withUserContext(collaborator.id, (tx) =>
+      listAccessibleBudgets(tx, collaborator.id)
+    );
+    expect(collaboratorBudgets).toHaveLength(1);
+    expect(collaboratorBudgets[0]).toMatchObject({
+      id: household.id,
+      role: 'read',
+      years: [9050, 9051],
+    });
+  } finally {
+    await superuserDb.delete(users).where(sql`email IN (${ownerEmail}, ${collaboratorEmail})`);
+    await superuserClient.end();
+  }
+});
+
+test('top-level write shares allow creating future years while read shares only list them', async () => {
+  const superuserClient = postgres(buildSuperuserUrl(), { max: 1 });
+  const superuserDb = drizzle(superuserClient, { schema });
+  const ownerEmail = `yearly-write-share-owner-${Date.now()}@test.com`;
+  const collaboratorEmail = `yearly-write-share-collab-${Date.now()}@test.com`;
+  try {
+    const [owner] = await superuserDb.insert(users).values({ email: ownerEmail, passwordHash: 'hash' }).returning();
+    const [collaborator] = await superuserDb
+      .insert(users)
+      .values({ email: collaboratorEmail, passwordHash: 'hash' })
+      .returning();
+
+    const household = await withUserContext(owner.id, (tx) => createYearlyBudget(tx, owner.id, 9060, 'Household'));
+    const personal = await withUserContext(owner.id, (tx) => createYearlyBudget(tx, owner.id, 9065, 'Personal'));
+
+    await withTenantContext(owner.id, household.id, (tx) =>
+      shareBudgetWithUser(tx, household.id, owner.id, collaboratorEmail, 'write')
+    );
+    await withTenantContext(collaborator.id, household.id, (tx) => createYear(tx, 9061, 0, household.id, owner.id));
+
+    await superuserDb
+      .update(budgetShares)
+      .set({ role: 'read' })
+      .where(sql`budget_id = ${household.id} AND user_id = ${collaborator.id}`);
+
+    const collaboratorBudgets = await withUserContext(collaborator.id, (tx) =>
+      listAccessibleBudgets(tx, collaborator.id)
+    );
+    expect(collaboratorBudgets).toHaveLength(1);
+    expect(collaboratorBudgets[0]).toMatchObject({
+      id: household.id,
+      role: 'read',
+      years: [9060, 9061],
+    });
+    expect(collaboratorBudgets.some((budget) => budget.id === personal.id)).toBe(false);
+
+    await expect(
+      withTenantContext(collaborator.id, household.id, (tx) => createYear(tx, 9062, 0, household.id, owner.id))
+    ).rejects.toThrow();
   } finally {
     await superuserDb.delete(users).where(sql`email IN (${ownerEmail}, ${collaboratorEmail})`);
     await superuserClient.end();

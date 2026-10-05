@@ -1,16 +1,20 @@
-import { type Request, type Router as RouterType, Router } from 'express';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { type Request, Router, type Router as RouterType } from 'express';
 import { withTenantContext } from '../db/context.js';
+import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import * as budgetSvc from '../services/budget.js';
 import * as transfersSvc from '../services/transfers.js';
 
 const router: RouterType = Router();
 
-function parseSelectedYear(req: Request): number {
+async function parseSelectedYear(req: Request): Promise<number> {
   const year = parseInt(req.params.year, 10);
   if (Number.isNaN(year)) {
     throw new AppError(400, 'Invalid year');
   }
-  if (year !== req.budget!.startYear) {
+  const budgetId = req.budget!.id;
+  const userId = req.user!.id;
+  const existing = await withTenantContext(userId, budgetId, (tx) => budgetSvc.getBudgetYear(tx, year, budgetId));
+  if (!existing) {
     throw new AppError(404, 'Budget year not found');
   }
   return year;
@@ -20,7 +24,7 @@ function parseSelectedYear(req: Request): number {
 router.get(
   '/:year',
   asyncHandler(async (req, res) => {
-    const year = parseSelectedYear(req);
+    const year = await parseSelectedYear(req);
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const ownerId = req.budget!.userId;
@@ -35,13 +39,11 @@ router.get(
 router.get(
   '/:year/accounts',
   asyncHandler(async (req, res) => {
-    parseSelectedYear(req);
+    await parseSelectedYear(req);
     const userId = req.user!.id;
     const budgetId = req.budget!.id;
     const ownerId = req.budget!.userId;
-    const accounts = await withTenantContext(userId, budgetId, (tx) =>
-      transfersSvc.getAvailableAccounts(tx, ownerId)
-    );
+    const accounts = await withTenantContext(userId, budgetId, (tx) => transfersSvc.getAvailableAccounts(tx, ownerId));
     res.json(accounts);
   })
 );
@@ -50,7 +52,7 @@ router.get(
 router.post(
   '/:year',
   asyncHandler(async (req, res) => {
-    const year = parseSelectedYear(req);
+    const year = await parseSelectedYear(req);
 
     const { date, amount, description, sourceAccountId, destinationAccountId, accountingMonth, accountingYear } =
       req.body;
@@ -67,15 +69,21 @@ router.post(
     const userId = req.user!.id;
     const ownerId = req.budget!.userId;
     const transfer = await withTenantContext(userId, budgetId, (tx) =>
-      transfersSvc.createTransfer(tx, year, {
-        date,
-        amount: parseFloat(amount),
-        description,
-        sourceAccountId: parseInt(sourceAccountId, 10),
-        destinationAccountId: parseInt(destinationAccountId, 10),
-        accountingMonth: accountingMonth ? parseInt(accountingMonth, 10) : undefined,
-        accountingYear: accountingYear ? parseInt(accountingYear, 10) : undefined,
-      }, budgetId, ownerId)
+      transfersSvc.createTransfer(
+        tx,
+        year,
+        {
+          date,
+          amount: parseFloat(amount),
+          description,
+          sourceAccountId: parseInt(sourceAccountId, 10),
+          destinationAccountId: parseInt(destinationAccountId, 10),
+          accountingMonth: accountingMonth ? parseInt(accountingMonth, 10) : undefined,
+          accountingYear: accountingYear ? parseInt(accountingYear, 10) : undefined,
+        },
+        budgetId,
+        ownerId
+      )
     );
 
     res.status(201).json(transfer);
@@ -98,15 +106,21 @@ router.put(
     const userId = req.user!.id;
     const ownerId = req.budget!.userId;
     const transfer = await withTenantContext(userId, budgetId, (tx) =>
-      transfersSvc.updateTransfer(tx, id, {
-        date,
-        amount: amount !== undefined ? parseFloat(amount) : undefined,
-        description,
-        sourceAccountId: sourceAccountId !== undefined ? parseInt(sourceAccountId, 10) : undefined,
-        destinationAccountId: destinationAccountId !== undefined ? parseInt(destinationAccountId, 10) : undefined,
-        accountingMonth: accountingMonth !== undefined ? parseInt(accountingMonth, 10) : undefined,
-        accountingYear: accountingYear !== undefined ? parseInt(accountingYear, 10) : undefined,
-      }, budgetId, ownerId)
+      transfersSvc.updateTransfer(
+        tx,
+        id,
+        {
+          date,
+          amount: amount !== undefined ? parseFloat(amount) : undefined,
+          description,
+          sourceAccountId: sourceAccountId !== undefined ? parseInt(sourceAccountId, 10) : undefined,
+          destinationAccountId: destinationAccountId !== undefined ? parseInt(destinationAccountId, 10) : undefined,
+          accountingMonth: accountingMonth !== undefined ? parseInt(accountingMonth, 10) : undefined,
+          accountingYear: accountingYear !== undefined ? parseInt(accountingYear, 10) : undefined,
+        },
+        budgetId,
+        ownerId
+      )
     );
 
     if (!transfer) {
@@ -128,9 +142,7 @@ router.delete(
 
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    const deleted = await withTenantContext(userId, budgetId, (tx) =>
-      transfersSvc.deleteTransfer(tx, id, budgetId)
-    );
+    const deleted = await withTenantContext(userId, budgetId, (tx) => transfersSvc.deleteTransfer(tx, id, budgetId));
 
     if (!deleted) {
       throw new AppError(404, 'Transfer not found');

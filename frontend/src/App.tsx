@@ -4,6 +4,7 @@ import {
   type AccessibleBudget,
   type Account,
   createBudget,
+  createBudgetYear,
   deleteBudget,
   fetchAccounts,
   fetchBudgetData,
@@ -43,6 +44,15 @@ interface ExpectedBreakdownByType {
   savings: ExpectedBreakdown;
 }
 
+const budgetYearKey = (budgetId: number) => `tallix_active_budget_year:${budgetId}`;
+
+function rememberedBudgetYear(budget: AccessibleBudget): number {
+  const stored = Number(localStorage.getItem(budgetYearKey(budget.id)));
+  if (budget.years.includes(stored)) return stored;
+  const currentYear = new Date().getFullYear();
+  return budget.years.includes(currentYear) ? currentYear : Math.max(...budget.years);
+}
+
 function AppContent() {
   const [budgetData, setBudgetData] = useState<BudgetData | null>(null);
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
@@ -57,6 +67,7 @@ function AppContent() {
     const stored = Number.parseInt(localStorage.getItem(ACTIVE_BUDGET_KEY) || '', 10);
     return Number.isNaN(stored) ? null : stored;
   });
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const requestVersion = useRef(0);
   const [budgetsReady, setBudgetsReady] = useState(false);
   const { t, monthNames } = useI18n();
@@ -71,6 +82,10 @@ function AppContent() {
         const selectedId = budgets.some((budget) => budget.id === storedId) ? storedId : defaultBudgetId;
         localStorage.setItem(ACTIVE_BUDGET_KEY, String(selectedId));
         setActiveBudgetId(selectedId);
+        const selectedBudget = budgets.find((budget) => budget.id === selectedId)!;
+        const year = rememberedBudgetYear(selectedBudget);
+        localStorage.setItem(budgetYearKey(selectedId), String(year));
+        setSelectedYear(year);
         setBudgetsReady(true);
       })
       .catch((err) => {
@@ -108,7 +123,6 @@ function AppContent() {
   }, [paymentAccounts]);
 
   const activeBudget = availableBudgets.find((budget) => budget.id === activeBudgetId) ?? null;
-  const selectedYear = activeBudget?.year ?? new Date().getFullYear();
 
   const expectedBreakdown = useMemo<ExpectedBreakdownByType>(() => {
     const empty: ExpectedBreakdownByType = {
@@ -191,26 +205,79 @@ function AppContent() {
   const currentYear = selectedYear;
   const yearId = budgetData?.yearId || 0;
 
-  const handleBudgetChange = useCallback((budgetId: number, view = 'current') => {
+  const resetBudgetData = useCallback(() => {
     requestVersion.current += 1;
     setLoading(true);
     setError(null);
     setBudgetData(null);
     setSummary(null);
     setAccounts([]);
-    localStorage.setItem(ACTIVE_BUDGET_KEY, String(budgetId));
-    setActiveBudgetId(budgetId);
-    setActiveView(view);
   }, []);
+
+  const handleBudgetChange = useCallback(
+    (budgetId: number, view = 'current', budget?: AccessibleBudget) => {
+      const nextBudget = budget ?? availableBudgets.find((candidate) => candidate.id === budgetId);
+      if (!nextBudget) return;
+      resetBudgetData();
+      const year = rememberedBudgetYear(nextBudget);
+      localStorage.setItem(ACTIVE_BUDGET_KEY, String(budgetId));
+      localStorage.setItem(budgetYearKey(budgetId), String(year));
+      setActiveBudgetId(budgetId);
+      setSelectedYear(year);
+      setActiveView(view);
+    },
+    [availableBudgets, resetBudgetData]
+  );
+
+  const handleYearChange = useCallback(
+    (year: number) => {
+      if (!activeBudget?.years.includes(year) || selectedYear === year) return;
+      resetBudgetData();
+      localStorage.setItem(budgetYearKey(activeBudget.id), String(year));
+      setSelectedYear(year);
+    },
+    [activeBudget, selectedYear, resetBudgetData]
+  );
+
+  const handleCreateYear = useCallback(
+    async (year: number) => {
+      if (!activeBudget || activeBudget.role === 'read') return;
+      const budgetId = activeBudget.id;
+      const version = requestVersion.current;
+      const created = await createBudgetYear(year);
+      setAvailableBudgets((current) =>
+        current.map((budget) =>
+          budget.id === budgetId
+            ? { ...budget, years: [...new Set([...budget.years, created.year])].sort((a, b) => a - b) }
+            : budget
+        )
+      );
+      if (localStorage.getItem(ACTIVE_BUDGET_KEY) === String(budgetId) && version === requestVersion.current) {
+        resetBudgetData();
+        localStorage.setItem(budgetYearKey(budgetId), String(created.year));
+        setSelectedYear(created.year);
+        setActiveView('current');
+      }
+    },
+    [activeBudget, resetBudgetData]
+  );
 
   const handleCreateBudget = useCallback(
     async (year: number, description: string, parentBudgetId: number | null) => {
       const budget = await createBudget(year, description.trim(), parentBudgetId);
       setAvailableBudgets((current) => [...current, budget]);
-      handleBudgetChange(budget.id);
+      handleBudgetChange(budget.id, 'current', budget);
     },
     [handleBudgetChange]
   );
+
+  const handleBudgetRestored = useCallback(async () => {
+    const { budgets } = await fetchBudgets();
+    setAvailableBudgets(budgets);
+    if (localStorage.getItem(ACTIVE_BUDGET_KEY) !== String(activeBudgetId)) return;
+    const restoredBudget = budgets.find((budget) => budget.id === activeBudgetId);
+    if (restoredBudget) handleBudgetChange(restoredBudget.id, 'settings', restoredBudget);
+  }, [activeBudgetId, handleBudgetChange]);
 
   const handleDeleteBudget = useCallback(
     async (budgetId: number) => {
@@ -218,7 +285,11 @@ function AppContent() {
       setAvailableBudgets(budgets);
       const selectedId = Number(localStorage.getItem(ACTIVE_BUDGET_KEY));
       if (!budgets.some((budget) => budget.id === selectedId)) {
-        handleBudgetChange(defaultBudgetId, 'user-settings');
+        handleBudgetChange(
+          defaultBudgetId,
+          'user-settings',
+          budgets.find((budget) => budget.id === defaultBudgetId)
+        );
       }
     },
     [handleBudgetChange]
@@ -245,6 +316,7 @@ function AppContent() {
           activeBudgetId={activeBudgetId}
           onCreateBudget={handleCreateBudget}
           onDeleteBudget={handleDeleteBudget}
+          onCreateYear={handleCreateYear}
         />
       );
     }
@@ -300,6 +372,7 @@ function AppContent() {
             groups={budgetData?.groups || []}
             onDataChanged={refreshData}
             accessRole={activeBudget?.role || 'owner'}
+            onBudgetRestored={handleBudgetRestored}
           />
         );
       case 'accounts':
@@ -337,8 +410,10 @@ function AppContent() {
         budgets={availableBudgets}
         activeBudgetId={activeBudgetId}
         onBudgetChange={handleBudgetChange}
+        selectedYear={selectedYear}
+        onYearChange={handleYearChange}
       />
-      <main className="main-content" key={activeBudgetId}>
+      <main className="main-content" key={`${activeBudgetId}-${selectedYear}`}>
         {activeBudget?.role === 'read' && <div className="read-only-banner">{t('sharing.readOnlyBanner')}</div>}
         {showBudgetHeader && (
           <Header
@@ -359,7 +434,7 @@ function AppContent() {
         )}
         {renderContent()}
       </main>
-      <CopilotWidget key={`copilot-${activeBudgetId}`} />
+      <CopilotWidget key={`copilot-${activeBudgetId}-${selectedYear}`} year={selectedYear} />
     </div>
   );
 }

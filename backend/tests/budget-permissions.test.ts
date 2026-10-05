@@ -99,7 +99,21 @@ describe('yearly budget collaboration', () => {
         budgetShares: {
           findMany: vi.fn().mockResolvedValue([{ budgetId: 11, userId: 'owner-id', role: 'write' }]),
         },
+        budgetYears: {
+          findMany: vi
+            .fn()
+            .mockResolvedValueOnce([{ year: 2026 }, { year: 2027 }])
+            .mockResolvedValueOnce([{ year: 2026 }]),
+        },
       },
+      execute: vi
+        .fn()
+        .mockResolvedValueOnce([{ budgetId: null }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ budgetId: null }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined),
     } as unknown as DbClient;
 
     await expect(listAccessibleBudgets(tx, 'owner-id')).resolves.toEqual([
@@ -108,6 +122,7 @@ describe('yearly budget collaboration', () => {
         description: 'Household',
         year: 2026,
         startYear: 2026,
+        years: [2026, 2027],
         parentBudgetId: null,
         ownerId: 'owner-id',
         ownerName: 'Owner',
@@ -119,6 +134,7 @@ describe('yearly budget collaboration', () => {
         description: 'Travel',
         year: 2026,
         startYear: 2026,
+        years: [2026],
         parentBudgetId: null,
         ownerId: 'friend-id',
         ownerName: 'Friend',
@@ -160,19 +176,20 @@ describe('yearly budget collaboration', () => {
       }),
       query: {
         budgets: {
-          findFirst: vi
-            .fn()
-            .mockResolvedValueOnce({ startYear: 2026 })
-            .mockResolvedValueOnce({
-              id: 42,
-              userId: 'owner-id',
-              description: 'Travel',
-              startYear: 2026,
-              parentBudgetId: null,
-              user: { name: 'Owner', email: 'owner@example.com' },
-            }),
+          findFirst: vi.fn().mockResolvedValueOnce({
+            id: 42,
+            userId: 'owner-id',
+            description: 'Travel',
+            startYear: 2026,
+            years: [{ year: 2026 }],
+            parentBudgetId: null,
+            user: { name: 'Owner', email: 'owner@example.com' },
+          }),
         },
         budgetYears: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
+        budgetItems: {
           findFirst: vi.fn().mockResolvedValue(null),
         },
         paymentMethods: {
@@ -191,6 +208,7 @@ describe('yearly budget collaboration', () => {
       description: 'Travel',
       year: 2026,
       startYear: 2026,
+      years: [2026],
       parentBudgetId: null,
       ownerId: 'owner-id',
       ownerName: 'Owner',

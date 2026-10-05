@@ -1,6 +1,7 @@
-import { Router, type Router as RouterType } from 'express';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { type Request, Router, type Router as RouterType } from 'express';
 import { withTenantContext } from '../db/context.js';
+import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import * as budgetSvc from '../services/budget.js';
 import * as transactionsSvc from '../services/transactions.js';
 
 const router: RouterType = Router();
@@ -10,6 +11,20 @@ function mapTransactionWriteError(error: unknown): never {
     throw new AppError(400, error.message);
   }
   throw error;
+}
+
+async function parseSelectedYear(req: Request): Promise<number> {
+  const year = parseInt(req.params.year, 10);
+  if (Number.isNaN(year)) {
+    throw new AppError(400, 'Invalid year');
+  }
+  const budgetId = req.budget!.id;
+  const userId = req.user!.id;
+  const existing = await withTenantContext(userId, budgetId, (tx) => budgetSvc.getBudgetYear(tx, year, budgetId));
+  if (!existing) {
+    throw new AppError(404, 'Budget year not found');
+  }
+  return year;
 }
 
 // GET /api/transactions/third-parties - Get distinct third parties for autocomplete
@@ -44,13 +59,7 @@ router.get(
 router.get(
   '/year/:year',
   asyncHandler(async (req, res) => {
-    const year = parseInt(req.params.year, 10);
-    if (Number.isNaN(year)) {
-      throw new AppError(400, 'Invalid year');
-    }
-    if (year !== req.budget!.startYear) {
-      throw new AppError(404, 'Budget year not found');
-    }
+    const year = await parseSelectedYear(req);
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const transactions = await withTenantContext(userId, budgetId, (tx) =>
@@ -66,8 +75,16 @@ router.post(
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const {
-      yearId, itemId, date, description, comment, thirdParty,
-      paymentMethodId, amount, accountingMonth, accountingYear,
+      yearId,
+      itemId,
+      date,
+      description,
+      comment,
+      thirdParty,
+      paymentMethodId,
+      amount,
+      accountingMonth,
+      accountingYear,
     } = req.body;
 
     if (!yearId || !date || !paymentMethodId || amount === undefined) {
@@ -79,10 +96,24 @@ router.post(
     let newTransaction: Awaited<ReturnType<typeof transactionsSvc.createTransaction>>;
     try {
       newTransaction = await withTenantContext(userId, budgetId, (tx) =>
-        transactionsSvc.createTransaction(tx, userId, budgetId, {
-          yearId, itemId, date, description, comment, thirdParty,
-          paymentMethodId, amount, accountingMonth, accountingYear,
-        }, ownerId)
+        transactionsSvc.createTransaction(
+          tx,
+          userId,
+          budgetId,
+          {
+            yearId,
+            itemId,
+            date,
+            description,
+            comment,
+            thirdParty,
+            paymentMethodId,
+            amount,
+            accountingMonth,
+            accountingYear,
+          },
+          ownerId
+        )
       );
     } catch (error) {
       mapTransactionWriteError(error);
@@ -132,8 +163,16 @@ router.put(
     }
 
     const {
-      itemId, date, description, comment, thirdParty, paymentMethodId,
-      amount, accountingMonth, accountingYear, recalculateAccounting,
+      itemId,
+      date,
+      description,
+      comment,
+      thirdParty,
+      paymentMethodId,
+      amount,
+      accountingMonth,
+      accountingYear,
+      recalculateAccounting,
     } = req.body;
 
     const budgetId = req.budget!.id;
@@ -141,10 +180,25 @@ router.put(
     let updated: Awaited<ReturnType<typeof transactionsSvc.updateTransaction>>;
     try {
       updated = await withTenantContext(userId, budgetId, (tx) =>
-        transactionsSvc.updateTransaction(tx, userId, budgetId, id, {
-          itemId, date, description, comment, thirdParty, paymentMethodId,
-          amount, accountingMonth, accountingYear, recalculateAccounting,
-        }, ownerId)
+        transactionsSvc.updateTransaction(
+          tx,
+          userId,
+          budgetId,
+          id,
+          {
+            itemId,
+            date,
+            description,
+            comment,
+            thirdParty,
+            paymentMethodId,
+            amount,
+            accountingMonth,
+            accountingYear,
+            recalculateAccounting,
+          },
+          ownerId
+        )
       );
     } catch (error) {
       mapTransactionWriteError(error);
@@ -171,9 +225,16 @@ router.post(
     const budgetId = req.budget!.id;
     const ownerId = req.budget!.userId;
     const updated = await withTenantContext(userId, budgetId, (tx) =>
-      transactionsSvc.updateTransaction(tx, userId, budgetId, id, {
-        warning: null,
-      }, ownerId)
+      transactionsSvc.updateTransaction(
+        tx,
+        userId,
+        budgetId,
+        id,
+        {
+          warning: null,
+        },
+        ownerId
+      )
     );
 
     if (!updated) {

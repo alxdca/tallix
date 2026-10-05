@@ -17,6 +17,7 @@ vi.mock('./contexts/AuthContext', () => ({
 vi.mock('./api', () => ({
   ACTIVE_BUDGET_KEY: 'tallix_active_budget_id',
   createBudget: vi.fn(),
+  createBudgetYear: vi.fn(),
   deleteBudget: vi.fn(),
   fetchAccounts: vi.fn(),
   fetchBudgetData: vi.fn(),
@@ -35,6 +36,17 @@ vi.mock('./components/Sidebar', () => ({
         {props.budgets.map((budget: any) => (
           <option key={budget.id} value={budget.id}>
             {budget.year} {budget.description || budget.ownerName || budget.ownerEmail}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Year"
+        value={props.selectedYear}
+        onChange={(event) => props.onYearChange(Number(event.currentTarget.value))}
+      >
+        {(props.budgets.find((budget: any) => budget.id === props.activeBudgetId)?.years ?? []).map((year: number) => (
+          <option key={year} value={year}>
+            {year}
           </option>
         ))}
       </select>
@@ -78,6 +90,9 @@ vi.mock('./components/Settings', () => ({
   default: (props: any) => (
     <div data-testid="settings">
       Settings year-id {props.yearId} role {props.accessRole}
+      <button type="button" onClick={() => void props.onBudgetRestored()}>
+        Restore budget
+      </button>
     </div>
   ),
 }));
@@ -114,11 +129,11 @@ vi.mock('./components/UserSettings', () => ({
   default: (props: any) => (
     <div data-testid="user-settings">
       User settings active {props.activeBudgetId}
+      <button type="button" onClick={() => void props.onCreateYear(2028).catch(() => undefined)}>
+        Add 2028
+      </button>
       <button type="button" onClick={() => void props.onCreateBudget(2030, 'Roadtrip', null).catch(() => undefined)}>
         Create 2030
-      </button>
-      <button type="button" onClick={() => void props.onCreateBudget(2031, 'Roadtrip child', 1).catch(() => undefined)}>
-        Create 2031 from 1
       </button>
       {props.budgets.map((budget: any) => (
         <button
@@ -146,7 +161,7 @@ const mockedApi = vi.mocked(api);
 const mountedRoots: Root[] = [];
 
 const accessibleBudgets = [
-  budget({ id: 1, year: 2026, description: 'Current', role: 'owner' }),
+  budget({ id: 1, year: 2026, years: [2025, 2026], description: 'Current', role: 'owner' }),
   budget({ id: 2, year: 2025, description: 'Last year', role: 'owner' }),
   budget({ id: 3, year: 2027, description: null, ownerName: 'Morgan', ownerEmail: 'morgan@example.com', role: 'read' }),
   budget({
@@ -168,6 +183,7 @@ function budget(overrides: any) {
     ownerName: null,
     ownerEmail: 'owner@example.com',
     parentBudgetId: null,
+    years: [overrides.year ?? 2026],
     role: 'owner',
     ...overrides,
   };
@@ -220,6 +236,7 @@ function setupApi() {
   mockedApi.fetchBudgetData.mockImplementation(async (year = 2026) => budgetData(year));
   mockedApi.fetchBudgetSummary.mockImplementation(async (year = 2026) => summary(year));
   mockedApi.fetchAccounts.mockImplementation(async (year: number) => accounts(year));
+  mockedApi.createBudgetYear.mockResolvedValue({ id: 20280, year: 2028 });
   mockedApi.createBudget.mockResolvedValue(budget({ id: 4, year: 2030, description: 'Roadtrip' }) as any);
   mockedApi.deleteBudget.mockResolvedValue({ budgets: accessibleBudgets.slice(1) as any, defaultBudgetId: 2 });
 }
@@ -300,7 +317,7 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-describe('yearly budget selection', () => {
+describe('budget and year selection', () => {
   it('loads data, summary and accounts for the selected budget year when switching past and future budgets', async () => {
     const { container } = await renderApp();
     await waitForText(container, 'Header 2026 remaining 2726');
@@ -323,7 +340,7 @@ describe('yearly budget selection', () => {
     expect(container.textContent).toContain('You have read-only access to this budget');
   });
 
-  it('creates a yearly budget from user settings and selects the returned budget', async () => {
+  it('creates a named budget with its initial year from user settings and selects the returned budget', async () => {
     const { container } = await renderApp();
     await waitForText(container, 'Header 2026 remaining 2726');
 
@@ -337,23 +354,6 @@ describe('yearly budget selection', () => {
     expect(mockedApi.fetchBudgetData).toHaveBeenCalledWith(2030);
     expect(mockedApi.fetchBudgetSummary).toHaveBeenCalledWith(2030);
     expect(mockedApi.fetchAccounts).toHaveBeenCalledWith(2030);
-  });
-
-  it('passes the selected parent budget when creating from user settings', async () => {
-    mockedApi.createBudget.mockResolvedValueOnce(
-      budget({ id: 6, year: 2031, description: 'Roadtrip child', parentBudgetId: 1 }) as any
-    );
-    const { container } = await renderApp();
-    await waitForText(container, 'Header 2026 remaining 2726');
-
-    click(container, 'My account');
-    await waitForText(container, 'User settings active 1');
-    click(container, 'Create 2031 from 1');
-    await waitForText(container, 'Header 2031 remaining 2731');
-
-    expect(mockedApi.createBudget).toHaveBeenCalledWith(2031, 'Roadtrip child', 1);
-    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('6');
-    expect(mockedApi.fetchBudgetData).toHaveBeenCalledWith(2031);
   });
 
   it('keeps the current budget selected when budget creation fails', async () => {
@@ -517,5 +517,107 @@ describe('yearly budget selection', () => {
     expect(container.querySelector<HTMLSelectElement>('select[aria-label="Budget"]')?.value).toBe('3');
     expect(container.textContent).toContain('Header 2027 remaining 2727');
     expect(mockedApi.fetchBudgetData).not.toHaveBeenCalledWith(2025);
+  });
+
+  it('switches years within the same budget and remembers each budget selection', async () => {
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    act(() => {
+      const select = container.querySelector<HTMLSelectElement>('select[aria-label="Year"]')!;
+      select.value = '2025';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await waitForText(container, 'Header 2025');
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('1');
+    expect(mockedApi.fetchAccounts).toHaveBeenCalledWith(2025);
+    changeBudget(container, '3');
+    await waitForText(container, 'Header 2027');
+    changeBudget(container, '1');
+    await waitForText(container, 'Header 2025');
+  });
+
+  it('adds a year to the active budget without creating a new budget', async () => {
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    click(container, 'My account');
+    click(container, 'Add 2028');
+    await waitForText(container, 'Header 2028');
+    expect(mockedApi.createBudgetYear).toHaveBeenCalledWith(2028);
+    expect(mockedApi.createBudget).not.toHaveBeenCalled();
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('1');
+    expect(container.querySelectorAll('select[aria-label="Budget"] option')).toHaveLength(4);
+  });
+
+  it('ignores a saved year that does not belong to the selected budget', async () => {
+    localStorage.setItem('tallix_active_budget_year:1', '1999');
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    expect(mockedApi.fetchBudgetData).not.toHaveBeenCalledWith(1999);
+  });
+  it('does not let a slower previous year response overwrite the latest year', async () => {
+    const pending = deferred<BudgetData>();
+    mockedApi.fetchBudgetData.mockImplementation((year = 2026) =>
+      year === 2025 ? pending.promise : Promise.resolve(budgetData(year))
+    );
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    const changeYear = (year: string) =>
+      act(() => {
+        const select = container.querySelector<HTMLSelectElement>('select[aria-label="Year"]')!;
+        select.value = year;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    changeYear('2025');
+    changeYear('2026');
+    await waitForText(container, 'Header 2026');
+    pending.resolve(budgetData(2025));
+    await flush();
+    expect(container.textContent).toContain('Spreadsheet 2026');
+    expect(container.textContent).not.toContain('Header 2025');
+  });
+
+  it('keeps the latest budget selected when an add-year response arrives after switching', async () => {
+    const pending = deferred<{ id: number; year: number }>();
+    mockedApi.createBudgetYear.mockReturnValueOnce(pending.promise);
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    click(container, 'My account');
+    click(container, 'Add 2028');
+    changeBudget(container, '3');
+    await waitForText(container, 'Header 2027');
+    pending.resolve({ id: 20280, year: 2028 });
+    await flush();
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('3');
+    expect(container.textContent).toContain('Header 2027');
+    changeBudget(container, '1');
+    await waitForText(container, 'Header 2026');
+    expect(container.querySelector('select[aria-label="Year"] option[value="2028"]')).not.toBeNull();
+  });
+
+  it('preserves the selected year when adding a year fails', async () => {
+    mockedApi.createBudgetYear.mockRejectedValueOnce(new Error('network down'));
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    click(container, 'My account');
+    click(container, 'Add 2028');
+    await flush();
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('1');
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="Year"]')?.value).toBe('2026');
+    expect(container.querySelector('select[aria-label="Year"] option[value="2028"]')).toBeNull();
+  });
+  it('refreshes year choices and replaces a missing selected year after restoring a budget', async () => {
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    mockedApi.fetchBudgets.mockResolvedValueOnce({
+      budgets: [budget({ id: 1, year: 2027, years: [2027, 2028] }), ...accessibleBudgets.slice(1)],
+      defaultBudgetId: 1,
+    });
+    click(container, 'Settings');
+    click(container, 'Restore budget');
+    await waitForText(container, 'Settings year-id 20280');
+    expect(
+      Array.from(container.querySelectorAll('select[aria-label="Year"] option'), (option) => option.textContent)
+    ).toEqual(['2027', '2028']);
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('1');
   });
 });

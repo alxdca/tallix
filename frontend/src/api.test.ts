@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ACTIVE_BUDGET_KEY,
+  askCopilot,
   createBudget,
+  createBudgetYear,
   deleteBudget,
   fetchAccounts,
   fetchBudgetData,
   fetchBudgetSummary,
+  shareBudget,
 } from './api';
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
@@ -158,5 +161,36 @@ describe('budget api year routing', () => {
       code: 'AUTH_NO_TOKEN',
       status: 401,
     });
+  });
+  it('creates a year inside the active budget', async () => {
+    localStorage.setItem(ACTIVE_BUDGET_KEY, '42');
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 78, year: 2028 }));
+    await createBudgetYear(2028);
+    expect(fetchMock).toHaveBeenCalledWith('/api/budget/years', {
+      method: 'POST',
+      body: JSON.stringify({ year: 2028 }),
+      headers: { 'Content-Type': 'application/json', 'X-Budget-Id': '42' },
+    });
+  });
+
+  it('shares the parent budget without limiting access to a year', async () => {
+    localStorage.setItem(ACTIVE_BUDGET_KEY, '42');
+    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+    await shareBudget('reader@example.com', 'read');
+    expect(fetchMock).toHaveBeenCalledWith('/api/budgets/current/shares', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'reader@example.com', role: 'read' }),
+      headers: { 'Content-Type': 'application/json', 'X-Budget-Id': '42' },
+    });
+  });
+
+  it('asks copilot with the selected year as its default context', async () => {
+    await askCopilot('What did I spend?', [], 2025);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/copilot/ask',
+      expect.objectContaining({
+        body: JSON.stringify({ question: 'What did I spend?', conversationHistory: [], year: 2025 }),
+      })
+    );
   });
 });

@@ -5,7 +5,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { withInheritedBalanceReadContext, withTenantContext, withUserContext } from '../src/db/context.js';
 import * as schema from '../src/db/schema.js';
 import { getAccountsForYear, setAccountBalance } from '../src/services/accounts.js';
-import { getBudgetSummary } from '../src/services/budget.js';
+import { createYear, getBudgetSummary } from '../src/services/budget.js';
 import {
   createYearlyBudget,
   deleteOwnedBudget,
@@ -321,6 +321,78 @@ describe('parent budget creation', () => {
         id: parent.savingsAccount.id,
         initialBalance: 500,
         inheritedFromParent: true,
+      })
+    );
+  });
+
+  it('does not use legacy parent inheritance for non-start years inside a child budget', async () => {
+    const owner = await createUser('parent-budget-child-extra-year-owner@test.com');
+    const parent = await createParentBudget(owner.id, 2130);
+    const child = await withUserContext(owner.id, (tx) =>
+      createYearlyBudget(tx, owner.id, 2131, 'Child', parent.budget.id)
+    );
+    const { childYear } = await getChildItems(child.id);
+    await superuserDb
+      .update(budgetItems)
+      .set({ slug: 'emergency-fund' })
+      .where(and(eq(budgetItems.yearId, childYear.id), eq(budgetItems.savingsAccountId, parent.savingsAccount.id)));
+
+    await withTenantContext(owner.id, child.id, (tx) => createYear(tx, 2129, 0, child.id, owner.id));
+    await withTenantContext(owner.id, child.id, (tx) => createYear(tx, 2132, 0, child.id, owner.id));
+
+    const [laterYear] = await superuserDb
+      .select()
+      .from(budgetYears)
+      .where(and(eq(budgetYears.budgetId, child.id), eq(budgetYears.year, 2132)));
+    const laterSavingsItems = await superuserDb
+      .select()
+      .from(budgetItems)
+      .where(and(eq(budgetItems.yearId, laterYear.id), eq(budgetItems.savingsAccountId, parent.savingsAccount.id)));
+    expect(laterSavingsItems).toHaveLength(1);
+
+    const earlierAccounts = await getEffectiveAccounts(owner.id, child.id, 2129);
+    expect(earlierAccounts.accounts).toContainEqual(
+      expect.objectContaining({
+        id: parent.checkingAccount.id,
+        initialBalance: 0,
+        inheritedFromParent: false,
+      })
+    );
+
+    const laterAccountsBeforeParentEdit = await getEffectiveAccounts(owner.id, child.id, 2132);
+    expect(laterAccountsBeforeParentEdit.accounts).toContainEqual(
+      expect.objectContaining({
+        id: parent.checkingAccount.id,
+        initialBalance: 650,
+        inheritedFromParent: false,
+      })
+    );
+
+    await superuserDb.insert(transactions).values({
+      yearId: parent.year.id,
+      itemId: parent.dailyItem.id,
+      date: '2130-12-20',
+      amount: '300.00',
+      paymentMethodId: parent.checkingAccount.id,
+      accountingMonth: 12,
+      accountingYear: 2130,
+    });
+
+    const startYearAccountsAfterParentEdit = await getEffectiveAccounts(owner.id, child.id, 2131);
+    expect(startYearAccountsAfterParentEdit.accounts).toContainEqual(
+      expect.objectContaining({
+        id: parent.checkingAccount.id,
+        initialBalance: 350,
+        inheritedFromParent: true,
+      })
+    );
+
+    const laterAccountsAfterParentEdit = await getEffectiveAccounts(owner.id, child.id, 2132);
+    expect(laterAccountsAfterParentEdit.accounts).toContainEqual(
+      expect.objectContaining({
+        id: parent.checkingAccount.id,
+        initialBalance: 650,
+        inheritedFromParent: false,
       })
     );
   });

@@ -39,6 +39,7 @@ interface SettingsProps {
   yearId: number;
   groups: BudgetGroup[];
   onDataChanged: () => void;
+  onBudgetRestored: () => Promise<void>;
   accessRole: BudgetAccessRole;
 }
 
@@ -53,7 +54,7 @@ function slugify(text: string): string {
 
 type SettingsTab = 'categories' | 'accounts' | 'preferences' | 'sharing' | 'backup';
 
-export default function Settings({ yearId, groups, onDataChanged, accessRole }: SettingsProps) {
+export default function Settings({ yearId, groups, onDataChanged, onBudgetRestored, accessRole }: SettingsProps) {
   const { t } = useI18n();
   const { theme, decimalSeparator, showBudgetBelowActual, toggleTheme, setDecimalSeparator, setShowBudgetBelowActual } =
     useSettings();
@@ -241,7 +242,7 @@ export default function Settings({ yearId, groups, onDataChanged, accessRole }: 
         summary.transfers +
         summary.accountBalances;
       setBackupSuccess(t('settings.importSuccess', { count: total }));
-      onDataChanged();
+      await onBudgetRestored();
     } catch (error) {
       logger.error('Failed to import backup', error);
       setBackupError(getErrorMessage(error, t));

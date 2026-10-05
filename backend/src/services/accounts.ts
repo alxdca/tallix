@@ -89,7 +89,14 @@ export async function getAccountsForYear(
     .map((pm) => pm.id);
   const inheritedBalanceMap =
     requestedInheritedPaymentMethodIds.length > 0
-      ? await getInheritedOpeningBalances(tx, budgetId, userId, requestedInheritedPaymentMethodIds, visitedBudgetIds)
+      ? await getInheritedOpeningBalances(
+          tx,
+          budgetId,
+          year,
+          userId,
+          requestedInheritedPaymentMethodIds,
+          visitedBudgetIds
+        )
       : new Map<number, Decimal>();
   const balanceMap = new Map<number, Decimal>();
   const inheritedFromParentMap = new Map<number, boolean>();
@@ -348,16 +355,21 @@ export async function getEffectiveInitialBalanceMap(
 async function getInheritedOpeningBalances(
   tx: DbClient,
   budgetId: number,
+  year: number,
   userId: string,
   paymentMethodIds: number[],
   visitedBudgetIds: Set<number>
 ): Promise<Map<number, Decimal>> {
   const childBudget = await tx.query.budgets.findFirst({
     where: and(eq(budgets.id, budgetId), eq(budgets.userId, userId)),
-    columns: { id: true, parentBudgetId: true },
+    columns: { id: true, parentBudgetId: true, startYear: true },
   });
 
   if (!childBudget?.parentBudgetId) {
+    return new Map();
+  }
+
+  if (childBudget.startYear !== year) {
     return new Map();
   }
 

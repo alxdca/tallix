@@ -9,14 +9,25 @@ interface SidebarProps {
   budgets: AccessibleBudget[];
   activeBudgetId: number | null;
   onBudgetChange: (budgetId: number) => void;
+  selectedYear: number;
+  onYearChange: (year: number) => void;
 }
 
-export default function Sidebar({ activeView, onViewChange, budgets, activeBudgetId, onBudgetChange }: SidebarProps) {
+export default function Sidebar({
+  activeView,
+  onViewChange,
+  budgets,
+  activeBudgetId,
+  onBudgetChange,
+  selectedYear,
+  onYearChange,
+}: SidebarProps) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const activeBudgetRole = budgets.find((budget) => budget.id === activeBudgetId)?.role;
+  const activeBudget = budgets.find((budget) => budget.id === activeBudgetId);
+  const activeBudgetRole = activeBudget?.role;
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -39,7 +50,7 @@ export default function Sidebar({ activeView, onViewChange, budgets, activeBudge
       budget.role === 'owner'
         ? t('sharing.myBudget')
         : t('sharing.sharedBy', { owner: budget.ownerName || budget.ownerEmail });
-    return budget.description ? `${budget.year} - ${budget.description}` : `${budget.year} - ${ownerLabel}`;
+    return budget.description || ownerLabel;
   };
 
   return (
@@ -75,13 +86,11 @@ export default function Sidebar({ activeView, onViewChange, budgets, activeBudge
                   onBudgetChange(Number(event.target.value));
                 }}
               >
-                {[...budgets]
-                  .sort((a, b) => b.year - a.year || a.id - b.id)
-                  .map((budget) => (
-                    <option key={budget.id} value={budget.id}>
-                      {formatBudgetLabel(budget)}
-                    </option>
-                  ))}
+                {budgets.map((budget) => (
+                  <option key={budget.id} value={budget.id}>
+                    {formatBudgetLabel(budget)}
+                  </option>
+                ))}
               </select>
               <svg
                 className="budget-select-chevron"
@@ -98,11 +107,50 @@ export default function Sidebar({ activeView, onViewChange, budgets, activeBudge
                 <path d="m8 10 4 4 4-4" />
               </svg>
             </div>
-            {budgets.find((budget) => budget.id === activeBudgetId)?.role !== 'owner' && (
+            <label htmlFor="active-year">{t('sharing.year')}</label>
+            <div className="budget-select-control">
+              <svg
+                className="budget-select-icon"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                aria-hidden="true"
+              >
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M16 3v4M8 3v4M3 11h18" />
+              </svg>
+              <select
+                id="active-year"
+                value={selectedYear}
+                onChange={(event) => onYearChange(Number(event.target.value))}
+              >
+                {[...(activeBudget?.years ?? [])]
+                  .sort((a, b) => b - a)
+                  .map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+              </select>
+              <svg
+                className="budget-select-chevron"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path d="m8 10 4 4 4-4" />
+              </svg>
+            </div>
+            {activeBudgetRole !== 'owner' && (
               <span className="budget-access-badge">
-                {budgets.find((budget) => budget.id === activeBudgetId)?.role === 'write'
-                  ? t('sharing.writeAccess')
-                  : t('sharing.readAccess')}
+                {activeBudgetRole === 'write' ? t('sharing.writeAccess') : t('sharing.readAccess')}
               </span>
             )}
           </div>

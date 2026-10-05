@@ -84,6 +84,7 @@ export interface AccessibleBudget {
   id: number;
   description: string | null;
   year: number;
+  years: number[];
   parentBudgetId: number | null;
   ownerId: string;
   ownerName: string | null;
@@ -115,6 +116,15 @@ export async function createBudget(
     body: JSON.stringify({ year, description, ...(parentBudgetId != null ? { parentBudgetId } : {}) }),
   });
   await ensureOk(response, 'Failed to create budget');
+  return response.json();
+}
+
+export async function createBudgetYear(year: number): Promise<{ id: number; year: number }> {
+  const response = await authFetch(`${API_BASE}/budget/years`, {
+    method: 'POST',
+    body: JSON.stringify({ year }),
+  });
+  await ensureOk(response, 'Failed to create budget year');
   return response.json();
 }
 
@@ -899,11 +909,12 @@ export interface CopilotAnswer {
 
 export async function askCopilot(
   question: string,
-  conversationHistory?: ConversationMessage[]
+  conversationHistory?: ConversationMessage[],
+  year?: number
 ): Promise<CopilotAnswer> {
   const response = await authFetch(`${API_BASE}/copilot/ask`, {
     method: 'POST',
-    body: JSON.stringify({ question, conversationHistory }),
+    body: JSON.stringify({ question, conversationHistory, year }),
   });
   await ensureOk(response, 'Failed to ask copilot');
   return response.json();

@@ -22,16 +22,16 @@ Settings apply to the budget selected in the Budget dropdown and include categor
 
 ## Sharing
 
-Select a yearly budget, then use **Sharing** to grant read-only or edit access to existing Tallix users.
-Collaborators and access levels are specific to that budget. Creating another year does not copy its collaborators.
+Select a named budget, then use **Sharing** to grant read-only or edit access to existing Tallix users.
+Collaborators and access levels apply to all existing and future years inside that budget.
+Other budgets keep their own collaborators.
 
-To add past or future years, choose **Create new budget** in the Budget dropdown.
+To add past or future years, use **My account → Add year to selected budget**.
 
 ## Backup
 
-Export and restore the selected yearly budget. A backup must contain exactly one year
-and match the selected budget year. Select or create that year's budget before restoring.
-Legacy backups containing several years need to be separated by year before import.
+Export and restore all years in the selected budget. Restoring replaces its existing years
+with those in the backup. Other budgets and sharing permissions are retained.
 
-Existing accounts keep their settings and links because they can be used by several yearly budgets.
+Existing accounts keep their settings and links because they can be used by several budgets.
 If an account has different settings in the backup, the import stops before replacing any data.

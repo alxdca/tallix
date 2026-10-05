@@ -1,7 +1,8 @@
 import Decimal from 'decimal.js';
-import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { DbClient } from '../db/index.js';
 import {
+  accountBalances,
   budgetGroups,
   budgetItems,
   budgets,
@@ -45,18 +46,17 @@ export const SAVINGS_GROUP_SLUG = 'epargne';
 export const SAVINGS_GROUP_TYPE = 'savings';
 export const SAVINGS_SORT_ORDER = 998;
 
-async function assertBudgetYearMatchesStartYear(tx: DbClient, year: number, budgetId: number) {
-  const budget = await tx.query.budgets.findFirst({
-    where: eq(budgets.id, budgetId),
-    columns: { startYear: true },
-  });
-
-  if (!budget) {
-    throw new Error('Budget not found');
+export class BudgetYearNotFoundError extends Error {
+  constructor() {
+    super('Budget year not found');
+    this.name = 'BudgetYearNotFoundError';
   }
+}
 
-  if (budget.startYear !== year) {
-    throw new Error('Create a new budget instead of adding years to the current budget');
+export class BudgetYearAlreadyExistsError extends Error {
+  constructor(year: number) {
+    super(`Year ${year} already exists`);
+    this.name = 'BudgetYearAlreadyExistsError';
   }
 }
 
@@ -77,28 +77,20 @@ async function getActiveSavingsAccountIds(tx: DbClient, userId: string): Promise
   return new Set(accounts.map((account) => account.id));
 }
 
-// Get or create a budget year
-export async function getOrCreateYear(tx: DbClient, year: number, budgetId: number) {
-  await assertBudgetYearMatchesStartYear(tx, year, budgetId);
-
-  const existing = await tx.query.budgetYears.findFirst({
+export async function getBudgetYear(tx: DbClient, year: number, budgetId: number) {
+  return await tx.query.budgetYears.findFirst({
     where: and(eq(budgetYears.budgetId, budgetId), eq(budgetYears.year, year)),
   });
+}
 
-  if (existing) {
-    return existing;
+export async function requireBudgetYear(tx: DbClient, year: number, budgetId: number) {
+  const existing = await getBudgetYear(tx, year, budgetId);
+
+  if (!existing) {
+    throw new BudgetYearNotFoundError();
   }
 
-  const [budgetYear] = await tx
-    .insert(budgetYears)
-    .values({
-      budgetId,
-      year,
-      initialBalance: '0',
-    })
-    .returning();
-
-  return budgetYear;
+  return existing;
 }
 
 // Get transaction totals per item per month for a year
@@ -403,7 +395,7 @@ export async function getBudgetDataForYear(
   budgetId: number,
   userId: string
 ): Promise<BudgetData> {
-  const budgetYear = await getOrCreateYear(tx, year, budgetId);
+  const budgetYear = await requireBudgetYear(tx, year, budgetId);
   const activeSavingsAccountIds = await getActiveSavingsAccountIds(tx, userId);
   const transactionTotals = await getTransactionTotals(tx, budgetYear.id, year);
   const transferTotals = await getSavingsTransferTotals(tx, budgetYear.id, year, activeSavingsAccountIds);
@@ -545,8 +537,28 @@ export async function createYear(
   budgetId: number,
   userId: string
 ) {
-  await assertBudgetYearMatchesStartYear(tx, year, budgetId);
+  const newYear = await insertBudgetYear(tx, year, initialBalance, budgetId);
 
+  await copyPreviousYearItems(tx, newYear.id, year, budgetId);
+  await createOpeningBalancesFromPreviousYear(tx, newYear.id, year, budgetId, userId);
+
+  // Create budget items for existing savings accounts that were not present in the previous year.
+  const savingsAccounts = await tx.query.paymentMethods.findMany({
+    where: and(eq(paymentMethods.isSavingsAccount, true), eq(paymentMethods.userId, userId)),
+  });
+
+  for (const sa of savingsAccounts) {
+    await createSavingsItemForYear(tx, newYear.id, sa.id, sa.name, sa.institution, budgetId);
+  }
+
+  return {
+    id: newYear.id,
+    year: newYear.year,
+    initialBalance: parseFloat(newYear.initialBalance),
+  };
+}
+
+async function insertBudgetYear(tx: DbClient, year: number, initialBalance: number, budgetId: number) {
   try {
     const [newYear] = await tx
       .insert(budgetYears)
@@ -556,26 +568,92 @@ export async function createYear(
         initialBalance: initialBalance.toString(),
       })
       .returning();
-
-    // Create budget items for existing savings accounts
-    const savingsAccounts = await tx.query.paymentMethods.findMany({
-      where: and(eq(paymentMethods.isSavingsAccount, true), eq(paymentMethods.userId, userId)),
-    });
-
-    for (const sa of savingsAccounts) {
-      await createSavingsItemForYear(tx, newYear.id, sa.id, sa.name, sa.institution, budgetId);
-    }
-
-    return {
-      id: newYear.id,
-      year: newYear.year,
-      initialBalance: parseFloat(newYear.initialBalance),
-    };
+    return newYear;
   } catch (err: unknown) {
-    if (err && typeof err === 'object' && 'code' in err && err.code === '23505') {
-      throw new Error(`Year ${year} already exists`);
+    if (isUniqueViolation(err)) {
+      throw new BudgetYearAlreadyExistsError(year);
     }
     throw err;
+  }
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  if ('code' in error && error.code === '23505') {
+    return true;
+  }
+  if ('cause' in error && error.cause && typeof error.cause === 'object' && 'code' in error.cause) {
+    return error.cause.code === '23505';
+  }
+  return false;
+}
+
+async function getPreviousBudgetYear(tx: DbClient, year: number, budgetId: number) {
+  return await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.budgetId, budgetId), sql`${budgetYears.year} < ${year}`),
+    orderBy: [desc(budgetYears.year)],
+  });
+}
+
+async function copyPreviousYearItems(tx: DbClient, newYearId: number, year: number, budgetId: number) {
+  const previousYear = await getPreviousBudgetYear(tx, year, budgetId);
+  if (!previousYear) {
+    return;
+  }
+
+  const previousItems = await tx.query.budgetItems.findMany({
+    where: eq(budgetItems.yearId, previousYear.id),
+    orderBy: [asc(budgetItems.sortOrder), asc(budgetItems.id)],
+  });
+
+  for (const previousItem of previousItems) {
+    const [newItem] = await tx
+      .insert(budgetItems)
+      .values({
+        yearId: newYearId,
+        groupId: previousItem.groupId,
+        name: previousItem.name,
+        slug: previousItem.slug,
+        sortOrder: previousItem.sortOrder,
+        yearlyBudget: '0',
+        savingsAccountId: previousItem.savingsAccountId,
+      })
+      .returning();
+
+    await tx.insert(monthlyValues).values(
+      Array.from({ length: 12 }, (_, index) => ({
+        itemId: newItem.id,
+        month: index + 1,
+        budget: '0',
+        actual: '0',
+      }))
+    );
+  }
+}
+
+async function createOpeningBalancesFromPreviousYear(
+  tx: DbClient,
+  newYearId: number,
+  year: number,
+  budgetId: number,
+  userId: string
+) {
+  const previousYear = await getPreviousBudgetYear(tx, year, budgetId);
+  if (!previousYear) {
+    return;
+  }
+
+  const { accounts } = await accountsSvc.getAccountsForYear(tx, previousYear.year, budgetId, userId);
+  const openingBalances = accounts.map((account) => ({
+    yearId: newYearId,
+    paymentMethodId: account.id,
+    initialBalance: new Decimal(String(account.monthlyBalances[11] ?? 0)).toDecimalPlaces(2).toFixed(2),
+  }));
+
+  if (openingBalances.length > 0) {
+    await tx.insert(accountBalances).values(openingBalances);
   }
 }
 
@@ -1108,6 +1186,17 @@ export async function createSavingsItemForYear(
     ? `${savingsAccountName} (${savingsAccountInstitution})`
     : savingsAccountName;
   const itemSlug = `savings-${savingsAccountId}`;
+
+  const existingItem = await tx.query.budgetItems.findFirst({
+    where: and(
+      eq(budgetItems.yearId, yearId),
+      or(eq(budgetItems.slug, itemSlug), eq(budgetItems.savingsAccountId, savingsAccountId))
+    ),
+    columns: { id: true },
+  });
+  if (existingItem) {
+    return existingItem.id;
+  }
 
   const [newItem] = await tx
     .insert(budgetItems)

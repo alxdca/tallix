@@ -11,14 +11,14 @@
  * Run: pnpm test -- tests/backup.test.ts
  */
 
-import { test, expect } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import { expect, test } from 'vitest';
 import { withTenantContext, withUserContext } from '../src/db/context.js';
 import * as schema from '../src/db/schema.js';
-import * as backupSvc from '../src/services/backup.js';
 import type { BackupPayload } from '../src/services/backup.js';
+import * as backupSvc from '../src/services/backup.js';
 
 const {
   users,
@@ -60,10 +60,7 @@ async function setup() {
     .returning();
   userAId = userA.id;
 
-  const [bA] = await superuserDb
-    .insert(budgets)
-    .values({ userId: userAId, startYear: 2024 })
-    .returning();
+  const [bA] = await superuserDb.insert(budgets).values({ userId: userAId, startYear: 2024 }).returning();
   budgetAId = bA.id;
 
   // Payment methods (with linked reference)
@@ -117,7 +114,14 @@ async function setup() {
   // Budget items (year 2024)
   const [iSalary] = await superuserDb
     .insert(budgetItems)
-    .values({ yearId: y2024.id, groupId: gIncome.id, name: 'Monthly Salary', slug: 'monthly-salary', sortOrder: 0, yearlyBudget: '500.00' })
+    .values({
+      yearId: y2024.id,
+      groupId: gIncome.id,
+      name: 'Monthly Salary',
+      slug: 'monthly-salary',
+      sortOrder: 0,
+      yearlyBudget: '500.00',
+    })
     .returning();
   const [iRent] = await superuserDb
     .insert(budgetItems)
@@ -168,7 +172,14 @@ async function setup() {
     .returning();
   const [aChild] = await superuserDb
     .insert(assets)
-    .values({ budgetId: budgetAId, name: 'Apartment', sortOrder: 1, isSystem: false, isDebt: false, parentAssetId: aParent.id })
+    .values({
+      budgetId: budgetAId,
+      name: 'Apartment',
+      sortOrder: 1,
+      isSystem: false,
+      isDebt: false,
+      parentAssetId: aParent.id,
+    })
     .returning();
 
   // Asset values
@@ -201,10 +212,7 @@ async function setup() {
     .returning();
   userBId = userB.id;
 
-  const [bB] = await superuserDb
-    .insert(budgets)
-    .values({ userId: userBId, startYear: 8024 })
-    .returning();
+  const [bB] = await superuserDb.insert(budgets).values({ userId: userBId, startYear: 8024 }).returning();
   budgetBId = bB.id;
 }
 
@@ -267,7 +275,9 @@ test('Backup export and import', async () => {
     expect(childAsset?.parentAssetId).toBe(parentAsset?.id);
 
     // Verify decimal precision preserved as strings
-    const salaryItem = exported.budgetItems.find((i) => i.name === 'Monthly Salary' && i.yearId === exported.budgetYears[0].id);
+    const salaryItem = exported.budgetItems.find(
+      (i) => i.name === 'Monthly Salary' && i.yearId === exported.budgetYears[0].id
+    );
     expect(salaryItem?.yearlyBudget).toBe('500.00');
 
     // Verify multi-year data
@@ -279,58 +289,51 @@ test('Backup export and import', async () => {
     // ── Test 2: Round-trip (export from A → import into B) ──
     console.log('\n--- Test 2: Round-trip import ---');
 
-    await expect(
-      withTenantContext(userBId, budgetBId, (tx) =>
-        backupSvc.importBackup(tx, userBId, budgetBId, exported)
-      )
-    ).rejects.toThrow(/exactly one budget year/);
-
-    const exportedYear = exported.budgetYears[0];
-    const exportedYearId = exportedYear.id;
-    const itemIdsForYear = new Set(
-      exported.budgetItems.filter((item) => item.yearId === exportedYearId).map((item) => item.id)
-    );
-    const singleYearExport: BackupPayload = {
-      ...exported,
-      budgetYears: [exportedYear],
-      budgetItems: exported.budgetItems.filter((item) => item.yearId === exportedYearId),
-      monthlyValues: exported.monthlyValues.filter((value) => itemIdsForYear.has(value.itemId)),
-      transactions: exported.transactions.filter((transaction) => transaction.yearId === exportedYearId),
-      assetValues: exported.assetValues.filter((value) => value.yearId === exportedYearId),
-      transfers: exported.transfers.filter((transfer) => transfer.yearId === exportedYearId),
-      accountBalances: exported.accountBalances.filter((balance) => balance.yearId === exportedYearId),
-    };
-
     const importResult = await withTenantContext(userBId, budgetBId, (tx) =>
-      backupSvc.importBackup(tx, userBId, budgetBId, singleYearExport)
+      backupSvc.importBackup(tx, userBId, budgetBId, exported)
     );
 
     expect(importResult.paymentMethods).toBe(3);
-    expect(importResult.budgetYears).toBe(1);
+    expect(importResult.budgetYears).toBe(2);
     expect(importResult.budgetGroups).toBe(2);
-    expect(importResult.budgetItems).toBe(singleYearExport.budgetItems.length);
-    expect(importResult.monthlyValues).toBe(singleYearExport.monthlyValues.length);
-    expect(importResult.transactions).toBe(singleYearExport.transactions.length);
+    expect(importResult.budgetItems).toBe(exported.budgetItems.length);
+    expect(importResult.monthlyValues).toBe(exported.monthlyValues.length);
+    expect(importResult.transactions).toBe(exported.transactions.length);
     expect(importResult.assets).toBe(2);
-    expect(importResult.assetValues).toBe(singleYearExport.assetValues.length);
-    expect(importResult.transfers).toBe(singleYearExport.transfers.length);
-    expect(importResult.accountBalances).toBe(singleYearExport.accountBalances.length);
+    expect(importResult.assetValues).toBe(exported.assetValues.length);
+    expect(importResult.transfers).toBe(exported.transfers.length);
+    expect(importResult.accountBalances).toBe(exported.accountBalances.length);
+
+    const [budgetAfterImport] = await superuserDb.select().from(budgets).where(sql`id = ${budgetBId}`);
+    expect(budgetAfterImport?.startYear).toBe(8024);
 
     // Verify data in user B's budget
-    const bPms = await withUserContext(userBId, (tx) =>
-      tx.select().from(paymentMethods)
-    );
+    const bPms = await withUserContext(userBId, (tx) => tx.select().from(paymentMethods));
     expect(bPms).toHaveLength(3);
 
-    const bYears = await withTenantContext(userBId, budgetBId, (tx) =>
-      tx.select().from(budgetYears)
-    );
-    expect(bYears).toHaveLength(1);
+    const bYears = await withTenantContext(userBId, budgetBId, (tx) => tx.select().from(budgetYears));
+    expect(bYears.map((year) => year.year).sort()).toEqual([8024, 8025]);
 
-    const bGroups = await withTenantContext(userBId, budgetBId, (tx) =>
-      tx.select().from(budgetGroups)
-    );
+    const bGroups = await withTenantContext(userBId, budgetBId, (tx) => tx.select().from(budgetGroups));
     expect(bGroups).toHaveLength(2);
+
+    const bItems = await withTenantContext(userBId, budgetBId, async (tx) => {
+      const { inArray } = await import('drizzle-orm');
+      return tx
+        .select()
+        .from(budgetItems)
+        .where(
+          inArray(
+            budgetItems.yearId,
+            bYears.map((year) => year.id)
+          )
+        );
+    });
+    expect(bItems).toHaveLength(exported.budgetItems.length);
+    const importedYearByNumber = new Map(bYears.map((year) => [year.year, year.id]));
+    expect(
+      bItems.some((item) => item.name === 'Monthly Salary' && item.yearId === importedYearByNumber.get(8025))
+    ).toBe(true);
 
     // Verify linked payment method was remapped correctly
     const bCredit = bPms.find((pm) => pm.name === 'Credit Card');
@@ -338,9 +341,7 @@ test('Backup export and import', async () => {
     expect(bCredit?.linkedPaymentMethodId).toBe(bChecking?.id);
 
     // Verify asset parent reference was remapped
-    const bAssets = await withTenantContext(userBId, budgetBId, (tx) =>
-      tx.select().from(assets)
-    );
+    const bAssets = await withTenantContext(userBId, budgetBId, (tx) => tx.select().from(assets));
     const bParent = bAssets.find((a) => a.name === 'Real Estate');
     const bChild = bAssets.find((a) => a.name === 'Apartment');
     expect(bChild?.parentAssetId).toBe(bParent?.id);
@@ -351,12 +352,38 @@ test('Backup export and import', async () => {
       const { inArray } = await import('drizzle-orm');
       return tx.select().from(transactions).where(inArray(transactions.yearId, bYearIds));
     });
-    expect(bTxns).toHaveLength(singleYearExport.transactions.length);
+    expect(bTxns).toHaveLength(exported.transactions.length);
     // All transaction payment methods should belong to user B
     const bPmIds = new Set(bPms.map((pm) => pm.id));
     for (const txn of bTxns) {
       expect(bPmIds.has(txn.paymentMethodId)).toBe(true);
     }
+
+    const bAssetValues = await withTenantContext(userBId, budgetBId, async (tx) => {
+      const { inArray } = await import('drizzle-orm');
+      return tx
+        .select()
+        .from(assetValues)
+        .where(
+          inArray(
+            assetValues.assetId,
+            bAssets.map((asset) => asset.id)
+          )
+        );
+    });
+    expect(bAssetValues).toHaveLength(exported.assetValues.length);
+
+    const bTransfers = await withTenantContext(userBId, budgetBId, async (tx) => {
+      const { inArray } = await import('drizzle-orm');
+      return tx.select().from(transfers).where(inArray(transfers.yearId, bYearIds));
+    });
+    expect(bTransfers).toHaveLength(exported.transfers.length);
+
+    const bAccountBalances = await withTenantContext(userBId, budgetBId, async (tx) => {
+      const { inArray } = await import('drizzle-orm');
+      return tx.select().from(accountBalances).where(inArray(accountBalances.yearId, bYearIds));
+    });
+    expect(bAccountBalances).toHaveLength(exported.accountBalances.length);
 
     console.log('  Round-trip: all assertions passed');
 
@@ -368,23 +395,52 @@ test('Backup export and import', async () => {
       .values({ userId: userBId, name: 'Sibling only', sortOrder: 99 })
       .returning();
 
-    // User B now has data from test 2. Import again — should wipe and re-import.
-    const importResult2 = await withTenantContext(userBId, budgetBId, (tx) =>
+    const exported2025 = exported.budgetYears.find((year) => year.year === 8025)!;
+    const itemIdsFor2025 = new Set(
+      exported.budgetItems.filter((item) => item.yearId === exported2025.id).map((item) => item.id)
+    );
+    const singleYearExport: BackupPayload = {
+      ...exported,
+      budgetYears: [exported2025],
+      budgetItems: exported.budgetItems.filter((item) => item.yearId === exported2025.id),
+      monthlyValues: exported.monthlyValues.filter((value) => itemIdsFor2025.has(value.itemId)),
+      transactions: exported.transactions.filter((transaction) => transaction.yearId === exported2025.id),
+      assetValues: exported.assetValues.filter((value) => value.yearId === exported2025.id),
+      transfers: exported.transfers.filter((transfer) => transfer.yearId === exported2025.id),
+      accountBalances: exported.accountBalances.filter((balance) => balance.yearId === exported2025.id),
+    };
+
+    await withTenantContext(userBId, budgetBId, (tx) =>
       backupSvc.importBackup(tx, userBId, budgetBId, singleYearExport)
     );
-    expect(importResult2.transactions).toBe(singleYearExport.transactions.length);
+    const [budgetAfterSingleYearImport] = await superuserDb.select().from(budgets).where(sql`id = ${budgetBId}`);
+    expect(budgetAfterSingleYearImport?.startYear).toBe(8025);
+
+    // User B now has data from test 2. Import again — should wipe and re-import.
+    const importResult2 = await withTenantContext(userBId, budgetBId, (tx) =>
+      backupSvc.importBackup(tx, userBId, budgetBId, exported)
+    );
+    expect(importResult2.transactions).toBe(exported.transactions.length);
+    const [budgetAfterFullReimport] = await superuserDb.select().from(budgets).where(sql`id = ${budgetBId}`);
+    expect(budgetAfterFullReimport?.startYear).toBe(8025);
 
     // Verify no duplicate data (should be exactly the same counts as the backup)
     const b2Txns = await withTenantContext(userBId, budgetBId, async (tx) => {
       const { inArray } = await import('drizzle-orm');
       const years = await tx.select({ id: budgetYears.id }).from(budgetYears);
-      return tx.select().from(transactions).where(inArray(transactions.yearId, years.map((y) => y.id)));
+      return tx
+        .select()
+        .from(transactions)
+        .where(
+          inArray(
+            transactions.yearId,
+            years.map((y) => y.id)
+          )
+        );
     });
-    expect(b2Txns).toHaveLength(singleYearExport.transactions.length);
+    expect(b2Txns).toHaveLength(exported.transactions.length);
 
-    const b2Groups = await withTenantContext(userBId, budgetBId, (tx) =>
-      tx.select().from(budgetGroups)
-    );
+    const b2Groups = await withTenantContext(userBId, budgetBId, (tx) => tx.select().from(budgetGroups));
     expect(b2Groups).toHaveLength(2);
 
     const [preservedSiblingPaymentMethod] = await superuserDb
@@ -400,9 +456,7 @@ test('Backup export and import', async () => {
 
     // Missing schemaVersion
     await expect(
-      withTenantContext(userBId, budgetBId, (tx) =>
-        backupSvc.importBackup(tx, userBId, budgetBId, {} as any)
-      )
+      withTenantContext(userBId, budgetBId, (tx) => backupSvc.importBackup(tx, userBId, budgetBId, {} as any))
     ).rejects.toThrow(/Unsupported backup schema version/);
 
     // Wrong schemaVersion
@@ -419,14 +473,39 @@ test('Backup export and import', async () => {
       )
     ).rejects.toThrow(/Missing or invalid/);
 
+    const emptyYearsPayload: BackupPayload = {
+      ...exported,
+      budgetYears: [],
+      budgetItems: [],
+      monthlyValues: [],
+      transactions: [],
+      assetValues: [],
+      transfers: [],
+      accountBalances: [],
+    };
+    await expect(
+      withTenantContext(userBId, budgetBId, (tx) => backupSvc.importBackup(tx, userBId, budgetBId, emptyYearsPayload))
+    ).rejects.toThrow(/at least one budget year/);
+
     // Broken reference: item references non-existent year
     const brokenPayload: BackupPayload = {
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       paymentMethods: [],
-      budgetYears: [],
+      budgetYears: [{ id: 1, year: 9000, initialBalance: '0' }],
       budgetGroups: [],
-      budgetItems: [{ id: 1, yearId: 999, groupId: null, name: 'X', slug: 'x', sortOrder: 0, yearlyBudget: '0', savingsAccountId: null }],
+      budgetItems: [
+        {
+          id: 1,
+          yearId: 999,
+          groupId: null,
+          name: 'X',
+          slug: 'x',
+          sortOrder: 0,
+          yearlyBudget: '0',
+          savingsAccountId: null,
+        },
+      ],
       monthlyValues: [],
       transactions: [],
       assets: [],
@@ -435,15 +514,15 @@ test('Backup export and import', async () => {
       accountBalances: [],
     };
     await expect(
-      withTenantContext(userBId, budgetBId, (tx) =>
-        backupSvc.importBackup(tx, userBId, budgetBId, brokenPayload)
-      )
+      withTenantContext(userBId, budgetBId, (tx) => backupSvc.importBackup(tx, userBId, budgetBId, brokenPayload))
     ).rejects.toThrow(/unknown year backup ID/);
 
     const conflictingPaymentMethodPayload: BackupPayload = {
       ...singleYearExport,
       paymentMethods: singleYearExport.paymentMethods.map((method, index) =>
-        index === 0 ? { ...method, settlementDay: method.settlementDay === null ? 10 : method.settlementDay + 1 } : method
+        index === 0
+          ? { ...method, settlementDay: method.settlementDay === null ? 10 : method.settlementDay + 1 }
+          : method
       ),
     };
     await expect(
@@ -470,7 +549,9 @@ test('Backup export and import', async () => {
       ...singleYearExport,
       paymentMethods: singleYearExport.paymentMethods
         .map((method) =>
-          existingCard && method.id === existingCard.id ? { ...method, linkedPaymentMethodId: newLinkedChecking.id } : method
+          existingCard && method.id === existingCard.id
+            ? { ...method, linkedPaymentMethodId: newLinkedChecking.id }
+            : method
         )
         .concat(newLinkedChecking),
     };
@@ -490,21 +571,55 @@ test('Backup export and import', async () => {
     console.log('\n--- Test 5: Atomicity ---');
 
     // First, check user B's current state (from test 3 import)
-    const preAtomicGroups = await withTenantContext(userBId, budgetBId, (tx) =>
-      tx.select().from(budgetGroups)
-    );
+    const preAtomicGroups = await withTenantContext(userBId, budgetBId, (tx) => tx.select().from(budgetGroups));
     const preGroupCount = preAtomicGroups.length;
 
     // Create a payload that will fail partway through (transaction references unknown PM)
     const failPayload: BackupPayload = {
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
-      paymentMethods: [{ id: 1, name: 'Test PM', institution: null, sortOrder: 0, isSavingsAccount: false, savingsType: null, settlementDay: null, linkedPaymentMethodId: null }],
+      paymentMethods: [
+        {
+          id: 1,
+          name: 'Test PM',
+          institution: null,
+          sortOrder: 0,
+          isSavingsAccount: false,
+          savingsType: null,
+          settlementDay: null,
+          linkedPaymentMethodId: null,
+        },
+      ],
       budgetYears: [{ id: 1, year: 8099, initialBalance: '0' }],
       budgetGroups: [{ id: 1, name: 'Test Group', slug: 'test-group', type: 'expense', sortOrder: 0 }],
-      budgetItems: [{ id: 1, yearId: 1, groupId: 1, name: 'Test Item', slug: 'test-item', sortOrder: 0, yearlyBudget: '0', savingsAccountId: null }],
+      budgetItems: [
+        {
+          id: 1,
+          yearId: 1,
+          groupId: 1,
+          name: 'Test Item',
+          slug: 'test-item',
+          sortOrder: 0,
+          yearlyBudget: '0',
+          savingsAccountId: null,
+        },
+      ],
       monthlyValues: [],
-      transactions: [{ yearId: 1, itemId: 1, date: '8099-01-01', description: null, comment: null, thirdParty: null, paymentMethodId: 999, amount: '100', accountingMonth: 1, accountingYear: 8099, warning: null }],
+      transactions: [
+        {
+          yearId: 1,
+          itemId: 1,
+          date: '8099-01-01',
+          description: null,
+          comment: null,
+          thirdParty: null,
+          paymentMethodId: 999,
+          amount: '100',
+          accountingMonth: 1,
+          accountingYear: 8099,
+          warning: null,
+        },
+      ],
       assets: [],
       assetValues: [],
       transfers: [],
@@ -513,15 +628,11 @@ test('Backup export and import', async () => {
 
     // This should fail validation (transaction references unknown PM backup ID 999)
     await expect(
-      withTenantContext(userBId, budgetBId, (tx) =>
-        backupSvc.importBackup(tx, userBId, budgetBId, failPayload)
-      )
+      withTenantContext(userBId, budgetBId, (tx) => backupSvc.importBackup(tx, userBId, budgetBId, failPayload))
     ).rejects.toThrow(/unknown payment method backup ID/);
 
     // Verify data is unchanged (transaction rolled back)
-    const postAtomicGroups = await withTenantContext(userBId, budgetBId, (tx) =>
-      tx.select().from(budgetGroups)
-    );
+    const postAtomicGroups = await withTenantContext(userBId, budgetBId, (tx) => tx.select().from(budgetGroups));
     expect(postAtomicGroups.length).toBe(preGroupCount);
 
     console.log('  Atomicity: all assertions passed');

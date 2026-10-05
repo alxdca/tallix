@@ -1,9 +1,32 @@
 import { Router, type Router as RouterType } from 'express';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { withTenantContext } from '../db/context.js';
+import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import * as budget from '../services/budget.js';
 
 const router: RouterType = Router();
+
+function parseYear(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1900 || value > 9999) {
+    throw new AppError(400, 'year must be an integer between 1900 and 9999');
+  }
+  return value;
+}
+
+function parseYearParam(value: string): number {
+  const year = parseInt(value, 10);
+  if (Number.isNaN(year)) {
+    throw new AppError(400, 'Invalid year');
+  }
+  return year;
+}
+
+async function requireExistingBudgetYear(userId: string, budgetId: number, year: number) {
+  const existing = await withTenantContext(userId, budgetId, (tx) => budget.getBudgetYear(tx, year, budgetId));
+  if (!existing) {
+    throw new AppError(404, 'Budget year not found');
+  }
+  return existing;
+}
 
 // GET /api/budget - Get budget data for current year
 router.get(
@@ -24,16 +47,11 @@ router.get(
 router.get(
   '/year/:year',
   asyncHandler(async (req, res) => {
-    const year = parseInt(req.params.year, 10);
-    if (Number.isNaN(year)) {
-      throw new AppError(400, 'Invalid year');
-    }
-    if (year !== req.budget!.startYear) {
-      throw new AppError(404, 'Budget year not found');
-    }
+    const year = parseYearParam(req.params.year);
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const ownerId = req.budget!.userId;
+    await requireExistingBudgetYear(userId, budgetId, year);
     const data = await withTenantContext(userId, budgetId, (tx) =>
       budget.getBudgetDataForYear(tx, year, budgetId, ownerId)
     );
@@ -54,12 +72,10 @@ router.get(
     if (Number.isNaN(requestedYear)) {
       throw new AppError(400, 'Invalid year');
     }
-    if (requestedYear !== req.budget!.startYear) {
-      throw new AppError(404, 'Budget year not found');
-    }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
     const ownerId = req.budget!.userId;
+    await requireExistingBudgetYear(userId, budgetId, requestedYear);
     const summary = await withTenantContext(userId, budgetId, (tx) =>
       budget.getBudgetSummary(tx, requestedYear, budgetId, ownerId)
     );
@@ -73,11 +89,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    const allYears = await withTenantContext(userId, budgetId, (tx) =>
-      budget.getAllYears(tx, budgetId)
-    );
+    const allYears = await withTenantContext(userId, budgetId, (tx) => budget.getAllYears(tx, budgetId));
     // Return just the year numbers for the sidebar dropdown
-    const years = allYears.map(y => y.year);
+    const years = allYears.map((y) => y.year);
     res.json({ years });
   })
 );
@@ -85,8 +99,33 @@ router.get(
 // POST /api/budget/years - Create a new year
 router.post(
   '/years',
-  asyncHandler(async () => {
-    throw new AppError(410, 'Create a new budget instead of adding years to the current budget');
+  asyncHandler(async (req, res) => {
+    const year = parseYear(req.body.year);
+    const initialBalance =
+      req.body.initialBalance === undefined || req.body.initialBalance === null
+        ? 0
+        : typeof req.body.initialBalance === 'number'
+          ? req.body.initialBalance
+          : Number(req.body.initialBalance);
+    if (Number.isNaN(initialBalance)) {
+      throw new AppError(400, 'initialBalance must be a valid number');
+    }
+
+    const budgetId = req.budget!.id;
+    const userId = req.user!.id;
+    const ownerId = req.budget!.userId;
+    let created: Awaited<ReturnType<typeof budget.createYear>>;
+    try {
+      created = await withTenantContext(userId, budgetId, (tx) =>
+        budget.createYear(tx, year, initialBalance, budgetId, ownerId)
+      );
+    } catch (error) {
+      if (error instanceof budget.BudgetYearAlreadyExistsError) {
+        throw new AppError(409, error.message, { code: 'BUDGET_YEAR_ALREADY_EXISTS', params: { year } });
+      }
+      throw error;
+    }
+    res.status(201).json({ id: created.id, year: created.year });
   })
 );
 
@@ -145,9 +184,7 @@ router.put(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    await withTenantContext(userId, budgetId, (tx) =>
-      budget.reorderGroups(tx, groups, budgetId)
-    );
+    await withTenantContext(userId, budgetId, (tx) => budget.reorderGroups(tx, groups, budgetId));
     res.json({ success: true });
   })
 );
@@ -183,9 +220,7 @@ router.delete(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    const deleted = await withTenantContext(userId, budgetId, (tx) =>
-      budget.deleteGroup(tx, id, budgetId)
-    );
+    const deleted = await withTenantContext(userId, budgetId, (tx) => budget.deleteGroup(tx, id, budgetId));
     if (!deleted) {
       throw new AppError(404, 'Group not found');
     }
@@ -220,9 +255,7 @@ router.put(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    const updated = await withTenantContext(userId, budgetId, (tx) =>
-      budget.moveItem(tx, itemId, groupId, budgetId)
-    );
+    const updated = await withTenantContext(userId, budgetId, (tx) => budget.moveItem(tx, itemId, groupId, budgetId));
     if (!updated) {
       throw new AppError(404, 'Item not found');
     }
@@ -240,9 +273,7 @@ router.put(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    await withTenantContext(userId, budgetId, (tx) =>
-      budget.reorderItems(tx, items, budgetId)
-    );
+    await withTenantContext(userId, budgetId, (tx) => budget.reorderItems(tx, items, budgetId));
     res.json({ success: true });
   })
 );
@@ -278,9 +309,7 @@ router.delete(
     }
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    const deleted = await withTenantContext(userId, budgetId, (tx) =>
-      budget.deleteItem(tx, id, budgetId)
-    );
+    const deleted = await withTenantContext(userId, budgetId, (tx) => budget.deleteItem(tx, id, budgetId));
     if (!deleted) {
       throw new AppError(404, 'Item not found');
     }
@@ -318,9 +347,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
-    const startYear = await withTenantContext(userId, budgetId, (tx) =>
-      budget.getStartYear(tx, budgetId)
-    );
+    const startYear = await withTenantContext(userId, budgetId, (tx) => budget.getStartYear(tx, budgetId));
     res.json({ startYear });
   })
 );
