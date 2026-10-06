@@ -100,6 +100,8 @@ export interface BackupTransfer {
   destinationAccountId: number;
   accountingMonth: number;
   accountingYear: number;
+  destinationAccountingMonth?: number | null;
+  destinationAccountingYear?: number | null;
 }
 
 export interface BackupAccountBalance {
@@ -284,6 +286,8 @@ export async function exportBackup(tx: DbClient, userId: string, budgetId: numbe
       destinationAccountId: xf.destinationAccountId,
       accountingMonth: xf.accountingMonth,
       accountingYear: xf.accountingYear,
+      destinationAccountingMonth: xf.destinationAccountingMonth,
+      destinationAccountingYear: xf.destinationAccountingYear,
     })),
     accountBalances: balances.map((ab) => ({
       yearId: ab.yearId,
@@ -417,6 +421,35 @@ export function validateBackupPayload(payload: unknown): asserts payload is Back
     if (!pmIds.has(xf.destinationAccountId)) {
       throw new AppError(400, `Transfer references unknown destination account backup ID: ${xf.destinationAccountId}`, {
         code: 'BACKUP_INVALID_REFERENCE',
+      });
+    }
+    const destinationAccountingMonth = xf.destinationAccountingMonth;
+    const destinationAccountingYear = xf.destinationAccountingYear;
+    const hasDestinationMonth = destinationAccountingMonth !== undefined && destinationAccountingMonth !== null;
+    const hasDestinationYear = destinationAccountingYear !== undefined && destinationAccountingYear !== null;
+    if (hasDestinationMonth !== hasDestinationYear) {
+      throw new AppError(400, 'Transfer destination accounting month and year must be provided together', {
+        code: 'BACKUP_INVALID_SCHEMA',
+      });
+    }
+    if (
+      destinationAccountingMonth != null &&
+      (!Number.isInteger(destinationAccountingMonth) ||
+        destinationAccountingMonth < 1 ||
+        destinationAccountingMonth > 12)
+    ) {
+      throw new AppError(400, 'Transfer destination accounting month must be between 1 and 12', {
+        code: 'BACKUP_INVALID_SCHEMA',
+      });
+    }
+    if (
+      destinationAccountingYear != null &&
+      (!Number.isInteger(destinationAccountingYear) ||
+        destinationAccountingYear < 1900 ||
+        destinationAccountingYear > 9999)
+    ) {
+      throw new AppError(400, 'Transfer destination accounting year must be between 1900 and 9999', {
+        code: 'BACKUP_INVALID_SCHEMA',
       });
     }
   }
@@ -766,6 +799,8 @@ export async function importBackup(
         destinationAccountId: pmIdMap.get(xf.destinationAccountId)!,
         accountingMonth: xf.accountingMonth,
         accountingYear: xf.accountingYear,
+        destinationAccountingMonth: xf.destinationAccountingMonth ?? xf.accountingMonth,
+        destinationAccountingYear: xf.destinationAccountingYear ?? xf.accountingYear,
       }))
     );
   }

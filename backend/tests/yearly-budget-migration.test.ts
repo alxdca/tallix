@@ -147,19 +147,12 @@ test('yearly split migration preserves moved year data and copied shares', async
       VALUES (${year2024.id}, ${account.id}, '345.67')
       RETURNING id
     `);
-    const [transfer] = await db
-      .insert(transfers)
-      .values({
-        yearId: year2024.id,
-        date: '9024-02-03',
-        amount: '50.25',
-        description: 'Move to savings',
-        sourceAccountId: account.id,
-        destinationAccountId: savingsAccount.id,
-        accountingMonth: 2,
-        accountingYear: 9024,
-      })
-      .returning();
+    // This fixture deliberately uses the schema before migration 0032.
+    const [transfer] = await db.execute<{ id: number }>(sql`
+      INSERT INTO transfers (year_id, date, amount, description, source_account_id, destination_account_id, accounting_month, accounting_year)
+      VALUES (${year2024.id}, '9024-02-03', '50.25', 'Move to savings', ${account.id}, ${savingsAccount.id}, 2, 9024)
+      RETURNING id
+    `);
     const [transactionOrder] = await db
       .insert(entryOrderOverrides)
       .values({ yearId: year2024.id, entryType: 'transaction', entryId: transaction.id, sortOffset: -1 })
@@ -304,7 +297,16 @@ test('yearly split migration preserves moved year data and copied shares', async
       })
       .from(accountBalances)
       .where(eq(accountBalances.id, balance.id));
-    const [updatedTransfer] = await db.select().from(transfers).where(eq(transfers.id, transfer.id));
+    const [updatedTransfer] = await db
+      .select({
+        id: transfers.id,
+        yearId: transfers.yearId,
+        amount: transfers.amount,
+        sourceAccountId: transfers.sourceAccountId,
+        destinationAccountId: transfers.destinationAccountId,
+      })
+      .from(transfers)
+      .where(eq(transfers.id, transfer.id));
     const movedOrderRows = await db
       .select()
       .from(entryOrderOverrides)

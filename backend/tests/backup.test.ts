@@ -203,6 +203,8 @@ async function setup() {
     destinationAccountId: pmSavings.id,
     accountingMonth: 1,
     accountingYear: 8024,
+    destinationAccountingMonth: 2,
+    destinationAccountingYear: 8024,
   });
 
   // Create user B (empty budget, for round-trip test)
@@ -262,6 +264,8 @@ test('Backup export and import', async () => {
     expect(exported.assetValues).toHaveLength(2);
     expect(exported.transfers).toHaveLength(1);
     expect(exported.accountBalances).toHaveLength(2);
+    expect(exported.transfers[0].destinationAccountingMonth).toBe(2);
+    expect(exported.transfers[0].destinationAccountingYear).toBe(8024);
 
     // Verify linked payment method reference
     const creditCard = exported.paymentMethods.find((pm) => pm.name === 'Credit Card');
@@ -378,6 +382,8 @@ test('Backup export and import', async () => {
       return tx.select().from(transfers).where(inArray(transfers.yearId, bYearIds));
     });
     expect(bTransfers).toHaveLength(exported.transfers.length);
+    expect(bTransfers[0].destinationAccountingMonth).toBe(2);
+    expect(bTransfers[0].destinationAccountingYear).toBe(8024);
 
     const bAccountBalances = await withTenantContext(userBId, budgetBId, async (tx) => {
       const { inArray } = await import('drizzle-orm');
@@ -516,6 +522,73 @@ test('Backup export and import', async () => {
     await expect(
       withTenantContext(userBId, budgetBId, (tx) => backupSvc.importBackup(tx, userBId, budgetBId, brokenPayload))
     ).rejects.toThrow(/unknown year backup ID/);
+
+    const oldTransferBackupPayload: BackupPayload = {
+      ...exported,
+      transfers: exported.transfers.map(
+        ({
+          destinationAccountingMonth: _destinationAccountingMonth,
+          destinationAccountingYear: _destinationAccountingYear,
+          ...transfer
+        }) => transfer
+      ),
+    };
+    expect(oldTransferBackupPayload.transfers.length).toBeGreaterThan(0);
+    expect(exported.transfers[0].destinationAccountingMonth).not.toBe(exported.transfers[0].accountingMonth);
+    await withTenantContext(userBId, budgetBId, (tx) =>
+      backupSvc.importBackup(tx, userBId, budgetBId, oldTransferBackupPayload)
+    );
+    const [legacyRestoredTransfer] = await withTenantContext(userBId, budgetBId, async (tx) => {
+      const restoredYears = await tx.select({ id: budgetYears.id }).from(budgetYears);
+      const { inArray } = await import('drizzle-orm');
+      return tx
+        .select()
+        .from(transfers)
+        .where(
+          inArray(
+            transfers.yearId,
+            restoredYears.map((year) => year.id)
+          )
+        );
+    });
+    expect(legacyRestoredTransfer.destinationAccountingMonth).toBe(legacyRestoredTransfer.accountingMonth);
+    expect(legacyRestoredTransfer.destinationAccountingYear).toBe(legacyRestoredTransfer.accountingYear);
+
+    const incompleteDestinationPeriodPayload: BackupPayload = {
+      ...exported,
+      transfers: exported.transfers.map((transfer, index) =>
+        index === 0 ? { ...transfer, destinationAccountingMonth: 8, destinationAccountingYear: undefined } : transfer
+      ),
+    };
+    await expect(
+      withTenantContext(userBId, budgetBId, (tx) =>
+        backupSvc.importBackup(tx, userBId, budgetBId, incompleteDestinationPeriodPayload)
+      )
+    ).rejects.toThrow(/destination accounting month and year/);
+
+    const invalidDestinationPeriodPayload: BackupPayload = {
+      ...exported,
+      transfers: exported.transfers.map((transfer, index) =>
+        index === 0 ? { ...transfer, destinationAccountingMonth: 13, destinationAccountingYear: 8024 } : transfer
+      ),
+    };
+    await expect(
+      withTenantContext(userBId, budgetBId, (tx) =>
+        backupSvc.importBackup(tx, userBId, budgetBId, invalidDestinationPeriodPayload)
+      )
+    ).rejects.toThrow(/destination accounting month/);
+
+    const invalidDestinationYearPayload: BackupPayload = {
+      ...exported,
+      transfers: exported.transfers.map((transfer, index) =>
+        index === 0 ? { ...transfer, destinationAccountingMonth: 8, destinationAccountingYear: 10000 } : transfer
+      ),
+    };
+    await expect(
+      withTenantContext(userBId, budgetBId, (tx) =>
+        backupSvc.importBackup(tx, userBId, budgetBId, invalidDestinationYearPayload)
+      )
+    ).rejects.toThrow(/destination accounting year/);
 
     const conflictingPaymentMethodPayload: BackupPayload = {
       ...singleYearExport,

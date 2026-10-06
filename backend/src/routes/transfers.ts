@@ -7,8 +7,8 @@ import * as transfersSvc from '../services/transfers.js';
 const router: RouterType = Router();
 
 async function parseSelectedYear(req: Request): Promise<number> {
-  const year = parseInt(req.params.year, 10);
-  if (Number.isNaN(year)) {
+  const year = parseInteger(req.params.year);
+  if (year === undefined) {
     throw new AppError(400, 'Invalid year');
   }
   const budgetId = req.budget!.id;
@@ -18,6 +18,76 @@ async function parseSelectedYear(req: Request): Promise<number> {
     throw new AppError(404, 'Budget year not found');
   }
   return year;
+}
+
+function parseInteger(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+    return Number(value);
+  }
+  return undefined;
+}
+
+function requiredInteger(value: unknown, fieldName: string): number {
+  const parsed = parseInteger(value);
+  if (parsed === undefined) {
+    throw new AppError(400, `${fieldName} must be an integer`);
+  }
+  return parsed;
+}
+
+function optionalInteger(value: unknown, fieldName: string): number | undefined {
+  const parsed = parseInteger(value);
+  if (parsed === undefined && value !== undefined && value !== null && value !== '') {
+    throw new AppError(400, `${fieldName} must be an integer`);
+  }
+  return parsed;
+}
+
+function optionalPeriodMonth(value: unknown, fieldName: string): number | undefined {
+  const parsed = optionalInteger(value, fieldName);
+  if (parsed !== undefined && (parsed < 1 || parsed > 12)) {
+    throw new AppError(400, `${fieldName} must be between 1 and 12`);
+  }
+  return parsed;
+}
+
+function optionalPeriodYear(value: unknown, fieldName: string): number | undefined {
+  const parsed = optionalInteger(value, fieldName);
+  if (parsed !== undefined && (parsed < 1900 || parsed > 9999)) {
+    throw new AppError(400, `${fieldName} must be between 1900 and 9999`);
+  }
+  return parsed;
+}
+
+function validateOptionalPeriodPair(month: number | undefined, year: number | undefined, label: string): void {
+  if ((month === undefined) !== (year === undefined)) {
+    throw new AppError(400, `${label} accounting month and year must be provided together`);
+  }
+}
+
+function optionalAmount(value: unknown, fieldName: string): number | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
+  if (!Number.isFinite(parsed)) {
+    throw new AppError(400, `${fieldName} must be a number`);
+  }
+  return parsed;
+}
+
+function requiredAmount(value: unknown, fieldName: string): number {
+  const parsed = optionalAmount(value, fieldName);
+  if (parsed === undefined) {
+    throw new AppError(400, `${fieldName} must be a number`);
+  }
+  return parsed;
 }
 
 // Get all transfers for a year
@@ -54,16 +124,42 @@ router.post(
   asyncHandler(async (req, res) => {
     const year = await parseSelectedYear(req);
 
-    const { date, amount, description, sourceAccountId, destinationAccountId, accountingMonth, accountingYear } =
-      req.body;
+    const {
+      date,
+      amount,
+      description,
+      sourceAccountId,
+      destinationAccountId,
+      accountingMonth,
+      accountingYear,
+      sourceAccountingMonth,
+      sourceAccountingYear,
+      destinationAccountingMonth,
+      destinationAccountingYear,
+    } = req.body;
 
     if (!date || amount === undefined || !sourceAccountId || !destinationAccountId) {
       throw new AppError(400, 'Date, amount, source and destination accounts are required');
     }
 
-    if (sourceAccountId === destinationAccountId) {
+    const parsedSourceAccountId = requiredInteger(sourceAccountId, 'sourceAccountId');
+    const parsedDestinationAccountId = requiredInteger(destinationAccountId, 'destinationAccountId');
+
+    if (parsedSourceAccountId === parsedDestinationAccountId) {
       throw new AppError(400, 'Source and destination accounts must be different');
     }
+    const parsedAccountingMonth = optionalPeriodMonth(accountingMonth, 'accountingMonth');
+    const parsedAccountingYear = optionalPeriodYear(accountingYear, 'accountingYear');
+    const parsedSourceAccountingMonth = optionalPeriodMonth(sourceAccountingMonth, 'sourceAccountingMonth');
+    const parsedSourceAccountingYear = optionalPeriodYear(sourceAccountingYear, 'sourceAccountingYear');
+    const parsedDestinationAccountingMonth = optionalPeriodMonth(
+      destinationAccountingMonth,
+      'destinationAccountingMonth'
+    );
+    const parsedDestinationAccountingYear = optionalPeriodYear(destinationAccountingYear, 'destinationAccountingYear');
+    validateOptionalPeriodPair(parsedAccountingMonth, parsedAccountingYear, 'Legacy');
+    validateOptionalPeriodPair(parsedSourceAccountingMonth, parsedSourceAccountingYear, 'Source');
+    validateOptionalPeriodPair(parsedDestinationAccountingMonth, parsedDestinationAccountingYear, 'Destination');
 
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
@@ -74,12 +170,16 @@ router.post(
         year,
         {
           date,
-          amount: parseFloat(amount),
+          amount: requiredAmount(amount, 'amount'),
           description,
-          sourceAccountId: parseInt(sourceAccountId, 10),
-          destinationAccountId: parseInt(destinationAccountId, 10),
-          accountingMonth: accountingMonth ? parseInt(accountingMonth, 10) : undefined,
-          accountingYear: accountingYear ? parseInt(accountingYear, 10) : undefined,
+          sourceAccountId: parsedSourceAccountId,
+          destinationAccountId: parsedDestinationAccountId,
+          accountingMonth: parsedAccountingMonth,
+          accountingYear: parsedAccountingYear,
+          sourceAccountingMonth: parsedSourceAccountingMonth,
+          sourceAccountingYear: parsedSourceAccountingYear,
+          destinationAccountingMonth: parsedDestinationAccountingMonth,
+          destinationAccountingYear: parsedDestinationAccountingYear,
         },
         budgetId,
         ownerId
@@ -94,13 +194,36 @@ router.post(
 router.put(
   '/:id',
   asyncHandler(async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (Number.isNaN(id)) {
+    const id = parseInteger(req.params.id);
+    if (id === undefined) {
       throw new AppError(400, 'Invalid transfer ID');
     }
 
-    const { date, amount, description, sourceAccountId, destinationAccountId, accountingMonth, accountingYear } =
-      req.body;
+    const {
+      date,
+      amount,
+      description,
+      sourceAccountId,
+      destinationAccountId,
+      accountingMonth,
+      accountingYear,
+      sourceAccountingMonth,
+      sourceAccountingYear,
+      destinationAccountingMonth,
+      destinationAccountingYear,
+    } = req.body;
+    const parsedAccountingMonth = optionalPeriodMonth(accountingMonth, 'accountingMonth');
+    const parsedAccountingYear = optionalPeriodYear(accountingYear, 'accountingYear');
+    const parsedSourceAccountingMonth = optionalPeriodMonth(sourceAccountingMonth, 'sourceAccountingMonth');
+    const parsedSourceAccountingYear = optionalPeriodYear(sourceAccountingYear, 'sourceAccountingYear');
+    const parsedDestinationAccountingMonth = optionalPeriodMonth(
+      destinationAccountingMonth,
+      'destinationAccountingMonth'
+    );
+    const parsedDestinationAccountingYear = optionalPeriodYear(destinationAccountingYear, 'destinationAccountingYear');
+    validateOptionalPeriodPair(parsedAccountingMonth, parsedAccountingYear, 'Legacy');
+    validateOptionalPeriodPair(parsedSourceAccountingMonth, parsedSourceAccountingYear, 'Source');
+    validateOptionalPeriodPair(parsedDestinationAccountingMonth, parsedDestinationAccountingYear, 'Destination');
 
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
@@ -111,12 +234,16 @@ router.put(
         id,
         {
           date,
-          amount: amount !== undefined ? parseFloat(amount) : undefined,
+          amount: optionalAmount(amount, 'amount'),
           description,
-          sourceAccountId: sourceAccountId !== undefined ? parseInt(sourceAccountId, 10) : undefined,
-          destinationAccountId: destinationAccountId !== undefined ? parseInt(destinationAccountId, 10) : undefined,
-          accountingMonth: accountingMonth !== undefined ? parseInt(accountingMonth, 10) : undefined,
-          accountingYear: accountingYear !== undefined ? parseInt(accountingYear, 10) : undefined,
+          sourceAccountId: optionalInteger(sourceAccountId, 'sourceAccountId'),
+          destinationAccountId: optionalInteger(destinationAccountId, 'destinationAccountId'),
+          accountingMonth: parsedAccountingMonth,
+          accountingYear: parsedAccountingYear,
+          sourceAccountingMonth: parsedSourceAccountingMonth,
+          sourceAccountingYear: parsedSourceAccountingYear,
+          destinationAccountingMonth: parsedDestinationAccountingMonth,
+          destinationAccountingYear: parsedDestinationAccountingYear,
         },
         budgetId,
         ownerId
@@ -135,8 +262,8 @@ router.put(
 router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (Number.isNaN(id)) {
+    const id = parseInteger(req.params.id);
+    if (id === undefined) {
       throw new AppError(400, 'Invalid transfer ID');
     }
 

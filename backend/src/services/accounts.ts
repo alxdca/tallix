@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { withInheritedBalanceReadContext } from '../db/context.js';
 import type { DbClient } from '../db/index.js';
 import {
@@ -173,38 +173,51 @@ export async function getAccountsForYear(
   }
 
   // Get all transfers for balance adjustment
-  // Note: We filter by accountingYear only, not yearId, for consistency with transactions
+  // Either leg can belong to this year, including transfers entered in a prior year.
   const allTransfers = await tx
     .select()
     .from(transfers)
-    .where(and(eq(transfers.accountingYear, year), inArray(transfers.yearId, budgetYearIdValues)));
+    .where(
+      and(
+        or(
+          eq(transfers.accountingYear, year),
+          sql`COALESCE(${transfers.destinationAccountingYear}, ${transfers.accountingYear}) = ${year}`
+        ),
+        inArray(transfers.yearId, budgetYearIdValues)
+      )
+    );
 
   // Build transfer impact maps: accountId -> month -> { incoming, outgoing }
   const transferImpact = new Map<number, Map<number, { incoming: Decimal; outgoing: Decimal }>>();
 
   for (const t of allTransfers) {
     const amount = new Decimal(t.amount);
-    const month = t.accountingMonth;
-
-    // Source account loses money
-    if (!transferImpact.has(t.sourceAccountId)) {
-      transferImpact.set(t.sourceAccountId, new Map());
+    const legs = [
+      {
+        accountId: t.sourceAccountId,
+        month: t.accountingMonth,
+        year: t.accountingYear,
+        direction: 'outgoing' as const,
+      },
+      {
+        accountId: t.destinationAccountId,
+        month: t.destinationAccountingMonth ?? t.accountingMonth,
+        year: t.destinationAccountingYear ?? t.accountingYear,
+        direction: 'incoming' as const,
+      },
+    ];
+    for (const leg of legs) {
+      if (leg.year !== year) continue;
+      if (!transferImpact.has(leg.accountId)) {
+        transferImpact.set(leg.accountId, new Map());
+      }
+      const monthMap = transferImpact.get(leg.accountId)!;
+      if (!monthMap.has(leg.month)) {
+        monthMap.set(leg.month, { incoming: new Decimal(0), outgoing: new Decimal(0) });
+      }
+      const impact = monthMap.get(leg.month)!;
+      impact[leg.direction] = impact[leg.direction].plus(amount);
     }
-    const sourceMonthMap = transferImpact.get(t.sourceAccountId)!;
-    if (!sourceMonthMap.has(month)) {
-      sourceMonthMap.set(month, { incoming: new Decimal(0), outgoing: new Decimal(0) });
-    }
-    sourceMonthMap.get(month)!.outgoing = sourceMonthMap.get(month)!.outgoing.plus(amount);
-
-    // Destination account gains money
-    if (!transferImpact.has(t.destinationAccountId)) {
-      transferImpact.set(t.destinationAccountId, new Map());
-    }
-    const destMonthMap = transferImpact.get(t.destinationAccountId)!;
-    if (!destMonthMap.has(month)) {
-      destMonthMap.set(month, { incoming: new Decimal(0), outgoing: new Decimal(0) });
-    }
-    destMonthMap.get(month)!.incoming = destMonthMap.get(month)!.incoming.plus(amount);
   }
 
   // Build account list
@@ -287,8 +300,11 @@ export async function getAccountsForYear(
     }
   }
   for (const t of allTransfers) {
-    if (t.accountingMonth > lastActiveMonth) {
-      lastActiveMonth = t.accountingMonth;
+    if (t.accountingYear === year) {
+      lastActiveMonth = Math.max(lastActiveMonth, t.accountingMonth);
+    }
+    if ((t.destinationAccountingYear ?? t.accountingYear) === year) {
+      lastActiveMonth = Math.max(lastActiveMonth, t.destinationAccountingMonth ?? t.accountingMonth);
     }
   }
 

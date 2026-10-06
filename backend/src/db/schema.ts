@@ -250,6 +250,8 @@ export const transfers = pgTable('transfers', {
   // Accounting period
   accountingMonth: integer('accounting_month').notNull(),
   accountingYear: integer('accounting_year').notNull(),
+  destinationAccountingMonth: integer('destination_accounting_month'),
+  destinationAccountingYear: integer('destination_accounting_year'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

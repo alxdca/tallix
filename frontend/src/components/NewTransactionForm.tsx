@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useMemo, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   type AccountIdentifier,
   createTransaction,
@@ -12,7 +12,12 @@ import { getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import { logger } from '../utils/logger';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
 import { getRecentlyUsedCategories } from './transactionCategories';
-import { formatWithInstitution, normalizeThirdParty, parseAccountString } from './transactionFormUtils';
+import {
+  calculateAccountingPeriod,
+  formatWithInstitution,
+  normalizeThirdParty,
+  parseAccountString,
+} from './transactionFormUtils';
 
 interface NewTransactionFormProps {
   year: number;
@@ -37,7 +42,7 @@ export default function NewTransactionForm({
   onSubmittingChange,
   onCreated,
 }: NewTransactionFormProps) {
-  const { t } = useI18n();
+  const { t, monthNames } = useI18n();
   // Form state (dates stored in DD/MM/YYYY display format)
   const [newEntryType, setNewEntryType] = useState<'transaction' | 'transfer'>('transaction');
   const [newDate, setNewDate] = useState(getTodayDisplay);
@@ -51,6 +56,12 @@ export default function NewTransactionForm({
   // Transfer-specific form state
   const [newSourceAccount, setNewSourceAccount] = useState(''); // Account ID
   const [newDestAccount, setNewDestAccount] = useState('');
+  const [newSourceAccountingMonth, setNewSourceAccountingMonth] = useState<number>(1);
+  const [newSourceAccountingYear, setNewSourceAccountingYear] = useState<number>(year);
+  const [newDestinationAccountingMonth, setNewDestinationAccountingMonth] = useState<number>(1);
+  const [newDestinationAccountingYear, setNewDestinationAccountingYear] = useState<number>(year);
+  const [sourcePeriodOverridden, setSourcePeriodOverridden] = useState(false);
+  const [destinationPeriodOverridden, setDestinationPeriodOverridden] = useState(false);
 
   const incomeItems = categories.filter((item) => item.groupType === 'income');
   const expenseItems = categories.filter((item) => item.groupType === 'expense');
@@ -59,6 +70,44 @@ export default function NewTransactionForm({
     () => getRecentlyUsedCategories(categories, transactions),
     [categories, transactions]
   );
+
+  const getTransferSettlementDay = useCallback(
+    (accountId: string): number | null => {
+      const id = Number(accountId);
+      if (!Number.isInteger(id)) return null;
+      const transferAccount = transferAccounts.find((account) => account.id === id);
+      if (transferAccount?.settlementDay !== undefined) return transferAccount.settlementDay ?? null;
+      return paymentMethods.find((method) => method.id === id)?.settlementDay ?? null;
+    },
+    [paymentMethods, transferAccounts]
+  );
+
+  useEffect(() => {
+    if (!isValidDateFormat(newDate)) return;
+    const sourceAccount = transferAccounts.find((account) => `${account.id}` === newSourceAccount);
+    const destinationAccount = transferAccounts.find((account) => `${account.id}` === newDestAccount);
+    const isoDate = parseDateInput(newDate);
+
+    if (sourceAccount && !sourcePeriodOverridden) {
+      const period = calculateAccountingPeriod(isoDate, getTransferSettlementDay(newSourceAccount));
+      setNewSourceAccountingMonth(period.month);
+      setNewSourceAccountingYear(period.year);
+    }
+
+    if (destinationAccount && !destinationPeriodOverridden) {
+      const period = calculateAccountingPeriod(isoDate, getTransferSettlementDay(newDestAccount));
+      setNewDestinationAccountingMonth(period.month);
+      setNewDestinationAccountingYear(period.year);
+    }
+  }, [
+    newDate,
+    newSourceAccount,
+    newDestAccount,
+    transferAccounts,
+    getTransferSettlementDay,
+    sourcePeriodOverridden,
+    destinationPeriodOverridden,
+  ]);
 
   const applyNewThirdPartySuggestion = useCallback(
     (value: string, source: 'blur' | 'select' = 'blur') => {
@@ -146,11 +195,17 @@ export default function NewTransactionForm({
           description: newDescription.trim() || undefined,
           sourceAccountId: source.id,
           destinationAccountId: dest.id,
+          sourceAccountingMonth: newSourceAccountingMonth,
+          sourceAccountingYear: newSourceAccountingYear,
+          destinationAccountingMonth: newDestinationAccountingMonth,
+          destinationAccountingYear: newDestinationAccountingYear,
         });
         setNewDescription('');
         setNewAmount('');
         setNewSourceAccount('');
         setNewDestAccount('');
+        setSourcePeriodOverridden(false);
+        setDestinationPeriodOverridden(false);
         await onCreated();
       } catch (error) {
         logger.error('Failed to create transfer', error);
@@ -241,7 +296,10 @@ export default function NewTransactionForm({
             <>
               <select
                 value={newSourceAccount}
-                onChange={(e) => setNewSourceAccount(e.target.value)}
+                onChange={(e) => {
+                  setNewSourceAccount(e.target.value);
+                  setSourcePeriodOverridden(false);
+                }}
                 className="form-select account-select"
                 required
               >
@@ -268,7 +326,10 @@ export default function NewTransactionForm({
               <span className="transfer-arrow">→</span>
               <select
                 value={newDestAccount}
-                onChange={(e) => setNewDestAccount(e.target.value)}
+                onChange={(e) => {
+                  setNewDestAccount(e.target.value);
+                  setDestinationPeriodOverridden(false);
+                }}
                 className="form-select account-select"
                 required
               >
@@ -342,6 +403,71 @@ export default function NewTransactionForm({
               step="0.01"
               className="form-input amount-input"
             />
+          </div>
+        )}
+
+        {newEntryType === 'transfer' && (
+          <div className="form-row transfer-accounting-row">
+            <label className="transfer-accounting-group">
+              <span>{t('transactions.sourceAccountingMonth')}</span>
+              <select
+                aria-label={t('transactions.sourceAccountingMonth')}
+                value={newSourceAccountingMonth}
+                onChange={(e) => {
+                  setNewSourceAccountingMonth(Number(e.target.value));
+                  setSourcePeriodOverridden(true);
+                }}
+                className="form-select accounting-month-select"
+              >
+                {monthNames.map((name, i) => (
+                  <option key={i + 1} value={i + 1}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <input
+                aria-label={t('transactions.sourceAccountingYear')}
+                type="number"
+                value={newSourceAccountingYear}
+                onChange={(e) => {
+                  setNewSourceAccountingYear(Number(e.target.value));
+                  setSourcePeriodOverridden(true);
+                }}
+                className="form-input accounting-year-input"
+                min="2000"
+                max="2100"
+              />
+            </label>
+            <label className="transfer-accounting-group">
+              <span>{t('transactions.destinationAccountingMonth')}</span>
+              <select
+                aria-label={t('transactions.destinationAccountingMonth')}
+                value={newDestinationAccountingMonth}
+                onChange={(e) => {
+                  setNewDestinationAccountingMonth(Number(e.target.value));
+                  setDestinationPeriodOverridden(true);
+                }}
+                className="form-select accounting-month-select"
+              >
+                {monthNames.map((name, i) => (
+                  <option key={i + 1} value={i + 1}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <input
+                aria-label={t('transactions.destinationAccountingYear')}
+                type="number"
+                value={newDestinationAccountingYear}
+                onChange={(e) => {
+                  setNewDestinationAccountingYear(Number(e.target.value));
+                  setDestinationPeriodOverridden(true);
+                }}
+                className="form-input accounting-year-input"
+                min="2000"
+                max="2100"
+              />
+            </label>
           </div>
         )}
 

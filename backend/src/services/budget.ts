@@ -119,7 +119,7 @@ async function getTransactionTotals(tx: DbClient, yearId: number, budgetYear: nu
 // Get transfer totals for savings accounts per month
 async function getSavingsTransferTotals(
   tx: DbClient,
-  yearId: number,
+  budgetId: number,
   budgetYear: number,
   savingsAccountIds: Set<number>
 ): Promise<Map<string, number>> {
@@ -134,14 +134,21 @@ async function getSavingsTransferTotals(
     .select({
       sourceAccountId: transfers.sourceAccountId,
       destinationAccountId: transfers.destinationAccountId,
-      month: transfers.accountingMonth,
+      accountingMonth: transfers.accountingMonth,
+      accountingYear: transfers.accountingYear,
+      destinationAccountingMonth: transfers.destinationAccountingMonth,
+      destinationAccountingYear: transfers.destinationAccountingYear,
       amount: transfers.amount,
     })
     .from(transfers)
+    .innerJoin(budgetYears, eq(transfers.yearId, budgetYears.id))
     .where(
       and(
-        eq(transfers.yearId, yearId),
-        eq(transfers.accountingYear, budgetYear),
+        eq(budgetYears.budgetId, budgetId),
+        or(
+          eq(transfers.accountingYear, budgetYear),
+          sql`COALESCE(${transfers.destinationAccountingYear}, ${transfers.accountingYear}) = ${budgetYear}`
+        ),
         or(
           inArray(transfers.sourceAccountId, accountIdsArray),
           inArray(transfers.destinationAccountId, accountIdsArray)
@@ -156,15 +163,18 @@ async function getSavingsTransferTotals(
     const amount = parseFloat(t.amount);
 
     // If destination is a savings account: positive (money in)
-    if (savingsAccountIds.has(t.destinationAccountId)) {
-      const key = `savings-${t.destinationAccountId}-${t.month}`;
+    if (
+      savingsAccountIds.has(t.destinationAccountId) &&
+      (t.destinationAccountingYear ?? t.accountingYear) === budgetYear
+    ) {
+      const key = `savings-${t.destinationAccountId}-${t.destinationAccountingMonth ?? t.accountingMonth}`;
       const current = totalsMap.get(key) || 0;
       totalsMap.set(key, current + amount);
     }
 
     // If source is a savings account: negative (money out)
-    if (savingsAccountIds.has(t.sourceAccountId)) {
-      const key = `savings-${t.sourceAccountId}-${t.month}`;
+    if (savingsAccountIds.has(t.sourceAccountId) && t.accountingYear === budgetYear) {
+      const key = `savings-${t.sourceAccountId}-${t.accountingMonth}`;
       const current = totalsMap.get(key) || 0;
       totalsMap.set(key, current - amount);
     }
@@ -398,7 +408,7 @@ export async function getBudgetDataForYear(
   const budgetYear = await requireBudgetYear(tx, year, budgetId);
   const activeSavingsAccountIds = await getActiveSavingsAccountIds(tx, userId);
   const transactionTotals = await getTransactionTotals(tx, budgetYear.id, year);
-  const transferTotals = await getSavingsTransferTotals(tx, budgetYear.id, year, activeSavingsAccountIds);
+  const transferTotals = await getSavingsTransferTotals(tx, budgetId, year, activeSavingsAccountIds);
   const savingsAccountTransactionTotals = await getSavingsAccountTransactionTotals(
     tx,
     budgetYear.id,

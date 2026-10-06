@@ -2441,6 +2441,24 @@ td.zero {
   flex-shrink: 0;
 }
 
+.transfer-accounting-row {
+  align-items: flex-end;
+}
+
+.transfer-accounting-group {
+  display: flex;
+  flex: 1;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.transfer-accounting-group span,
+.transfer-period-label {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 .transaction-form .date-input {
   width: 130px;
   flex-shrink: 0;
@@ -2568,6 +2586,18 @@ td.zero {
   display: flex;
   gap: 4px;
   align-items: center;
+}
+
+.transfer-accounting-edit-cell {
+  min-width: 18rem;
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.transfer-accounting-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .accounting-month-select {

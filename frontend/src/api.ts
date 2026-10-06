@@ -721,6 +721,7 @@ export interface AccountIdentifier {
   name: string;
   institution: string | null;
   isSavingsAccount: boolean;
+  settlementDay?: number | null;
 }
 
 export interface Transfer {
@@ -732,6 +733,10 @@ export interface Transfer {
   destinationAccount: AccountIdentifier;
   accountingMonth: number;
   accountingYear: number;
+  sourceAccountingMonth?: number;
+  sourceAccountingYear?: number;
+  destinationAccountingMonth?: number;
+  destinationAccountingYear?: number;
   sortPriority: number | null;
 }
 
@@ -757,6 +762,10 @@ export async function createTransfer(
     destinationAccountId: number;
     accountingMonth?: number;
     accountingYear?: number;
+    sourceAccountingMonth?: number;
+    sourceAccountingYear?: number;
+    destinationAccountingMonth?: number;
+    destinationAccountingYear?: number;
   }
 ): Promise<Transfer> {
   const response = await authFetch(`${API_BASE}/transfers/${year}`, {
@@ -777,6 +786,10 @@ export async function updateTransfer(
     destinationAccountId?: number;
     accountingMonth?: number;
     accountingYear?: number;
+    sourceAccountingMonth?: number;
+    sourceAccountingYear?: number;
+    destinationAccountingMonth?: number;
+    destinationAccountingYear?: number;
   }
 ): Promise<Transfer> {
   const response = await authFetch(`${API_BASE}/transfers/${id}`, {

@@ -28,7 +28,14 @@ import BulkImportModal from './BulkImportModal';
 import ConfirmDialog from './ConfirmDialog';
 import NewTransactionForm from './NewTransactionForm';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
-import { formatWithInstitution, normalizeThirdParty, parseAccountString } from './transactionFormUtils';
+import {
+  calculateAccountingPeriod,
+  formatWithInstitution,
+  normalizeThirdParty,
+  parseAccountString,
+  transferDestinationPeriod,
+  transferSourcePeriod,
+} from './transactionFormUtils';
 import {
   buildSelectionReorderUpdates,
   buildSingleReorderUpdates,
@@ -48,6 +55,10 @@ interface UnifiedEntry {
   amount: number;
   accountingMonth: number;
   accountingYear: number;
+  sourceAccountingMonth?: number;
+  sourceAccountingYear?: number;
+  destinationAccountingMonth?: number;
+  destinationAccountingYear?: number;
   sortPriority: number | null;
   naturalDateIndex: number;
   // Transaction-specific
@@ -58,6 +69,18 @@ interface UnifiedEntry {
 
 function formatAccountingPeriod(month: number, year: number, monthNames: string[]): string {
   return `${monthNames[month - 1]} ${year}`;
+}
+
+function accountingPeriodKey(month: number, year: number): string {
+  return `${year}-${month}`;
+}
+
+function formatTransferAccountingPeriod(transfer: Transfer, monthNames: string[]): string {
+  const source = transferSourcePeriod(transfer);
+  const destination = transferDestinationPeriod(transfer);
+  const sourceLabel = formatAccountingPeriod(source.month, source.year, monthNames);
+  const destinationLabel = formatAccountingPeriod(destination.month, destination.year, monthNames);
+  return sourceLabel === destinationLabel ? sourceLabel : `${sourceLabel} → ${destinationLabel}`;
 }
 
 interface TransactionsProps {
@@ -204,14 +227,24 @@ export default function Transactions({
   const [editItemId, setEditItemId] = useState<number | null>(null);
   const [editAccountingMonth, setEditAccountingMonth] = useState<number>(1);
   const [editAccountingYear, setEditAccountingYear] = useState<number>(new Date().getFullYear());
+  const [editDestinationAccountingMonth, setEditDestinationAccountingMonth] = useState<number>(1);
+  const [editDestinationAccountingYear, setEditDestinationAccountingYear] = useState<number>(new Date().getFullYear());
   // Track original values to detect if user explicitly changed accounting fields
   const [originalDate, setOriginalDate] = useState('');
   const [originalPaymentMethodId, setOriginalPaymentMethodId] = useState<number | null>(null);
   const [originalAccountingMonth, setOriginalAccountingMonth] = useState<number>(1);
   const [originalAccountingYear, setOriginalAccountingYear] = useState<number>(new Date().getFullYear());
+  const [originalDestinationAccountingMonth, setOriginalDestinationAccountingMonth] = useState<number>(1);
+  const [originalDestinationAccountingYear, setOriginalDestinationAccountingYear] = useState<number>(
+    new Date().getFullYear()
+  );
   // Edit transfer state
   const [editSourceAccount, setEditSourceAccount] = useState('');
   const [editDestAccount, setEditDestAccount] = useState('');
+  const [originalSourceAccount, setOriginalSourceAccount] = useState('');
+  const [originalDestAccount, setOriginalDestAccount] = useState('');
+  const [editSourcePeriodOverridden, setEditSourcePeriodOverridden] = useState(false);
+  const [editDestinationPeriodOverridden, setEditDestinationPeriodOverridden] = useState(false);
 
   // Get all items from all groups (savings accounts are now real budget items in "Épargne" group)
   const allItems = useMemo(
@@ -353,8 +386,12 @@ export default function Transactions({
       date: x.date,
       description: x.description,
       amount: x.amount,
-      accountingMonth: x.accountingMonth,
-      accountingYear: x.accountingYear,
+      accountingMonth: transferSourcePeriod(x).month,
+      accountingYear: transferSourcePeriod(x).year,
+      sourceAccountingMonth: transferSourcePeriod(x).month,
+      sourceAccountingYear: transferSourcePeriod(x).year,
+      destinationAccountingMonth: transferDestinationPeriod(x).month,
+      destinationAccountingYear: transferDestinationPeriod(x).year,
       sortPriority: x.sortPriority,
       transfer: x,
     }));
@@ -380,10 +417,31 @@ export default function Transactions({
 
   const accountingPeriods = Array.from(
     new Map(
-      unifiedEntries.map(({ accountingMonth, accountingYear }) => [
-        `${accountingYear}-${accountingMonth}`,
-        { month: accountingMonth, year: accountingYear },
-      ])
+      unifiedEntries.flatMap((entry) => {
+        if (entry.type !== 'transfer') {
+          return [
+            [
+              accountingPeriodKey(entry.accountingMonth, entry.accountingYear),
+              {
+                month: entry.accountingMonth,
+                year: entry.accountingYear,
+              },
+            ] as const,
+          ];
+        }
+        const source = {
+          month: entry.sourceAccountingMonth ?? entry.accountingMonth,
+          year: entry.sourceAccountingYear ?? entry.accountingYear,
+        };
+        const destination = {
+          month: entry.destinationAccountingMonth ?? entry.accountingMonth,
+          year: entry.destinationAccountingYear ?? entry.accountingYear,
+        };
+        return [
+          [accountingPeriodKey(source.month, source.year), source] as const,
+          [accountingPeriodKey(destination.month, destination.year), destination] as const,
+        ];
+      })
     ).values()
   ).sort((a, b) => a.year - b.year || a.month - b.month);
 
@@ -420,9 +478,28 @@ export default function Transactions({
       });
     }
     if (filters.accountingPeriod) {
-      result = result.filter(
-        (entry) => `${entry.accountingYear}-${entry.accountingMonth}` === filters.accountingPeriod
-      );
+      result = result.filter((entry) => {
+        if (entry.type !== 'transfer') {
+          return accountingPeriodKey(entry.accountingMonth, entry.accountingYear) === filters.accountingPeriod;
+        }
+        const sourceKey = accountingPeriodKey(
+          entry.sourceAccountingMonth ?? entry.accountingMonth,
+          entry.sourceAccountingYear ?? entry.accountingYear
+        );
+        const destinationKey = accountingPeriodKey(
+          entry.destinationAccountingMonth ?? entry.accountingMonth,
+          entry.destinationAccountingYear ?? entry.accountingYear
+        );
+        const sourceMatches =
+          sourceKey === filters.accountingPeriod &&
+          (filters.paymentMethods.length === 0 ||
+            (entry.transfer ? filters.paymentMethods.includes(entry.transfer.sourceAccount.id) : false));
+        const destinationMatches =
+          destinationKey === filters.accountingPeriod &&
+          (filters.paymentMethods.length === 0 ||
+            (entry.transfer ? filters.paymentMethods.includes(entry.transfer.destinationAccount.id) : false));
+        return sourceMatches || destinationMatches;
+      });
     }
     if (filters.thirdParty) {
       const search = filters.thirdParty.toLowerCase();
@@ -817,6 +894,65 @@ export default function Transactions({
     });
   };
 
+  const recalculateEditTransferSourcePeriod = useCallback(
+    (dateDisplay: string, accountId: string) => {
+      if (!isValidDateFormat(dateDisplay)) return;
+      const account = transferAccounts.find((candidate) => `${candidate.id}` === accountId);
+      const numericAccountId = Number(accountId);
+      const settlementDay =
+        account?.settlementDay !== undefined
+          ? (account.settlementDay ?? null)
+          : (paymentMethods.find((method) => method.id === numericAccountId)?.settlementDay ?? null);
+      if (!account && !Number.isInteger(numericAccountId)) return;
+      const period = calculateAccountingPeriod(parseDateInput(dateDisplay), settlementDay);
+      setEditAccountingMonth(period.month);
+      setEditAccountingYear(period.year);
+    },
+    [paymentMethods, transferAccounts]
+  );
+
+  const recalculateEditTransferDestinationPeriod = useCallback(
+    (dateDisplay: string, accountId: string) => {
+      if (!isValidDateFormat(dateDisplay)) return;
+      const account = transferAccounts.find((candidate) => `${candidate.id}` === accountId);
+      const numericAccountId = Number(accountId);
+      const settlementDay =
+        account?.settlementDay !== undefined
+          ? (account.settlementDay ?? null)
+          : (paymentMethods.find((method) => method.id === numericAccountId)?.settlementDay ?? null);
+      if (!account && !Number.isInteger(numericAccountId)) return;
+      const period = calculateAccountingPeriod(parseDateInput(dateDisplay), settlementDay);
+      setEditDestinationAccountingMonth(period.month);
+      setEditDestinationAccountingYear(period.year);
+    },
+    [paymentMethods, transferAccounts]
+  );
+
+  const handleEditDateChange = (value: string) => {
+    setEditDate(value);
+    if (!editingId?.startsWith('x_')) return;
+    if (!editSourcePeriodOverridden) {
+      recalculateEditTransferSourcePeriod(value, editSourceAccount);
+    }
+    if (!editDestinationPeriodOverridden) {
+      recalculateEditTransferDestinationPeriod(value, editDestAccount);
+    }
+  };
+
+  const handleEditSourceAccountChange = (value: string) => {
+    setEditSourceAccount(value);
+    if (!editSourcePeriodOverridden) {
+      recalculateEditTransferSourcePeriod(editDate, value);
+    }
+  };
+
+  const handleEditDestinationAccountChange = (value: string) => {
+    setEditDestAccount(value);
+    if (!editDestinationPeriodOverridden) {
+      recalculateEditTransferDestinationPeriod(editDate, value);
+    }
+  };
+
   const startEditTransaction = (transaction: Transaction) => {
     setEditingId(`t_${transaction.id}`); // Use entry ID format
     const dateDisplay = formatDateDisplay(transaction.date);
@@ -829,11 +965,17 @@ export default function Transactions({
     setEditItemId(transaction.itemId);
     setEditAccountingMonth(transaction.accountingMonth);
     setEditAccountingYear(transaction.accountingYear);
+    setEditDestinationAccountingMonth(transaction.accountingMonth);
+    setEditDestinationAccountingYear(transaction.accountingYear);
     // Store original values to detect explicit changes
     setOriginalDate(dateDisplay);
     setOriginalPaymentMethodId(transaction.paymentMethodId);
     setOriginalAccountingMonth(transaction.accountingMonth);
     setOriginalAccountingYear(transaction.accountingYear);
+    setOriginalDestinationAccountingMonth(transaction.accountingMonth);
+    setOriginalDestinationAccountingYear(transaction.accountingYear);
+    setEditSourcePeriodOverridden(false);
+    setEditDestinationPeriodOverridden(false);
   };
 
   const startEditTransfer = (transfer: Transfer) => {
@@ -844,13 +986,21 @@ export default function Transactions({
     setEditAmount(transfer.amount.toString());
     setEditSourceAccount(`${transfer.sourceAccount.id}`);
     setEditDestAccount(`${transfer.destinationAccount.id}`);
-    setEditAccountingMonth(transfer.accountingMonth);
-    setEditAccountingYear(transfer.accountingYear);
+    setEditAccountingMonth(transferSourcePeriod(transfer).month);
+    setEditAccountingYear(transferSourcePeriod(transfer).year);
+    setEditDestinationAccountingMonth(transferDestinationPeriod(transfer).month);
+    setEditDestinationAccountingYear(transferDestinationPeriod(transfer).year);
     // Store original values to detect explicit changes
     setOriginalDate(dateDisplay);
     setOriginalPaymentMethodId(null);
-    setOriginalAccountingMonth(transfer.accountingMonth);
-    setOriginalAccountingYear(transfer.accountingYear);
+    setOriginalAccountingMonth(transferSourcePeriod(transfer).month);
+    setOriginalAccountingYear(transferSourcePeriod(transfer).year);
+    setOriginalDestinationAccountingMonth(transferDestinationPeriod(transfer).month);
+    setOriginalDestinationAccountingYear(transferDestinationPeriod(transfer).year);
+    setOriginalSourceAccount(`${transfer.sourceAccount.id}`);
+    setOriginalDestAccount(`${transfer.destinationAccount.id}`);
+    setEditSourcePeriodOverridden(false);
+    setEditDestinationPeriodOverridden(false);
   };
 
   const cancelEdit = () => {
@@ -864,13 +1014,21 @@ export default function Transactions({
     setEditItemId(null);
     setEditAccountingMonth(1);
     setEditAccountingYear(new Date().getFullYear());
+    setEditDestinationAccountingMonth(1);
+    setEditDestinationAccountingYear(new Date().getFullYear());
     setEditSourceAccount('');
     setEditDestAccount('');
+    setOriginalSourceAccount('');
+    setOriginalDestAccount('');
+    setEditSourcePeriodOverridden(false);
+    setEditDestinationPeriodOverridden(false);
     // Reset original values
     setOriginalDate('');
     setOriginalPaymentMethodId(null);
     setOriginalAccountingMonth(1);
     setOriginalAccountingYear(new Date().getFullYear());
+    setOriginalDestinationAccountingMonth(1);
+    setOriginalDestinationAccountingYear(new Date().getFullYear());
   };
 
   const handleUpdate = async () => {
@@ -882,10 +1040,15 @@ export default function Transactions({
     // Check if user explicitly changed accounting fields
     const accountingExplicitlyChanged =
       editAccountingMonth !== originalAccountingMonth || editAccountingYear !== originalAccountingYear;
+    const destinationAccountingExplicitlyChanged =
+      editDestinationAccountingMonth !== originalDestinationAccountingMonth ||
+      editDestinationAccountingYear !== originalDestinationAccountingYear;
 
     // Check if date or payment method changed (which would affect accounting calculation)
     const dateChanged = editDate !== originalDate;
     const paymentMethodChanged = editPaymentMethodId !== originalPaymentMethodId;
+    const sourceAccountChanged = editSourceAccount !== originalSourceAccount;
+    const destinationAccountChanged = editDestAccount !== originalDestAccount;
 
     setIsSubmitting(true);
     try {
@@ -895,8 +1058,6 @@ export default function Transactions({
         const dest = parseAccountString(editDestAccount);
         if (!source || !dest) return;
 
-        // Only send accounting fields if user explicitly changed them
-        // Otherwise, let backend recalculate if date changed
         const transferData: Parameters<typeof updateTransfer>[1] = {
           date: parseDateInput(editDate),
           amount: parseFloat(editAmount),
@@ -905,11 +1066,21 @@ export default function Transactions({
           destinationAccountId: dest.id,
         };
 
-        if (accountingExplicitlyChanged) {
-          transferData.accountingMonth = editAccountingMonth;
-          transferData.accountingYear = editAccountingYear;
+        if (editSourcePeriodOverridden || accountingExplicitlyChanged) {
+          transferData.sourceAccountingMonth = editAccountingMonth;
+          transferData.sourceAccountingYear = editAccountingYear;
+        } else if (dateChanged || sourceAccountChanged) {
+          transferData.sourceAccountingMonth = editAccountingMonth;
+          transferData.sourceAccountingYear = editAccountingYear;
         }
-        // Note: Backend will recalculate if date changed and no explicit accounting provided
+
+        if (editDestinationPeriodOverridden || destinationAccountingExplicitlyChanged) {
+          transferData.destinationAccountingMonth = editDestinationAccountingMonth;
+          transferData.destinationAccountingYear = editDestinationAccountingYear;
+        } else if (dateChanged || destinationAccountChanged) {
+          transferData.destinationAccountingMonth = editDestinationAccountingMonth;
+          transferData.destinationAccountingYear = editDestinationAccountingYear;
+        }
 
         await updateTransfer(numericId, transferData);
       } else {
@@ -996,11 +1167,16 @@ export default function Transactions({
 
   // Calculate total moved to savings accounts (transfers where destination is a savings account)
   const filteredTransfers = filteredEntries.filter((e) => e.type === 'transfer').map((e) => e.transfer!);
+  const transferSideMatchesAccountingFilter = (transfer: Transfer, side: 'source' | 'destination') => {
+    if (!filters.accountingPeriod) return true;
+    const period = side === 'source' ? transferSourcePeriod(transfer) : transferDestinationPeriod(transfer);
+    return accountingPeriodKey(period.month, period.year) === filters.accountingPeriod;
+  };
   const totalToSavings = filteredTransfers
-    .filter((t) => t.destinationAccount.isSavingsAccount)
+    .filter((t) => t.destinationAccount.isSavingsAccount && transferSideMatchesAccountingFilter(t, 'destination'))
     .reduce((sum, t) => sum + t.amount, 0);
   const totalFromSavings = filteredTransfers
-    .filter((t) => t.sourceAccount.isSavingsAccount)
+    .filter((t) => t.sourceAccount.isSavingsAccount && transferSideMatchesAccountingFilter(t, 'source'))
     .reduce((sum, t) => sum + t.amount, 0);
   const netSavings = totalToSavings - totalFromSavings;
 
@@ -1137,32 +1313,36 @@ export default function Transactions({
       </div>
 
       {/* Bulk Import Modal */}
-      {!readOnly && <BulkImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        yearId={yearId}
-        groups={groups}
-        onImportComplete={() => {
-          loadTransactions();
-          onTransactionsChanged?.();
-        }}
-      />}
+      {!readOnly && (
+        <BulkImportModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          yearId={yearId}
+          groups={groups}
+          onImportComplete={() => {
+            loadTransactions();
+            onTransactionsChanged?.();
+          }}
+        />
+      )}
 
       {/* Add Transaction/Transfer Form */}
-      {!readOnly && <NewTransactionForm
-        year={year}
-        yearId={yearId}
-        categories={allItems}
-        transactions={transactions}
-        paymentMethods={paymentMethods}
-        transferAccounts={transferAccounts}
-        isSubmitting={isSubmitting}
-        onSubmittingChange={setIsSubmitting}
-        onCreated={async () => {
-          await loadTransactions();
-          onTransactionsChanged?.();
-        }}
-      />}
+      {!readOnly && (
+        <NewTransactionForm
+          year={year}
+          yearId={yearId}
+          categories={allItems}
+          transactions={transactions}
+          paymentMethods={paymentMethods}
+          transferAccounts={transferAccounts}
+          isSubmitting={isSubmitting}
+          onSubmittingChange={setIsSubmitting}
+          onCreated={async () => {
+            await loadTransactions();
+            onTransactionsChanged?.();
+          }}
+        />
+      )}
 
       {/* Transactions List */}
       <div className="transactions-list">
@@ -1410,7 +1590,7 @@ export default function Transactions({
                               <input
                                 type="text"
                                 value={editDate}
-                                onChange={(e) => setEditDate(e.target.value)}
+                                onChange={(e) => handleEditDateChange(e.target.value)}
                                 placeholder={t('transactions.datePlaceholder')}
                                 className={`edit-input ${!isValidDateFormat(editDate) && editDate ? 'invalid' : ''}`}
                                 // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
@@ -1423,7 +1603,7 @@ export default function Transactions({
                                 onChange={(e) => {
                                   if (e.target.value) {
                                     const [y, m, d] = e.target.value.split('-');
-                                    setEditDate(`${d}/${m}/${y}`);
+                                    handleEditDateChange(`${d}/${m}/${y}`);
                                   }
                                 }}
                               />
@@ -1452,32 +1632,75 @@ export default function Transactions({
                               </button>
                             </div>
                           </td>
-                          <td className="accounting-edit-cell">
-                            <select
-                              value={editAccountingMonth}
-                              onChange={(e) => setEditAccountingMonth(Number(e.target.value))}
-                              className="edit-select accounting-month-select"
-                            >
-                              {monthNames.map((name, i) => (
-                                <option key={i + 1} value={i + 1}>
-                                  {name}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              type="number"
-                              value={editAccountingYear}
-                              onChange={(e) => setEditAccountingYear(Number(e.target.value))}
-                              className="edit-input accounting-year-input"
-                              min="2000"
-                              max="2100"
-                            />
+                          <td className="accounting-edit-cell transfer-accounting-edit-cell">
+                            <div className="transfer-accounting-edit-row">
+                              <span className="transfer-period-label">{t('transactions.sourceAccountingShort')}</span>
+                              <select
+                                aria-label={t('transactions.sourceAccountingMonth')}
+                                value={editAccountingMonth}
+                                onChange={(e) => {
+                                  setEditAccountingMonth(Number(e.target.value));
+                                  setEditSourcePeriodOverridden(true);
+                                }}
+                                className="edit-select accounting-month-select"
+                              >
+                                {monthNames.map((name, i) => (
+                                  <option key={i + 1} value={i + 1}>
+                                    {name}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                aria-label={t('transactions.sourceAccountingYear')}
+                                type="number"
+                                value={editAccountingYear}
+                                onChange={(e) => {
+                                  setEditAccountingYear(Number(e.target.value));
+                                  setEditSourcePeriodOverridden(true);
+                                }}
+                                className="edit-input accounting-year-input"
+                                min="2000"
+                                max="2100"
+                              />
+                            </div>
+                            <div className="transfer-accounting-edit-row">
+                              <span className="transfer-period-label">
+                                {t('transactions.destinationAccountingShort')}
+                              </span>
+                              <select
+                                aria-label={t('transactions.destinationAccountingMonth')}
+                                value={editDestinationAccountingMonth}
+                                onChange={(e) => {
+                                  setEditDestinationAccountingMonth(Number(e.target.value));
+                                  setEditDestinationPeriodOverridden(true);
+                                }}
+                                className="edit-select accounting-month-select"
+                              >
+                                {monthNames.map((name, i) => (
+                                  <option key={i + 1} value={i + 1}>
+                                    {name}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                aria-label={t('transactions.destinationAccountingYear')}
+                                type="number"
+                                value={editDestinationAccountingYear}
+                                onChange={(e) => {
+                                  setEditDestinationAccountingYear(Number(e.target.value));
+                                  setEditDestinationPeriodOverridden(true);
+                                }}
+                                className="edit-input accounting-year-input"
+                                min="2000"
+                                max="2100"
+                              />
+                            </div>
                           </td>
                           <td>
                             <div className="transfer-edit-accounts">
                               <select
                                 value={editSourceAccount}
-                                onChange={(e) => setEditSourceAccount(e.target.value)}
+                                onChange={(e) => handleEditSourceAccountChange(e.target.value)}
                                 className="edit-select"
                               >
                                 <option value="">{t('transactions.sourceAccount')}</option>
@@ -1503,7 +1726,7 @@ export default function Transactions({
                               <span className="transfer-arrow-small">→</span>
                               <select
                                 value={editDestAccount}
-                                onChange={(e) => setEditDestAccount(e.target.value)}
+                                onChange={(e) => handleEditDestinationAccountChange(e.target.value)}
                                 className="edit-select"
                               >
                                 <option value="">{t('transactions.destinationAccount')}</option>
@@ -1598,7 +1821,7 @@ export default function Transactions({
                               <input
                                 type="text"
                                 value={editDate}
-                                onChange={(e) => setEditDate(e.target.value)}
+                                onChange={(e) => handleEditDateChange(e.target.value)}
                                 placeholder={t('transactions.datePlaceholder')}
                                 pattern="\d{2}/\d{2}/\d{4}"
                                 className={`edit-input ${!isValidDateFormat(editDate) && editDate ? 'invalid' : ''}`}
@@ -1612,7 +1835,7 @@ export default function Transactions({
                                 onChange={(e) => {
                                   if (e.target.value) {
                                     const [y, m, d] = e.target.value.split('-');
-                                    setEditDate(`${d}/${m}/${y}`);
+                                    handleEditDateChange(`${d}/${m}/${y}`);
                                   }
                                 }}
                               />
@@ -1645,6 +1868,7 @@ export default function Transactions({
                             <select
                               value={editAccountingMonth}
                               onChange={(e) => setEditAccountingMonth(Number(e.target.value))}
+                              aria-label={t('transactions.accountingMonth')}
                               className="edit-select accounting-month-select"
                             >
                               {monthNames.map((name, i) => (
@@ -1657,6 +1881,7 @@ export default function Transactions({
                               type="number"
                               value={editAccountingYear}
                               onChange={(e) => setEditAccountingYear(Number(e.target.value))}
+                              aria-label={t('transactions.accountingYear')}
                               className="edit-input accounting-year-input"
                               min="2000"
                               max="2100"
@@ -1838,7 +2063,9 @@ export default function Transactions({
                         </td>
                         <td className="date-cell">{formatDateDisplay(entry.date)}</td>
                         <td className="accounting-cell">
-                          {formatAccountingPeriod(entry.accountingMonth, entry.accountingYear, monthNames)}
+                          {isTransfer && transfer
+                            ? formatTransferAccountingPeriod(transfer, monthNames)
+                            : formatAccountingPeriod(entry.accountingMonth, entry.accountingYear, monthNames)}
                         </td>
                         <td className="third-party-cell">
                           {isTransfer ? (
@@ -1905,62 +2132,64 @@ export default function Transactions({
                           {formatCurrency(entry.amount, true)}
                         </td>
                         <td className="actions-cell">
-                          {!readOnly && <>
-                          {!isTransfer && transaction?.warning === 'potential_duplicate' && (
-                            <button
-                              className="btn-icon dismiss-warning"
-                              onClick={() => handleDismissWarning(transaction.id)}
-                              title={t('transactions.dismissWarning')}
-                            >
-                              <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
+                          {!readOnly && (
+                            <>
+                              {!isTransfer && transaction?.warning === 'potential_duplicate' && (
+                                <button
+                                  className="btn-icon dismiss-warning"
+                                  onClick={() => handleDismissWarning(transaction.id)}
+                                  title={t('transactions.dismissWarning')}
+                                >
+                                  <svg
+                                    width="16"
+                                    height="16"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                  >
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                </button>
+                              )}
+                              <button
+                                className="btn-icon edit"
+                                onClick={() =>
+                                  isTransfer ? startEditTransfer(transfer!) : startEditTransaction(transaction!)
+                                }
+                                title={t('common.edit')}
                               >
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                            </button>
+                                <svg
+                                  width="16"
+                                  height="16"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                </svg>
+                              </button>
+                              <button
+                                className="btn-icon delete"
+                                onClick={() => handleDelete(entry.id)}
+                                title={t('common.delete')}
+                              >
+                                <svg
+                                  width="16"
+                                  height="16"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                </svg>
+                              </button>
+                            </>
                           )}
-                          <button
-                            className="btn-icon edit"
-                            onClick={() =>
-                              isTransfer ? startEditTransfer(transfer!) : startEditTransaction(transaction!)
-                            }
-                            title={t('common.edit')}
-                          >
-                            <svg
-                              width="16"
-                              height="16"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                          </button>
-                          <button
-                            className="btn-icon delete"
-                            onClick={() => handleDelete(entry.id)}
-                            title={t('common.delete')}
-                          >
-                            <svg
-                              width="16"
-                              height="16"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <polyline points="3 6 5 6 21 6" />
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                            </svg>
-                          </button>
-                          </>}
                         </td>
                       </>
                     )}

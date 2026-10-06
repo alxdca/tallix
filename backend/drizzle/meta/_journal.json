@@ -239,6 +239,13 @@
       "when": 1790812800000,
       "tag": "0034_add_inherited_account_balances",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790899200000,
+      "tag": "0035_add_transfer_destination_accounting",
+      "breakpoints": true
     }
   ]
 }

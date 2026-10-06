@@ -34,6 +34,10 @@ Potential duplicates are highlighted with a warning background. You can dismiss 
 
 Transfers represent money moved between accounts and do not affect budget categories. Keep them separate from standard transactions to avoid inflating expenses or income.
 
+Transfers have one accounting period per side. The source side uses the source payment method settlement day, and the destination side uses the destination payment method settlement day. For example, a card top-up into Revolut can debit the card in September while crediting Revolut in August.
+
+When you edit an existing transfer, you can override the source and destination accounting periods separately. Older transfers and older backups that only have one accounting period keep using that same period for both sides until you edit them.
+
 ## Tips
 
 - Use third party names consistently for better search and duplicate detection.
