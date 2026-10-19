@@ -2464,7 +2464,8 @@ td.zero {
   flex-shrink: 0;
 }
 
-.transaction-form .description-input {
+.transaction-form .description-input,
+.transaction-form .comment-input {
   flex: 2;
   min-width: 180px;
 }
@@ -6887,6 +6888,92 @@ td.zero {
 
 .budget-planning-table td.category-cell:hover .chevron {
   opacity: 1;
+}
+
+/* Fit the planning year into laptop widths without changing the playground. */
+.budget-planning-compact {
+  padding: 16px;
+  gap: 16px;
+  min-width: 0;
+  --font-mono: var(--font-sans);
+}
+
+.budget-planning-compact .budget-planning-table {
+  width: 100%;
+  min-width: 1000px;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-planning-compact .budget-planning-table thead th {
+  min-width: 0;
+  padding: 10px 2px;
+  white-space: normal;
+  letter-spacing: 0;
+}
+
+.budget-planning-compact .budget-planning-table .col-category {
+  width: 12%;
+  padding-left: 8px;
+}
+
+.budget-planning-compact .budget-planning-table .col-actions {
+  width: 32px;
+}
+
+.budget-planning-compact .budget-planning-table .col-annual,
+.budget-planning-compact .budget-planning-table .col-yearly {
+  width: 7%;
+}
+
+.budget-planning-compact .budget-planning-table .col-remaining {
+  width: 8%;
+}
+
+.budget-planning-compact .budget-planning-table tbody td {
+  padding: 6px 2px;
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.budget-planning-compact .budget-planning-table .section-row td.category-cell {
+  padding-left: 8px;
+}
+
+.budget-planning-compact .budget-planning-table .section-row td.month-total,
+.budget-planning-compact .budget-planning-table .group-row td.month-total {
+  font-size: 0.6875rem;
+}
+
+.budget-planning-compact .budget-planning-table .group-row td.category-cell {
+  padding-left: 16px;
+}
+
+.budget-planning-compact .budget-planning-table .item-row td.category-cell {
+  padding-left: 24px;
+}
+
+.budget-planning-compact .budget-planning-table .budget-value {
+  min-width: 0;
+  padding: 4px 0;
+  font-size: inherit;
+}
+
+.budget-planning-compact .budget-planning-table .budget-input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 0;
+  font-size: inherit;
+}
+
+.budget-planning-compact .budget-planning-table .item-row td.remaining-budget-cell .remaining-content {
+  flex-wrap: wrap;
+  gap: 2px 4px;
+}
+
+.budget-planning-compact .budget-planning-table .item-row td.remaining-budget-cell .remaining-amount {
+  font-size: inherit;
 }
 
 /* Quick Fill Modal */

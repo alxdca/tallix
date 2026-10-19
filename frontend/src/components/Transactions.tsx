@@ -168,6 +168,7 @@ export interface TransactionsFilters {
   accountingPeriod: string;
   thirdParty: string;
   description: string;
+  comment: string;
   paymentMethods: number[]; // Multiple payment method IDs can be selected
   categoryFilter: string; // Combined: "section:income", "group:Salaires"
 }
@@ -204,6 +205,7 @@ export default function Transactions({
     accountingPeriod: '',
     thirdParty: '',
     description: '',
+    comment: '',
     paymentMethods: [],
     categoryFilter: '',
   });
@@ -451,6 +453,7 @@ export default function Transactions({
     filters.accountingPeriod ||
     filters.thirdParty ||
     filters.description ||
+    filters.comment ||
     filters.paymentMethods.length > 0 ||
     filters.categoryFilter;
 
@@ -517,6 +520,10 @@ export default function Transactions({
     if (filters.description) {
       const search = filters.description.toLowerCase();
       result = result.filter((e) => e.description?.toLowerCase().includes(search));
+    }
+    if (filters.comment) {
+      const search = filters.comment.toLowerCase();
+      result = result.filter((e) => e.transaction?.comment?.toLowerCase().includes(search));
     }
     if (filters.paymentMethods.length > 0) {
       result = result.filter((e) => {
@@ -889,6 +896,7 @@ export default function Transactions({
       accountingPeriod: '',
       thirdParty: '',
       description: '',
+      comment: '',
       paymentMethods: [],
       categoryFilter: '',
     });
@@ -1461,7 +1469,16 @@ export default function Transactions({
                     className="column-filter"
                   />
                 </th>
-                <th></th>
+                <th>
+                  <input
+                    type="text"
+                    aria-label={t('transactions.comment')}
+                    placeholder={t('transactions.filterPlaceholder')}
+                    value={filters.comment}
+                    onChange={(e) => setFilters((f) => ({ ...f, comment: e.target.value }))}
+                    className="column-filter comment-filter"
+                  />
+                </th>
                 <th className="multi-select-filter-cell">
                   <div className="multi-select-filter">
                     <button

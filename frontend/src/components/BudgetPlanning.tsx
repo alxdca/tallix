@@ -52,7 +52,12 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   const [quickFillMonths, setQuickFillMonths] = useState<Set<number>>(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
 
   const sections = useMemo(
-    () => organizeSections(groups, { income: t('budget.income'), expense: t('budget.expenses'), savings: t('budget.savings') }),
+    () =>
+      organizeSections(groups, {
+        income: t('budget.income'),
+        expense: t('budget.expenses'),
+        savings: t('budget.savings'),
+      }),
     [groups, t]
   );
 
@@ -264,7 +269,7 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
   };
 
   return (
-    <div className="budget-planning-container">
+    <div className="budget-planning-container budget-planning-compact">
       <div className="budget-planning-header">
         <h2>{t('planning.title', { year })}</h2>
         <p className="budget-planning-subtitle">{t('planning.subtitle')}</p>
@@ -276,7 +281,9 @@ export default function BudgetPlanning({ year, groups, months, onDataChanged }: 
             <thead>
               <tr>
                 <th className="col-category sticky-col">{t('planning.category')}</th>
-                <th className="col-actions">{t('planning.actions')}</th>
+                <th className="col-actions" aria-label={t('planning.actions')} title={t('planning.actions')}>
+                  <span aria-hidden="true">+</span>
+                </th>
                 <th className="col-annual">{t('planning.annualTotal')}</th>
                 <th className="col-yearly">{t('planning.variable')}</th>
                 <th className="col-remaining">{t('planning.remaining')}</th>

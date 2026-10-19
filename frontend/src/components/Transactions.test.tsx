@@ -268,6 +268,53 @@ afterEach(() => {
 });
 
 describe('transaction filters', () => {
+  it('matches comment text regardless of case, combines filters, and clears them', async () => {
+    const { container } = await renderTransactions(
+      [
+        transaction({ id: 1, description: 'Office purchase', comment: 'For the OFFICE kitchen' }),
+        transaction({ id: 2, description: 'March purchase', comment: 'office supplies', accountingMonth: 3 }),
+        transaction({ id: 3, description: 'Office without a comment', comment: null }),
+        transaction({ id: 4, description: 'Office with an empty comment', comment: '' }),
+        transaction({ id: 5, description: 'Personal purchase', comment: 'Personal kitchen' }),
+      ],
+      [transfer({ description: 'Office transfer' })]
+    );
+
+    const commentFilter = container.querySelector<HTMLInputElement>('input.comment-filter')!;
+    expect(commentFilter.getAttribute('aria-label')).toBe('Comment');
+    change(commentFilter, 'oFfIcE');
+
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(2);
+    expect(container.querySelector('tbody')?.textContent).toContain('Office purchase');
+    expect(container.querySelector('tbody')?.textContent).toContain('March purchase');
+    expect(container.querySelector('.btn-clear-filters')).not.toBeNull();
+
+    change(selectByClass(container, 'accounting-period-filter'), '2026-2');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+    expect(container.querySelector('tbody')?.textContent).toContain('Office purchase');
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('.btn-clear-filters')!.click();
+    });
+    expect(commentFilter.value).toBe('');
+    expect(selectByClass(container, 'accounting-period-filter').value).toBe('');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(6);
+    expect(container.querySelector('.btn-clear-filters')).toBeNull();
+  });
+
+  it('can clear a comment filter when no transactions match', async () => {
+    const { container } = await renderTransactions([transaction({ comment: 'Personal purchase' })]);
+
+    change(container.querySelector<HTMLInputElement>('input.comment-filter')!, 'office');
+    expect(container.textContent).toContain('No transactions match the filters');
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('.empty-transactions .btn-link')!.click();
+    });
+    expect(container.querySelector<HTMLInputElement>('input.comment-filter')!.value).toBe('');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+  });
+
   it('counts savings only in the savings side accounting period', async () => {
     const { container } = await renderTransactions(
       [],
@@ -416,6 +463,7 @@ describe('new transaction form', () => {
     change(byPlaceholder(container, 'DD/MM/YYYY'), '15/03/2026');
     change(byPlaceholder(container, 'Third party (recipient/sender)'), '  Coffee Shop  ');
     change(byPlaceholder(container, 'Description (optional)'), '  beans  ');
+    change(byPlaceholder(container, 'Comment'), '  For the office  ');
     change(selectByClass(container, 'payment-method-select'), '101');
     change(byPlaceholder(container, 'Amount'), '8.75');
     change(selectByClass(container, 'category-select'), '20');
@@ -427,6 +475,7 @@ describe('new transaction form', () => {
       itemId: 20,
       date: '2026-03-15',
       description: 'beans',
+      comment: 'For the office',
       thirdParty: 'Coffee Shop',
       paymentMethodId: 101,
       amount: 8.75,
@@ -434,12 +483,27 @@ describe('new transaction form', () => {
     expect(byPlaceholder(container, 'DD/MM/YYYY').value).toBe('15/03/2026');
     expect(byPlaceholder(container, 'Third party (recipient/sender)').value).toBe('');
     expect(byPlaceholder(container, 'Description (optional)').value).toBe('');
+    expect(byPlaceholder(container, 'Comment').value).toBe('');
     expect(byPlaceholder(container, 'Amount').value).toBe('');
     expect(selectByClass(container, 'payment-method-select').value).toBe('');
     expect(selectByClass(container, 'category-select').value).toBe('');
     expect(mockedApi.fetchTransactions).toHaveBeenCalledTimes(2);
     expect(mockedApi.fetchTransfers).toHaveBeenCalledTimes(2);
     expect(onTransactionsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['', '   '])('creates a transaction without an optional comment (%j)', async (comment) => {
+    mockedApi.createTransaction.mockResolvedValue(transaction({ id: 99 }));
+    const { container } = await renderTransactions();
+
+    change(byPlaceholder(container, 'Comment'), comment);
+    change(selectByClass(container, 'payment-method-select'), '100');
+    change(byPlaceholder(container, 'Amount'), '4.5');
+    change(selectByClass(container, 'category-select'), '20');
+    submit(container.querySelector('form.transaction-form')!);
+    await flush();
+
+    expect(mockedApi.createTransaction).toHaveBeenCalledWith(expect.objectContaining({ comment: undefined }));
   });
 
   it('preserves the transaction draft when createTransaction rejects', async () => {
@@ -449,6 +513,7 @@ describe('new transaction form', () => {
     change(byPlaceholder(container, 'DD/MM/YYYY'), '16/03/2026');
     change(byPlaceholder(container, 'Third party (recipient/sender)'), 'Bakery');
     change(byPlaceholder(container, 'Description (optional)'), 'Bread');
+    change(byPlaceholder(container, 'Comment'), 'Keep this comment');
     change(selectByClass(container, 'payment-method-select'), '100');
     change(byPlaceholder(container, 'Amount'), '4.5');
     change(selectByClass(container, 'category-select'), '20');
@@ -458,6 +523,7 @@ describe('new transaction form', () => {
     expect(byPlaceholder(container, 'DD/MM/YYYY').value).toBe('16/03/2026');
     expect(byPlaceholder(container, 'Third party (recipient/sender)').value).toBe('Bakery');
     expect(byPlaceholder(container, 'Description (optional)').value).toBe('Bread');
+    expect(byPlaceholder(container, 'Comment').value).toBe('Keep this comment');
     expect(byPlaceholder(container, 'Amount').value).toBe('4.5');
     expect(selectByClass(container, 'payment-method-select').value).toBe('100');
     expect(selectByClass(container, 'category-select').value).toBe('20');
@@ -596,6 +662,7 @@ describe('new transfer form', () => {
         .find((button) => button.textContent?.includes('Transfer'))
         ?.click();
     });
+    expect(container.querySelector('input[placeholder="Comment"]')).toBeNull();
     change(byPlaceholder(container, 'DD/MM/YYYY'), '17/03/2026');
     change(selectByClass(container, 'account-select'), '100');
     const accountSelects = container.querySelectorAll<HTMLSelectElement>('select.account-select');

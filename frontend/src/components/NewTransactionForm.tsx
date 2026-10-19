@@ -47,6 +47,7 @@ export default function NewTransactionForm({
   const [newEntryType, setNewEntryType] = useState<'transaction' | 'transfer'>('transaction');
   const [newDate, setNewDate] = useState(getTodayDisplay);
   const [newDescription, setNewDescription] = useState('');
+  const [newComment, setNewComment] = useState('');
   const [newThirdParty, setNewThirdParty] = useState('');
   const [newPaymentMethodId, setNewPaymentMethodId] = useState<number | null>(null);
   const [newAmount, setNewAmount] = useState('');
@@ -164,11 +165,13 @@ export default function NewTransactionForm({
           itemId: newItemId,
           date: parseDateInput(newDate), // Convert DD/MM/YYYY to YYYY-MM-DD
           description: newDescription.trim() || undefined,
+          comment: newComment.trim() || undefined,
           thirdParty: newThirdParty.trim() || undefined,
           paymentMethodId: newPaymentMethodId,
           amount: parseFloat(newAmount),
         });
         setNewDescription('');
+        setNewComment('');
         setNewThirdParty('');
         setNewPaymentMethodId(null);
         setAutoPaymentMethodFromThirdParty(false);
@@ -402,6 +405,14 @@ export default function NewTransactionForm({
               onChange={(e) => setNewAmount(e.target.value)}
               step="0.01"
               className="form-input amount-input"
+            />
+            <input
+              type="text"
+              aria-label={t('transactions.comment')}
+              placeholder={t('transactions.commentPlaceholder')}
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              className="form-input comment-input"
             />
           </div>
         )}
