@@ -315,6 +315,37 @@ describe('transaction filters', () => {
     expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
   });
 
+  it('keeps filters mounted and focused so a search with no matches can be edited', async () => {
+    const { container } = await renderTransactions([transaction({ comment: 'Personal purchase' })]);
+    const table = container.querySelector('.transactions-table');
+    const filterRow = container.querySelector('.filter-row');
+    const commentFilter = container.querySelector<HTMLInputElement>('input.comment-filter')!;
+
+    act(() => commentFilter.focus());
+    change(commentFilter, 'office');
+
+    expect(container.querySelector('.transactions-table')).toBe(table);
+    expect(container.querySelector('.filter-row')).toBe(filterRow);
+    expect(document.activeElement).toBe(commentFilter);
+    expect(commentFilter.value).toBe('office');
+    expect(container.textContent).toContain('No transactions match the filters');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(0);
+
+    change(commentFilter, 'personal');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+    expect(container.querySelector('.empty-transactions')).toBeNull();
+    expect(document.activeElement).toBe(commentFilter);
+  });
+
+  it('keeps filters visible when there are no recorded entries', async () => {
+    const { container } = await renderTransactions([], []);
+
+    expect(container.querySelector('.filter-row')).not.toBeNull();
+    expect(container.querySelector('input.comment-filter')).not.toBeNull();
+    expect(container.textContent).toContain('No transactions recorded');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(0);
+  });
+
   it('counts savings only in the savings side accounting period', async () => {
     const { container } = await renderTransactions(
       [],

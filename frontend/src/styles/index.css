@@ -2414,31 +2414,33 @@ td.zero {
 
 .edit-date-wrapper {
   width: 100%;
-  min-width: 120px;
+  min-width: 0;
 }
 
 .edit-date-wrapper .edit-input {
   width: 100%;
-  min-width: 95px;
+  min-width: 0;
   padding-right: 28px;
 }
 
 /* Transfer edit mode */
 .transfer-edit-accounts {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 4px;
 }
 
 .transfer-edit-accounts .edit-select {
-  flex: 1;
-  min-width: 110px;
+  min-width: 0;
   font-size: 0.8rem;
 }
 
 .transfer-edit-accounts .transfer-arrow-small {
   color: var(--text-muted);
   flex-shrink: 0;
+  align-self: center;
+  transform: rotate(90deg);
 }
 
 .transfer-accounting-row {
@@ -2507,8 +2509,14 @@ td.zero {
   gap: 16px;
 }
 
+.transactions-table-scroll {
+  overflow-x: auto;
+}
+
 .transactions-table {
   width: 100%;
+  min-width: 1360px;
+  table-layout: fixed;
   border-collapse: collapse;
 }
 
@@ -2525,8 +2533,7 @@ td.zero {
 }
 
 .transactions-table th:last-child {
-  text-align: center;
-  width: 100px;
+  width: 120px;
 }
 
 .transactions-table td {
@@ -2534,6 +2541,32 @@ td.zero {
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   vertical-align: middle;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.transactions-table .col-payment,
+.transactions-table .col-amount {
+  width: 120px;
+}
+
+.transactions-table .col-date {
+  width: 120px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.transactions-table .col-amount {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.transactions-table .col-comment {
+  width: 140px;
+}
+
+.transactions-table .col-category {
+  width: 180px;
 }
 
 .transactions-table tbody tr:hover {
@@ -2561,6 +2594,8 @@ td.zero {
   font-size: 0.8125rem;
   color: var(--text-muted);
   width: 120px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .transactions-table .accounting-cell {
@@ -2571,8 +2606,7 @@ td.zero {
 }
 
 .transactions-table .col-accounting {
-  width: 100px;
-  text-align: center;
+  width: 128px;
 }
 
 .transactions-table .col-third-party {
@@ -2580,23 +2614,25 @@ td.zero {
 }
 
 .transactions-table .col-description {
-  min-width: 220px;
+  width: 180px;
 }
 
 .accounting-edit-cell {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   align-items: center;
 }
 
 .transfer-accounting-edit-cell {
-  min-width: 18rem;
+  min-width: 0;
   align-items: flex-start;
   flex-direction: column;
 }
 
 .transfer-accounting-edit-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
 }
@@ -2690,13 +2726,12 @@ td.zero {
 }
 
 .transactions-table .actions-cell {
-  text-align: center;
   width: 120px;
   white-space: nowrap;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
+}
+
+.transactions-table .actions-cell .btn-icon + .btn-icon {
+  margin-left: 6px;
 }
 
 .transactions-table .actions-cell .btn-icon {
@@ -2730,15 +2765,22 @@ td.zero {
   width: 100px;
 }
 
-/* Select column */
-.transactions-table .col-select {
-  width: 40px;
-  text-align: center;
+.transactions-table .edit-date-wrapper .edit-input {
+  padding-left: 6px;
+  padding-right: 28px;
+  font-size: 0.75rem;
 }
 
-.transactions-table .col-order {
-  width: 44px;
-  text-align: center;
+/* Select column */
+.transactions-table .col-select {
+  width: 48px;
+}
+
+.transactions-table .col-order,
+.transactions-table .order-cell {
+  width: 36px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .transactions-table .col-select input[type="checkbox"] {
@@ -2746,11 +2788,6 @@ td.zero {
   height: 16px;
   cursor: pointer;
   accent-color: var(--accent-budget);
-}
-
-.transactions-table .order-cell {
-  width: 44px;
-  text-align: center;
 }
 
 .transactions-table .order-controls {
@@ -2769,7 +2806,7 @@ td.zero {
 
 .transactions-table .order-placeholder {
   display: inline-block;
-  width: 28px;
+  width: 18px;
   height: 1px;
 }
 
@@ -2789,11 +2826,24 @@ td.zero {
   vertical-align: middle;
 }
 
+.transactions-table .col-order svg {
+  margin-left: 0;
+}
+
 /* Filter row */
 .transactions-table .filter-row th {
-  padding: 8px 16px 12px;
+  padding: 8px 16px 12px 11px;
   background: var(--bg-tertiary);
   border-bottom: 2px solid var(--border-color);
+}
+
+.transactions-table .filter-row .col-date {
+  padding-left: 4px;
+  padding-right: 8px;
+}
+
+.transactions-table .filter-row .date-range-input {
+  padding-left: 7px;
 }
 
 .transactions-table .column-filter {

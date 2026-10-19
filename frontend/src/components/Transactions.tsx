@@ -1354,26 +1354,7 @@ export default function Transactions({
 
       {/* Transactions List */}
       <div className="transactions-list">
-        {unifiedEntries.length === 0 ? (
-          <div className="empty-transactions">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <line x1="12" y1="1" x2="12" y2="23" />
-              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
-            <p>{t('transactions.empty')}</p>
-          </div>
-        ) : filteredEntries.length === 0 ? (
-          <div className="empty-transactions">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <p>{t('transactions.emptyFiltered')}</p>
-            <button className="btn-link" onClick={clearFilters}>
-              {t('transactions.clearFilters')}
-            </button>
-          </div>
-        ) : (
+        <div className="transactions-table-scroll">
           <table className="transactions-table">
             <thead>
               <tr className="header-row">
@@ -1389,10 +1370,15 @@ export default function Transactions({
                     disabled={readOnly}
                   />
                 </th>
-                <th className="col-order sortable" onClick={() => handleSort('manual')}>
-                  {t('transactions.order')} <SortIcon field="manual" />
+                <th
+                  className="col-order sortable"
+                  onClick={() => handleSort('manual')}
+                  aria-label={t('transactions.order')}
+                  title={t('transactions.order')}
+                >
+                  <SortIcon field="manual" />
                 </th>
-                <th className="sortable" onClick={() => handleSort('date')}>
+                <th className="col-date sortable" onClick={() => handleSort('date')}>
                   {t('transactions.date')} <SortIcon field="date" />
                 </th>
                 <th className="col-accounting" title={t('transactions.accountingMonth')}>
@@ -1404,14 +1390,14 @@ export default function Transactions({
                 <th className="col-description sortable" onClick={() => handleSort('description')}>
                   {t('transactions.description')} <SortIcon field="description" />
                 </th>
-                <th>{t('transactions.comment')}</th>
-                <th className="sortable" onClick={() => handleSort('paymentMethod')}>
+                <th className="col-comment">{t('transactions.comment')}</th>
+                <th className="col-payment sortable" onClick={() => handleSort('paymentMethod')}>
                   {t('transactions.paymentMethod')} <SortIcon field="paymentMethod" />
                 </th>
-                <th className="sortable" onClick={() => handleSort('category')}>
+                <th className="col-category sortable" onClick={() => handleSort('category')}>
                   {t('transactions.category')} <SortIcon field="category" />
                 </th>
-                <th className="sortable" onClick={() => handleSort('amount')}>
+                <th className="col-amount sortable" onClick={() => handleSort('amount')}>
                   {t('transactions.amount')} <SortIcon field="amount" />
                 </th>
                 <th>{t('transactions.actions')}</th>
@@ -1419,7 +1405,7 @@ export default function Transactions({
               <tr className="filter-row">
                 <th></th>
                 <th></th>
-                <th>
+                <th className="col-date">
                   <div className="date-range-filter">
                     <DatePicker
                       selectsRange
@@ -1602,7 +1588,7 @@ export default function Transactions({
                           <td className="order-cell">
                             <span className="order-placeholder" />
                           </td>
-                          <td>
+                          <td className="date-cell">
                             <div className="date-input-wrapper edit-date-wrapper">
                               <input
                                 type="text"
@@ -1833,7 +1819,7 @@ export default function Transactions({
                           <td className="order-cell">
                             <span className="order-placeholder" />
                           </td>
-                          <td>
+                          <td className="date-cell">
                             <div className="date-input-wrapper edit-date-wrapper">
                               <input
                                 type="text"
@@ -2215,6 +2201,29 @@ export default function Transactions({
               })}
             </tbody>
           </table>
+        </div>
+        {filteredEntries.length === 0 && (
+          <div className="empty-transactions" role="status">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              {unifiedEntries.length === 0 ? (
+                <>
+                  <line x1="12" y1="1" x2="12" y2="23" />
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                </>
+              ) : (
+                <>
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </>
+              )}
+            </svg>
+            <p>{t(unifiedEntries.length === 0 ? 'transactions.empty' : 'transactions.emptyFiltered')}</p>
+            {hasActiveFilters && (
+              <button className="btn-link" onClick={clearFilters}>
+                {t('transactions.clearFilters')}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
