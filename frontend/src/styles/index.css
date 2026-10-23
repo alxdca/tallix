@@ -7672,7 +7672,11 @@ td.zero {
 /* Account opening links and calculated closing column */
 .accounts-view .accounts-table {
   table-layout: fixed;
-  min-width: 1584px;
+  min-width: 1560px;
+}
+
+.accounts-view .account-name-col {
+  text-align: center;
 }
 
 .accounts-view .account-month-col {
@@ -7683,9 +7687,9 @@ td.zero {
 .accounts-view .account-initial,
 .accounts-view .account-closing-col,
 .accounts-view .account-closing {
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
   padding-inline: 6px;
 }
 

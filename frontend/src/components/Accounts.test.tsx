@@ -308,7 +308,8 @@ describe('account closing balances and links', () => {
     await click(container, '.confirm-dialog-btn.confirm');
     expect(mockedApi.setAccountBalance).toHaveBeenCalledWith(2027, 100, 500, true);
     expect(onDataChanged).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('.account-balance-override')?.textContent).toBe('Manual override');
+    expect(container.querySelector('.account-balance-override')).toBeNull();
+    expect(container.querySelector('.account-balance-status')?.textContent).toBe('Restore link');
     mockedApi.fetchAccounts.mockResolvedValue({ accounts: [source], lastActiveMonth: 0 });
     await click(container, '.account-restore-link');
     expect(mockedApi.restoreAccountBalanceLink).toHaveBeenCalledWith(2027, 100);
@@ -389,6 +390,13 @@ describe('account closing balances and links', () => {
     await edit(container, '500');
     expect(container.querySelector('[role=alertdialog]')?.textContent).toContain('rompt le lien');
     expect(mockedApi.setAccountBalance).not.toHaveBeenCalled();
+    mockedApi.fetchAccounts.mockResolvedValue({
+      accounts: [account({ openingBalanceOverridden: true, canRestoreBalanceLink: true })],
+      lastActiveMonth: 0,
+    });
+    await click(container, '.confirm-dialog-btn.confirm');
+    expect(container.querySelector('.account-balance-status')?.textContent).toBe('Rétablir le lien');
+    expect(container.textContent).not.toContain('Solde manuel');
   });
 });
 
@@ -399,7 +407,8 @@ describe('account edit lifecycle guards', () => {
       vi.fn(),
       { readOnly: true }
     );
-    expect(container.querySelector('.account-balance-override')?.textContent).toBe('Manual override');
+    expect(container.querySelector('.account-balance-status')).toBeNull();
+    expect(container.querySelector('.account-balance-override')).toBeNull();
     expect(container.querySelector('.account-edit-balance')).toBeNull();
     expect(container.querySelector('.account-restore-link')).toBeNull();
     await click(container, '.balance-value');

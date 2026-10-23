@@ -442,24 +442,17 @@ export default function Accounts({ year, months, onDataChanged, readOnly = false
                           {t('accounts.linkedFromYear', { year: account.linkedFromYear })}
                         </span>
                       )}
-                      {(account.openingBalanceOverridden || canRestoreLink) && (
+                      {canRestoreLink && (
                         <div className="account-balance-status">
-                          {account.openingBalanceOverridden && (
-                            <span className="account-balance-override" title={t('accounts.manualOverrideHelp')}>
-                              {t('accounts.manualOverride')}
-                            </span>
-                          )}
-                          {canRestoreLink && (
-                            <button
-                              type="button"
-                              className="account-restore-link"
-                              aria-label={t('accounts.restoreLinkFor', { name: account.name })}
-                              disabled={isSubmitting}
-                              onClick={() => void updateBalance(account.id, null, scope)}
-                            >
-                              {t('accounts.restoreLink')}
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            className="account-restore-link"
+                            aria-label={t('accounts.restoreLinkFor', { name: account.name })}
+                            disabled={isSubmitting}
+                            onClick={() => void updateBalance(account.id, null, scope)}
+                          >
+                            {t('accounts.restoreLink')}
+                          </button>
                         </div>
                       )}
                     </td>
