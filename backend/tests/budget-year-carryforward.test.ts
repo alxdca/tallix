@@ -33,6 +33,7 @@ describe('budget year creation carryforward', () => {
         throw new Error('Unexpected table');
       }),
       query: {
+        budgets: { findFirst: vi.fn().mockResolvedValue(null) },
         budgetYears: {
           findFirst: vi
             .fn()
@@ -136,6 +137,7 @@ describe('budget year creation carryforward', () => {
         throw new Error('Unexpected table');
       }),
       query: {
+        budgets: { findFirst: vi.fn().mockResolvedValue(null) },
         budgetYears: {
           findFirst: vi.fn().mockResolvedValueOnce({ id: 2026, year: 2026 }),
         },

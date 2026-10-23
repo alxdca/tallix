@@ -11,7 +11,7 @@
  * Run: pnpm test -- tests/backup.test.ts
  */
 
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { expect, test } from 'vitest';
@@ -191,7 +191,7 @@ async function setup() {
   // Account balances
   await superuserDb.insert(accountBalances).values([
     { yearId: y2024.id, paymentMethodId: pmChecking.id, initialBalance: '5000.00' },
-    { yearId: y2025.id, paymentMethodId: pmChecking.id, initialBalance: '6000.00' },
+    { yearId: y2025.id, paymentMethodId: pmChecking.id, initialBalance: '6000.00', openingBalanceOverridden: true },
   ]);
 
   // Transfers
@@ -264,6 +264,7 @@ test('Backup export and import', async () => {
     expect(exported.assetValues).toHaveLength(2);
     expect(exported.transfers).toHaveLength(1);
     expect(exported.accountBalances).toHaveLength(2);
+    expect(exported.accountBalances.map((balance) => balance.openingBalanceOverridden).sort()).toEqual([false, true]);
     expect(exported.transfers[0].destinationAccountingMonth).toBe(2);
     expect(exported.transfers[0].destinationAccountingYear).toBe(8024);
 
@@ -390,6 +391,7 @@ test('Backup export and import', async () => {
       return tx.select().from(accountBalances).where(inArray(accountBalances.yearId, bYearIds));
     });
     expect(bAccountBalances).toHaveLength(exported.accountBalances.length);
+    expect(bAccountBalances.map((balance) => balance.openingBalanceOverridden).sort()).toEqual([false, true]);
 
     console.log('  Round-trip: all assertions passed');
 
@@ -709,6 +711,35 @@ test('Backup export and import', async () => {
     expect(postAtomicGroups.length).toBe(preGroupCount);
 
     console.log('  Atomicity: all assertions passed');
+
+    expect(() =>
+      backupSvc.validateBackupPayload({
+        ...exported,
+        accountBalances: exported.accountBalances.map((balance) => ({ ...balance, openingBalanceOverridden: 'yes' })),
+      })
+    ).toThrow(/opening override must be a boolean/);
+
+    const legacyBalances = exported.accountBalances.map(
+      ({ openingBalanceOverridden: _override, ...balance }) => balance
+    );
+    await withTenantContext(userBId, budgetBId, (tx) =>
+      backupSvc.importBackup(tx, userBId, budgetBId, { ...exported, accountBalances: legacyBalances })
+    );
+    const restoredLegacyBalances = await withTenantContext(userBId, budgetBId, async (tx) => {
+      const yearRows = await tx.select().from(budgetYears).where(eq(budgetYears.budgetId, budgetBId));
+      const { inArray } = await import('drizzle-orm');
+      return tx
+        .select()
+        .from(accountBalances)
+        .where(
+          inArray(
+            accountBalances.yearId,
+            yearRows.map((year) => year.id)
+          )
+        );
+    });
+    expect(restoredLegacyBalances).toHaveLength(2);
+    expect(restoredLegacyBalances.every((balance) => balance.openingBalanceOverridden === false)).toBe(true);
 
     console.log('\n--- All backup tests passed ---');
   } finally {

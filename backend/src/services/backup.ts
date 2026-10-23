@@ -109,6 +109,7 @@ export interface BackupAccountBalance {
   paymentMethodId: number;
   initialBalance: string;
   inheritedFromParent?: boolean;
+  openingBalanceOverridden?: boolean;
 }
 
 export interface BackupPayload {
@@ -294,6 +295,7 @@ export async function exportBackup(tx: DbClient, userId: string, budgetId: numbe
       paymentMethodId: ab.paymentMethodId,
       initialBalance: ab.initialBalance,
       inheritedFromParent: ab.inheritedFromParent,
+      openingBalanceOverridden: ab.openingBalanceOverridden,
     })),
   };
 }
@@ -455,6 +457,9 @@ export function validateBackupPayload(payload: unknown): asserts payload is Back
   }
 
   for (const ab of p.accountBalances as BackupAccountBalance[]) {
+    if (ab.openingBalanceOverridden !== undefined && typeof ab.openingBalanceOverridden !== 'boolean') {
+      throw new AppError(400, 'Account balance opening override must be a boolean', { code: 'BACKUP_INVALID_SCHEMA' });
+    }
     if (!yearIds.has(ab.yearId)) {
       throw new AppError(400, `Account balance references unknown year backup ID: ${ab.yearId}`, {
         code: 'BACKUP_INVALID_REFERENCE',
@@ -782,6 +787,7 @@ export async function importBackup(
         paymentMethodId: pmIdMap.get(ab.paymentMethodId)!,
         initialBalance: ab.initialBalance,
         inheritedFromParent: ab.inheritedFromParent ?? false,
+        openingBalanceOverridden: ab.openingBalanceOverridden ?? false,
       }))
     );
   }

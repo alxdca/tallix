@@ -4,7 +4,7 @@ import postgres from 'postgres';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { withInheritedBalanceReadContext, withTenantContext, withUserContext } from '../src/db/context.js';
 import * as schema from '../src/db/schema.js';
-import { getAccountsForYear, setAccountBalance } from '../src/services/accounts.js';
+import { getAccountsForYear, restoreAccountBalanceLink, setAccountBalance } from '../src/services/accounts.js';
 import { createYear, getBudgetSummary } from '../src/services/budget.js';
 import {
   createYearlyBudget,
@@ -391,10 +391,157 @@ describe('parent budget creation', () => {
     expect(laterAccountsAfterParentEdit.accounts).toContainEqual(
       expect.objectContaining({
         id: parent.checkingAccount.id,
-        initialBalance: 650,
+        initialBalance: 350,
         inheritedFromParent: false,
+        linkedFromYear: 2131,
       })
     );
+  });
+
+  it('preserves a legacy parent override despite an earlier child year and restores its parent link', async () => {
+    const owner = await createUser('parent-budget-legacy-override-owner@test.com');
+    const parent = await createParentBudget(owner.id, 2140);
+    const child = await withUserContext(owner.id, (tx) =>
+      createYearlyBudget(tx, owner.id, 2141, 'Child', parent.budget.id)
+    );
+    const { childYear } = await getChildItems(child.id);
+    await superuserDb.insert(budgetYears).values({ budgetId: child.id, year: 2139 });
+    // An old backup can have inheritedFromParent=false with no new override flag.
+    await superuserDb
+      .update(accountBalances)
+      .set({ initialBalance: '777', inheritedFromParent: false, openingBalanceOverridden: false })
+      .where(
+        and(eq(accountBalances.yearId, childYear.id), eq(accountBalances.paymentMethodId, parent.checkingAccount.id))
+      );
+    const before = await getEffectiveAccounts(owner.id, child.id, 2141);
+    expect(before.accounts).toContainEqual(
+      expect.objectContaining({
+        id: parent.checkingAccount.id,
+        initialBalance: 777,
+        inheritedFromParent: false,
+        openingBalanceOverridden: true,
+        linkedFromYear: null,
+        canRestoreBalanceLink: true,
+      })
+    );
+    await withTenantContext(owner.id, child.id, (tx) =>
+      restoreAccountBalanceLink(tx, 2141, parent.checkingAccount.id, child.id, owner.id)
+    );
+    const restored = await getEffectiveAccounts(owner.id, child.id, 2141);
+    expect(restored.accounts).toContainEqual(
+      expect.objectContaining({
+        id: parent.checkingAccount.id,
+        initialBalance: 650,
+        inheritedFromParent: true,
+        openingBalanceOverridden: false,
+        linkedFromYear: null,
+      })
+    );
+    // Parent detachment freezes the live opening even when an earlier child year exists.
+    await withUserContext(owner.id, (tx) => deleteOwnedBudget(tx, owner.id, parent.budget.id));
+    const detached = await getEffectiveAccounts(owner.id, child.id, 2141);
+    expect(detached.accounts).toContainEqual(
+      expect.objectContaining({
+        id: parent.checkingAccount.id,
+        initialBalance: 650,
+        inheritedFromParent: false,
+        openingBalanceOverridden: true,
+        linkedFromYear: null,
+      })
+    );
+  });
+
+  it('freezes an old-backup manual parent override before detaching its legacy source', async () => {
+    const owner = await createUser('parent-budget-legacy-detach-owner@test.com');
+    const parent = await createParentBudget(owner.id, 2143);
+    const child = await withUserContext(owner.id, (tx) =>
+      createYearlyBudget(tx, owner.id, 2144, 'Child', parent.budget.id)
+    );
+    const { childYear } = await getChildItems(child.id);
+    await superuserDb.insert(budgetYears).values({ budgetId: child.id, year: 2142 });
+    await superuserDb
+      .update(accountBalances)
+      .set({ initialBalance: '777', inheritedFromParent: false, openingBalanceOverridden: false })
+      .where(
+        and(eq(accountBalances.yearId, childYear.id), eq(accountBalances.paymentMethodId, parent.checkingAccount.id))
+      );
+    await withUserContext(owner.id, (tx) => deleteOwnedBudget(tx, owner.id, parent.budget.id));
+    const detached = await getEffectiveAccounts(owner.id, child.id, 2144);
+    expect(detached.accounts).toContainEqual(
+      expect.objectContaining({
+        id: parent.checkingAccount.id,
+        initialBalance: 777,
+        openingBalanceOverridden: true,
+        linkedFromYear: null,
+      })
+    );
+  });
+
+  it('relinks a recreated declared child start year to its parent despite an earlier child year', async () => {
+    const owner = await createUser('parent-budget-recreated-owner@test.com');
+    const parent = await createParentBudget(owner.id, 2153);
+    const child = await withUserContext(owner.id, (tx) =>
+      createYearlyBudget(tx, owner.id, 2154, 'Child', parent.budget.id)
+    );
+    const { childYear } = await getChildItems(child.id);
+    await superuserDb.insert(budgetYears).values({ budgetId: child.id, year: 2152 });
+    await superuserDb.delete(budgetYears).where(eq(budgetYears.id, childYear.id));
+    await withTenantContext(owner.id, child.id, (tx) => createYear(tx, 2154, 0, child.id, owner.id));
+    const recreated = await getEffectiveAccounts(owner.id, child.id, 2154);
+    expect(recreated.accounts).toContainEqual(
+      expect.objectContaining({
+        id: parent.checkingAccount.id,
+        initialBalance: 650,
+        inheritedFromParent: true,
+        openingBalanceOverridden: false,
+        linkedFromYear: null,
+      })
+    );
+  });
+
+  it('terminates a malformed parent cycle and restores tenant context', async () => {
+    const owner = await createUser('parent-budget-cycle-owner@test.com');
+    const parent = await createParentBudget(owner.id, 2145);
+    const child = await withUserContext(owner.id, (tx) =>
+      createYearlyBudget(tx, owner.id, 2146, 'Child', parent.budget.id)
+    );
+    await superuserDb.update(budgets).set({ parentBudgetId: child.id }).where(eq(budgets.id, parent.budget.id));
+    await withTenantContext(owner.id, child.id, async (tx) => {
+      const result = await getAccountsForYear(tx, 2146, child.id, owner.id);
+      expect(result.accounts.find((account) => account.id === parent.checkingAccount.id)?.initialBalance).toBe(650);
+      const [context] = await tx.execute(sql`SELECT current_setting('app.budget_id', true) AS budget_id`);
+      expect(context.budget_id).toBe(String(child.id));
+    });
+  });
+
+  it('restores tenant context when parent balance resolution throws', async () => {
+    const owner = await createUser('parent-budget-context-owner@test.com');
+    const parent = await createParentBudget(owner.id, 2150);
+    const child = await withUserContext(owner.id, (tx) =>
+      createYearlyBudget(tx, owner.id, 2151, 'Child', parent.budget.id)
+    );
+    await withTenantContext(owner.id, child.id, async (tx) => {
+      const failingTx = new Proxy(tx, {
+        get(target, property) {
+          if (property !== 'query') return Reflect.get(target, property);
+          return {
+            ...target.query,
+            budgets: {
+              ...target.query.budgets,
+              findFirst: async (options: Parameters<typeof tx.query.budgets.findFirst>[0]) => {
+                const row = await target.query.budgets.findFirst(options);
+                if (row?.id === parent.budget.id) throw new Error('Parent read failed');
+                return row;
+              },
+            },
+          };
+        },
+      });
+      await expect(getAccountsForYear(failingTx, 2151, child.id, owner.id)).rejects.toThrow('Parent read failed');
+      const [context] = await tx.execute(sql`SELECT current_setting('app.budget_id', true) AS budget_id`);
+      expect(context.budget_id).toBe(String(child.id));
+      expect((await getAccountsForYear(tx, 2151, child.id, owner.id)).accounts).toHaveLength(2);
+    });
   });
 
   it('inherits parent accounts added after child creation and freezes them on parent deletion', async () => {

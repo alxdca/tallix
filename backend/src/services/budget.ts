@@ -506,7 +506,8 @@ export async function getBudgetSummary(
 
   const initialBalance = Array.from(effectiveInitialBalances.entries())
     .filter(([paymentMethodId]) => paymentMethodIds.has(paymentMethodId))
-    .reduce((sum, [, balance]) => sum + balance.toNumber(), 0);
+    .reduce((sum, [, balance]) => sum.plus(balance), new Decimal(0))
+    .toNumber();
 
   const remainingBalance = new Decimal(initialBalance)
     .plus(expectedTotals.income)
@@ -654,6 +655,14 @@ async function createOpeningBalancesFromPreviousYear(
   if (!previousYear) {
     return;
   }
+
+  const budget = await tx.query.budgets.findFirst({
+    where: eq(budgets.id, budgetId),
+    columns: { startYear: true, parentBudgetId: true },
+  });
+  // A recreated child start year inherits its parent without a stored snapshot.
+  // An inherited=false snapshot here would look like a legacy manual override.
+  if (budget?.parentBudgetId != null && budget.startYear === year) return;
 
   const { accounts } = await accountsSvc.getAccountsForYear(tx, previousYear.year, budgetId, userId);
   const openingBalances = accounts.map((account) => ({

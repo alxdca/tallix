@@ -12,9 +12,10 @@ This document summarizes how the frontend is structured and how data flows throu
 
 ## View model
 
-- The app loads current-year budget data on startup.
-- Archive views load a separate year without changing the current-year selector.
-- Transactions, accounts, assets, and settings fetch data on demand.
+- The app loads the selected budget and remembers its selected year.
+- Transactions contains two sidebar subpages: Transactions and Transfers.
+- Each subpage owns its form, list, filters, selection, editing, and data refreshes. Switching subpages resets local drafts and selection; changing the budget or year remounts the current view.
+- Transactions, transfers, accounts, assets, and settings fetch data on demand.
 
 ## Internationalization
 
@@ -22,7 +23,8 @@ Strings are defined in `frontend/src/i18n.ts` and accessed via `I18nContext`.
 
 ## Key views
 
-- **Transactions**: add/edit/delete, duplicate warnings, bulk actions.
+- **Transactions**: transaction add/edit/delete, categories, comments, imports, duplicate warnings, and bulk actions.
+- **Transfers**: account-to-account transfers, separate source/destination accounting periods, account filters, savings movement, and bulk actions. Both subpages reuse the typed reorder API while ordering records within their own domain.
 - **Budget Planning**: monthly and yearly budgets per item.
 - **Accounts**: balances per payment method.
 - **Assets**: split tables for assets, debts, and net worth.

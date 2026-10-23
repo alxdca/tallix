@@ -1,22 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import {
-  type AccountIdentifier,
   bulkDeleteTransactions,
   deleteTransaction,
-  deleteTransfer,
   dismissTransactionWarning,
   fetchPaymentMethods,
   fetchTransactions,
-  fetchTransferAccounts,
-  fetchTransfers,
   type PaymentMethod,
   reorderTransactionEntries,
   type Transaction,
-  type Transfer,
   updateTransaction,
-  updateTransfer,
 } from '../api';
 import { useI18n } from '../contexts/I18nContext';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
@@ -28,43 +22,23 @@ import BulkImportModal from './BulkImportModal';
 import ConfirmDialog from './ConfirmDialog';
 import NewTransactionForm from './NewTransactionForm';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
-import {
-  calculateAccountingPeriod,
-  formatWithInstitution,
-  normalizeThirdParty,
-  parseAccountString,
-  transferDestinationPeriod,
-  transferSourcePeriod,
-} from './transactionFormUtils';
+import { formatWithInstitution, normalizeThirdParty } from './transactionFormUtils';
 import {
   buildSelectionReorderUpdates,
   buildSingleReorderUpdates,
   canReorderSelectedEntries,
   getSelectedReorderEntries,
+  type ReorderPriorityUpdate,
 } from './transactionsReorder';
 
 const TRANSACTION_PRIORITY_STORAGE_PREFIX = 'tallix_transaction_sort_priorities';
 
-type EntryType = 'transaction' | 'transfer';
-
-interface UnifiedEntry {
-  id: string; // "t_123" for transactions, "x_456" for transfers
-  type: EntryType;
-  date: string;
-  description: string | null;
-  amount: number;
-  accountingMonth: number;
-  accountingYear: number;
-  sourceAccountingMonth?: number;
-  sourceAccountingYear?: number;
-  destinationAccountingMonth?: number;
-  destinationAccountingYear?: number;
-  sortPriority: number | null;
+// The existing reorder helpers use typed, prefixed IDs.
+interface TransactionEntry extends Omit<Transaction, 'id'> {
+  id: string;
+  type: 'transaction';
+  transaction: Transaction;
   naturalDateIndex: number;
-  // Transaction-specific
-  transaction?: Transaction;
-  // Transfer-specific
-  transfer?: Transfer;
 }
 
 function formatAccountingPeriod(month: number, year: number, monthNames: string[]): string {
@@ -73,14 +47,6 @@ function formatAccountingPeriod(month: number, year: number, monthNames: string[
 
 function accountingPeriodKey(month: number, year: number): string {
   return `${year}-${month}`;
-}
-
-function formatTransferAccountingPeriod(transfer: Transfer, monthNames: string[]): string {
-  const source = transferSourcePeriod(transfer);
-  const destination = transferDestinationPeriod(transfer);
-  const sourceLabel = formatAccountingPeriod(source.month, source.year, monthNames);
-  const destinationLabel = formatAccountingPeriod(destination.month, destination.year, monthNames);
-  return sourceLabel === destinationLabel ? sourceLabel : `${sourceLabel} → ${destinationLabel}`;
 }
 
 interface TransactionsProps {
@@ -183,20 +149,27 @@ export default function Transactions({
   initialFilters,
   readOnly = false,
 }: TransactionsProps) {
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const formatCurrency = useFormatCurrency();
   const { dialogProps, confirm } = useConfirmDialog();
   const { t, monthNames } = useI18n();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [transferAccounts, setTransferAccounts] = useState<AccountIdentifier[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null); // "t_123" or "x_456"
+  const [editingId, setEditingId] = useState<string | null>(null); // Reorder-compatible transaction ID
   const [showImportModal, setShowImportModal] = useState(false);
 
   // Selection state
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // "t_123" or "x_456"
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // Reorder-compatible transaction ID
+
+  useEffect(() => {
+    if (!readOnly) return;
+    setEditingId(null);
+    setSelectedIds(new Set());
+    setShowImportModal(false);
+  }, [readOnly]);
 
   // Filters state
   const [filters, setFilters] = useState<Filters>({
@@ -229,25 +202,11 @@ export default function Transactions({
   const [editItemId, setEditItemId] = useState<number | null>(null);
   const [editAccountingMonth, setEditAccountingMonth] = useState<number>(1);
   const [editAccountingYear, setEditAccountingYear] = useState<number>(new Date().getFullYear());
-  const [editDestinationAccountingMonth, setEditDestinationAccountingMonth] = useState<number>(1);
-  const [editDestinationAccountingYear, setEditDestinationAccountingYear] = useState<number>(new Date().getFullYear());
   // Track original values to detect if user explicitly changed accounting fields
   const [originalDate, setOriginalDate] = useState('');
   const [originalPaymentMethodId, setOriginalPaymentMethodId] = useState<number | null>(null);
   const [originalAccountingMonth, setOriginalAccountingMonth] = useState<number>(1);
   const [originalAccountingYear, setOriginalAccountingYear] = useState<number>(new Date().getFullYear());
-  const [originalDestinationAccountingMonth, setOriginalDestinationAccountingMonth] = useState<number>(1);
-  const [originalDestinationAccountingYear, setOriginalDestinationAccountingYear] = useState<number>(
-    new Date().getFullYear()
-  );
-  // Edit transfer state
-  const [editSourceAccount, setEditSourceAccount] = useState('');
-  const [editDestAccount, setEditDestAccount] = useState('');
-  const [originalSourceAccount, setOriginalSourceAccount] = useState('');
-  const [originalDestAccount, setOriginalDestAccount] = useState('');
-  const [editSourcePeriodOverridden, setEditSourcePeriodOverridden] = useState(false);
-  const [editDestinationPeriodOverridden, setEditDestinationPeriodOverridden] = useState(false);
-
   // Get all items from all groups (savings accounts are now real budget items in "Épargne" group)
   const allItems = useMemo(
     () =>
@@ -264,17 +223,12 @@ export default function Transactions({
   const incomeItems = allItems.filter((i) => i.groupType === 'income');
   const expenseItems = allItems.filter((i) => i.groupType === 'expense');
   const savingsCategoryItems = allItems.filter((i) => i.groupType === 'savings');
-  // Get unique values for filter dropdowns (include transfer accounts)
+  // Get used payment methods for the filter dropdown.
   const uniquePaymentMethods = useMemo(() => {
     const methodIds = new Set<number>();
     // Add transaction payment method IDs
     transactions.forEach((t) => {
       if (t.paymentMethodId) methodIds.add(t.paymentMethodId);
-    });
-    // Add transfer account IDs
-    transfers.forEach((x) => {
-      methodIds.add(x.sourceAccount.id);
-      methodIds.add(x.destinationAccount.id);
     });
     // Convert IDs to payment method objects with display names
     return Array.from(methodIds)
@@ -288,21 +242,14 @@ export default function Transactions({
       })
       .filter((pm): pm is { id: number; name: string } => pm !== null)
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [transactions, transfers, paymentMethods]);
+  }, [transactions, paymentMethods]);
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [transactionsData, methodsData, transfersData, accountsData] = await Promise.all([
-        fetchTransactions(year),
-        fetchPaymentMethods(),
-        fetchTransfers(year),
-        fetchTransferAccounts(year),
-      ]);
+      const [transactionsData, methodsData] = await Promise.all([fetchTransactions(year), fetchPaymentMethods()]);
       setTransactions(mergeStoredTransactionPriorities(yearId, transactionsData));
       setPaymentMethods(methodsData);
-      setTransfers(transfersData);
-      setTransferAccounts(accountsData);
     } catch (error) {
       logger.error('Failed to load data', error);
     } finally {
@@ -330,16 +277,14 @@ export default function Transactions({
 
   const loadTransactions = async () => {
     try {
-      const [transactionsData, transfersData] = await Promise.all([fetchTransactions(year), fetchTransfers(year)]);
+      const transactionsData = await fetchTransactions(year);
       setTransactions(mergeStoredTransactionPriorities(yearId, transactionsData));
-      setTransfers(transfersData);
       // Clear selections that no longer exist
       setSelectedIds((prev) => {
         const newSet = new Set<string>();
         const existingTxIds = new Set(transactionsData.map((t) => `t_${t.id}`));
-        const existingXferIds = new Set(transfersData.map((x) => `x_${x.id}`));
         prev.forEach((id) => {
-          if (existingTxIds.has(id) || existingXferIds.has(id)) newSet.add(id);
+          if (existingTxIds.has(id)) newSet.add(id);
         });
         return newSet;
       });
@@ -368,82 +313,23 @@ export default function Transactions({
     [transactions, editingId]
   );
 
-  // Combine transactions and transfers into unified entries
-  const unifiedEntries = useMemo((): UnifiedEntry[] => {
-    const txEntries = transactions.map((t) => ({
-      id: `t_${t.id}`,
-      type: 'transaction' as EntryType,
-      date: t.date,
-      description: t.description,
-      amount: t.amount,
-      accountingMonth: t.accountingMonth,
-      accountingYear: t.accountingYear,
-      sortPriority: t.sortPriority,
-      transaction: t,
-    }));
-
-    const xferEntries = transfers.map((x) => ({
-      id: `x_${x.id}`,
-      type: 'transfer' as EntryType,
-      date: x.date,
-      description: x.description,
-      amount: x.amount,
-      accountingMonth: transferSourcePeriod(x).month,
-      accountingYear: transferSourcePeriod(x).year,
-      sourceAccountingMonth: transferSourcePeriod(x).month,
-      sourceAccountingYear: transferSourcePeriod(x).year,
-      destinationAccountingMonth: transferDestinationPeriod(x).month,
-      destinationAccountingYear: transferDestinationPeriod(x).year,
-      sortPriority: x.sortPriority,
-      transfer: x,
-    }));
-
+  const transactionEntries = useMemo((): TransactionEntry[] => {
     const naturalDateCounts = new Map<string, number>();
-
-    return [...txEntries, ...xferEntries]
-      .sort((a, b) => {
-        const dateComparison = b.date.localeCompare(a.date);
-        if (dateComparison !== 0) return dateComparison;
-        if (a.type !== b.type) return a.type === 'transaction' ? -1 : 1;
-        return parseInt(b.id.substring(2), 10) - parseInt(a.id.substring(2), 10);
-      })
-      .map((entry) => {
-        const naturalDateIndex = naturalDateCounts.get(entry.date) ?? 0;
-        naturalDateCounts.set(entry.date, naturalDateIndex + 1);
-        return {
-          ...entry,
-          naturalDateIndex,
-        };
+    return [...transactions]
+      .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+      .map((transaction) => {
+        const naturalDateIndex = naturalDateCounts.get(transaction.date) ?? 0;
+        naturalDateCounts.set(transaction.date, naturalDateIndex + 1);
+        return { ...transaction, id: `t_${transaction.id}`, type: 'transaction', transaction, naturalDateIndex };
       });
-  }, [transactions, transfers]);
+  }, [transactions]);
 
   const accountingPeriods = Array.from(
     new Map(
-      unifiedEntries.flatMap((entry) => {
-        if (entry.type !== 'transfer') {
-          return [
-            [
-              accountingPeriodKey(entry.accountingMonth, entry.accountingYear),
-              {
-                month: entry.accountingMonth,
-                year: entry.accountingYear,
-              },
-            ] as const,
-          ];
-        }
-        const source = {
-          month: entry.sourceAccountingMonth ?? entry.accountingMonth,
-          year: entry.sourceAccountingYear ?? entry.accountingYear,
-        };
-        const destination = {
-          month: entry.destinationAccountingMonth ?? entry.accountingMonth,
-          year: entry.destinationAccountingYear ?? entry.accountingYear,
-        };
-        return [
-          [accountingPeriodKey(source.month, source.year), source] as const,
-          [accountingPeriodKey(destination.month, destination.year), destination] as const,
-        ];
-      })
+      transactions.map((entry) => [
+        accountingPeriodKey(entry.accountingMonth, entry.accountingYear),
+        { month: entry.accountingMonth, year: entry.accountingYear },
+      ])
     ).values()
   ).sort((a, b) => a.year - b.year || a.month - b.month);
 
@@ -459,7 +345,7 @@ export default function Transactions({
 
   // Filtered and sorted entries
   const filteredEntries = useMemo(() => {
-    let result = [...unifiedEntries];
+    let result = [...transactionEntries];
 
     // Apply date range filter
     if (filters.dateFrom || filters.dateTo) {
@@ -481,41 +367,13 @@ export default function Transactions({
       });
     }
     if (filters.accountingPeriod) {
-      result = result.filter((entry) => {
-        if (entry.type !== 'transfer') {
-          return accountingPeriodKey(entry.accountingMonth, entry.accountingYear) === filters.accountingPeriod;
-        }
-        const sourceKey = accountingPeriodKey(
-          entry.sourceAccountingMonth ?? entry.accountingMonth,
-          entry.sourceAccountingYear ?? entry.accountingYear
-        );
-        const destinationKey = accountingPeriodKey(
-          entry.destinationAccountingMonth ?? entry.accountingMonth,
-          entry.destinationAccountingYear ?? entry.accountingYear
-        );
-        const sourceMatches =
-          sourceKey === filters.accountingPeriod &&
-          (filters.paymentMethods.length === 0 ||
-            (entry.transfer ? filters.paymentMethods.includes(entry.transfer.sourceAccount.id) : false));
-        const destinationMatches =
-          destinationKey === filters.accountingPeriod &&
-          (filters.paymentMethods.length === 0 ||
-            (entry.transfer ? filters.paymentMethods.includes(entry.transfer.destinationAccount.id) : false));
-        return sourceMatches || destinationMatches;
-      });
+      result = result.filter(
+        (entry) => accountingPeriodKey(entry.accountingMonth, entry.accountingYear) === filters.accountingPeriod
+      );
     }
     if (filters.thirdParty) {
       const search = filters.thirdParty.toLowerCase();
-      result = result.filter((e) => {
-        if (e.type === 'transaction') {
-          return e.transaction?.thirdParty?.toLowerCase().includes(search);
-        } else {
-          // For transfers, search in source/destination account names
-          const srcName = e.transfer?.sourceAccount.name.toLowerCase() || '';
-          const dstName = e.transfer?.destinationAccount.name.toLowerCase() || '';
-          return srcName.includes(search) || dstName.includes(search);
-        }
-      });
+      result = result.filter((entry) => entry.thirdParty?.toLowerCase().includes(search));
     }
     if (filters.description) {
       const search = filters.description.toLowerCase();
@@ -523,42 +381,19 @@ export default function Transactions({
     }
     if (filters.comment) {
       const search = filters.comment.toLowerCase();
-      result = result.filter((e) => e.transaction?.comment?.toLowerCase().includes(search));
+      result = result.filter((e) => e.comment?.toLowerCase().includes(search));
     }
     if (filters.paymentMethods.length > 0) {
-      result = result.filter((e) => {
-        if (e.type === 'transaction') {
-          return e.transaction?.paymentMethodId && filters.paymentMethods.includes(e.transaction.paymentMethodId);
-        }
-        // For transfers, check if source or destination account ID matches any selected method
-        if (e.type === 'transfer' && e.transfer) {
-          return (
-            filters.paymentMethods.includes(e.transfer.sourceAccount.id) ||
-            filters.paymentMethods.includes(e.transfer.destinationAccount.id)
-          );
-        }
-        return false;
-      });
+      result = result.filter(
+        (entry) => entry.paymentMethodId && filters.paymentMethods.includes(entry.paymentMethodId)
+      );
     }
-    // Filter by category (hierarchical: section, group, or item)
     if (filters.categoryFilter) {
       const [filterType, filterValue] = filters.categoryFilter.split(':');
-      if (filterType === 'section') {
-        if (filterValue === 'transfer') {
-          result = result.filter((e) => e.type === 'transfer');
-        } else {
-          result = result.filter((e) => e.type === 'transaction' && e.transaction?.groupType === filterValue);
-        }
-      } else if (filterType === 'group') {
-        result = result.filter((e) => e.type === 'transaction' && e.transaction?.groupName === filterValue);
-      } else if (filterType === 'item') {
-        result = result.filter((e) => {
-          if (e.type !== 'transaction') return false;
-          const t = e.transaction!;
-          const cat = t.groupName && t.itemName ? `${t.groupName} → ${t.itemName}` : null;
-          return cat === filterValue;
-        });
-      }
+      if (filterType === 'section') result = result.filter((entry) => entry.groupType === filterValue);
+      else if (filterType === 'group') result = result.filter((entry) => entry.groupName === filterValue);
+      else if (filterType === 'item')
+        result = result.filter((entry) => `${entry.groupName} → ${entry.itemName}` === filterValue);
     }
 
     // Apply sorting
@@ -578,44 +413,20 @@ export default function Transactions({
         case 'date':
           comparison = a.date.localeCompare(b.date);
           break;
-        case 'thirdParty': {
-          const thirdPartyA =
-            a.type === 'transaction'
-              ? a.transaction?.thirdParty || ''
-              : `${a.transfer?.sourceAccount.name} → ${a.transfer?.destinationAccount.name}`;
-          const thirdPartyB =
-            b.type === 'transaction'
-              ? b.transaction?.thirdParty || ''
-              : `${b.transfer?.sourceAccount.name} → ${b.transfer?.destinationAccount.name}`;
-          comparison = thirdPartyA.localeCompare(thirdPartyB);
+        case 'thirdParty':
+          comparison = (a.thirdParty || '').localeCompare(b.thirdParty || '');
           break;
-        }
         case 'description':
           comparison = (a.description || '').localeCompare(b.description || '');
           break;
-        case 'paymentMethod': {
-          const pmA = a.type === 'transaction' ? a.transaction?.paymentMethod || '' : '';
-          const pmB = b.type === 'transaction' ? b.transaction?.paymentMethod || '' : '';
-          comparison = pmA.localeCompare(pmB);
+        case 'paymentMethod':
+          comparison = (a.paymentMethod || '').localeCompare(b.paymentMethod || '');
           break;
-        }
-        case 'category': {
-          const transferLabel = t('transactions.typeTransfer');
-          const catA =
-            a.type === 'transaction' && a.transaction?.groupName && a.transaction?.itemName
-              ? `${a.transaction.groupName} → ${a.transaction.itemName}`
-              : a.type === 'transfer'
-                ? transferLabel
-                : '';
-          const catB =
-            b.type === 'transaction' && b.transaction?.groupName && b.transaction?.itemName
-              ? `${b.transaction.groupName} → ${b.transaction.itemName}`
-              : b.type === 'transfer'
-                ? transferLabel
-                : '';
-          comparison = catA.localeCompare(catB);
+        case 'category':
+          comparison = `${a.groupName || ''} → ${a.itemName || ''}`.localeCompare(
+            `${b.groupName || ''} → ${b.itemName || ''}`
+          );
           break;
-        }
         case 'amount':
           comparison = a.amount - b.amount;
           break;
@@ -625,11 +436,11 @@ export default function Transactions({
     });
 
     return result;
-  }, [unifiedEntries, filters, sortField, sortDirection, t]);
+  }, [transactionEntries, filters, sortField, sortDirection]);
 
   const manualEntries = useMemo(
     () =>
-      [...unifiedEntries].sort((a, b) => {
+      [...transactionEntries].sort((a, b) => {
         const dateComparison = b.date.localeCompare(a.date);
         if (dateComparison !== 0) {
           return dateComparison;
@@ -641,10 +452,10 @@ export default function Transactions({
         }
         return a.naturalDateIndex - b.naturalDateIndex;
       }),
-    [unifiedEntries]
+    [transactionEntries]
   );
 
-  const canReorderRows = !editingId;
+  const canReorderRows = !readOnly && !editingId;
 
   const selectedReorderEntries = useMemo(
     () => getSelectedReorderEntries(manualEntries, selectedIds),
@@ -657,7 +468,7 @@ export default function Transactions({
   );
 
   const applyPriorityUpdatesLocally = useCallback(
-    (entries: Array<{ type: 'transaction' | 'transfer'; id: number; sortPriority: number | null }>) => {
+    (entries: ReorderPriorityUpdate[]) => {
       const transactionPriorityMap = new Map(
         entries
           .filter((entry) => entry.type === 'transaction')
@@ -666,15 +477,6 @@ export default function Transactions({
             entry.sortPriority === null || entry.sortPriority === 0 ? null : Math.trunc(entry.sortPriority),
           ])
       );
-      const transferPriorityMap = new Map(
-        entries
-          .filter((entry) => entry.type === 'transfer')
-          .map((entry) => [
-            entry.id,
-            entry.sortPriority === null || entry.sortPriority === 0 ? null : Math.trunc(entry.sortPriority),
-          ])
-      );
-
       if (transactionPriorityMap.size > 0) {
         writeStoredTransactionPriorities(
           yearId,
@@ -691,22 +493,12 @@ export default function Transactions({
           )
         );
       }
-
-      if (transferPriorityMap.size > 0) {
-        setTransfers((current) =>
-          current.map((transfer) =>
-            transferPriorityMap.has(transfer.id)
-              ? { ...transfer, sortPriority: transferPriorityMap.get(transfer.id) ?? null }
-              : transfer
-          )
-        );
-      }
     },
     [yearId]
   );
 
   const persistEntryOrder = useCallback(
-    async (entries: Array<{ type: 'transaction' | 'transfer'; id: number; sortPriority: number | null }>) => {
+    async (entries: ReorderPriorityUpdate[]) => {
       await reorderTransactionEntries(entries);
       onTransactionsChanged?.();
     },
@@ -715,7 +507,7 @@ export default function Transactions({
 
   const handleReorderSelection = useCallback(
     async (direction: 'up' | 'down' | 'top' | 'bottom') => {
-      if (!canReorderSelection || isSubmitting) return;
+      if (readOnlyRef.current || !canReorderSelection || isSubmitting) return;
 
       const selectedEntries = selectedReorderEntries;
       if (selectedEntries.length === 0) return;
@@ -748,7 +540,7 @@ export default function Transactions({
 
   const handleReorderSingle = useCallback(
     async (entryId: string, direction: 'up' | 'down') => {
-      if (!canReorderRows || isSubmitting) return;
+      if (readOnlyRef.current || !canReorderRows || isSubmitting) return;
 
       const entry = manualEntries.find((candidate) => candidate.id === entryId);
       if (!entry) return;
@@ -773,6 +565,7 @@ export default function Transactions({
 
   // Selection handlers
   const toggleSelect = useCallback((id: string) => {
+    if (readOnlyRef.current) return;
     setSelectedIds((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(id)) {
@@ -785,6 +578,7 @@ export default function Transactions({
   }, []);
 
   const toggleSelectAll = useCallback(() => {
+    if (readOnlyRef.current) return;
     const filteredIds = filteredEntries.map((e) => e.id);
     const allSelected = filteredIds.every((id) => selectedIds.has(id));
 
@@ -810,7 +604,7 @@ export default function Transactions({
   }, [filteredEntries, selectedIds]);
 
   const handleBulkDelete = async () => {
-    if (selectedIds.size === 0) return;
+    if (readOnlyRef.current || isSubmitting || selectedIds.size === 0) return;
 
     const count = selectedIds.size;
     const confirmed = await confirm({
@@ -819,29 +613,11 @@ export default function Transactions({
       confirmLabel: t('common.delete'),
       variant: 'danger',
     });
-    if (!confirmed) return;
+    if (!confirmed || readOnlyRef.current) return;
 
     setIsSubmitting(true);
     try {
-      // Separate transaction IDs and transfer IDs
-      const txIds: number[] = [];
-      const xferIds: number[] = [];
-      selectedIds.forEach((id) => {
-        if (id.startsWith('t_')) {
-          txIds.push(parseInt(id.substring(2), 10));
-        } else if (id.startsWith('x_')) {
-          xferIds.push(parseInt(id.substring(2), 10));
-        }
-      });
-
-      // Delete transactions in bulk
-      if (txIds.length > 0) {
-        await bulkDeleteTransactions(txIds);
-      }
-      // Delete transfers one by one
-      for (const id of xferIds) {
-        await deleteTransfer(id);
-      }
+      await bulkDeleteTransactions([...selectedIds].map((id) => parseInt(id.substring(2), 10)));
 
       setSelectedIds(new Set());
       await loadTransactions();
@@ -902,66 +678,8 @@ export default function Transactions({
     });
   };
 
-  const recalculateEditTransferSourcePeriod = useCallback(
-    (dateDisplay: string, accountId: string) => {
-      if (!isValidDateFormat(dateDisplay)) return;
-      const account = transferAccounts.find((candidate) => `${candidate.id}` === accountId);
-      const numericAccountId = Number(accountId);
-      const settlementDay =
-        account?.settlementDay !== undefined
-          ? (account.settlementDay ?? null)
-          : (paymentMethods.find((method) => method.id === numericAccountId)?.settlementDay ?? null);
-      if (!account && !Number.isInteger(numericAccountId)) return;
-      const period = calculateAccountingPeriod(parseDateInput(dateDisplay), settlementDay);
-      setEditAccountingMonth(period.month);
-      setEditAccountingYear(period.year);
-    },
-    [paymentMethods, transferAccounts]
-  );
-
-  const recalculateEditTransferDestinationPeriod = useCallback(
-    (dateDisplay: string, accountId: string) => {
-      if (!isValidDateFormat(dateDisplay)) return;
-      const account = transferAccounts.find((candidate) => `${candidate.id}` === accountId);
-      const numericAccountId = Number(accountId);
-      const settlementDay =
-        account?.settlementDay !== undefined
-          ? (account.settlementDay ?? null)
-          : (paymentMethods.find((method) => method.id === numericAccountId)?.settlementDay ?? null);
-      if (!account && !Number.isInteger(numericAccountId)) return;
-      const period = calculateAccountingPeriod(parseDateInput(dateDisplay), settlementDay);
-      setEditDestinationAccountingMonth(period.month);
-      setEditDestinationAccountingYear(period.year);
-    },
-    [paymentMethods, transferAccounts]
-  );
-
-  const handleEditDateChange = (value: string) => {
-    setEditDate(value);
-    if (!editingId?.startsWith('x_')) return;
-    if (!editSourcePeriodOverridden) {
-      recalculateEditTransferSourcePeriod(value, editSourceAccount);
-    }
-    if (!editDestinationPeriodOverridden) {
-      recalculateEditTransferDestinationPeriod(value, editDestAccount);
-    }
-  };
-
-  const handleEditSourceAccountChange = (value: string) => {
-    setEditSourceAccount(value);
-    if (!editSourcePeriodOverridden) {
-      recalculateEditTransferSourcePeriod(editDate, value);
-    }
-  };
-
-  const handleEditDestinationAccountChange = (value: string) => {
-    setEditDestAccount(value);
-    if (!editDestinationPeriodOverridden) {
-      recalculateEditTransferDestinationPeriod(editDate, value);
-    }
-  };
-
   const startEditTransaction = (transaction: Transaction) => {
+    if (readOnlyRef.current || isSubmitting) return;
     setEditingId(`t_${transaction.id}`); // Use entry ID format
     const dateDisplay = formatDateDisplay(transaction.date);
     setEditDate(dateDisplay); // Convert YYYY-MM-DD to DD/MM/YYYY
@@ -973,42 +691,11 @@ export default function Transactions({
     setEditItemId(transaction.itemId);
     setEditAccountingMonth(transaction.accountingMonth);
     setEditAccountingYear(transaction.accountingYear);
-    setEditDestinationAccountingMonth(transaction.accountingMonth);
-    setEditDestinationAccountingYear(transaction.accountingYear);
     // Store original values to detect explicit changes
     setOriginalDate(dateDisplay);
     setOriginalPaymentMethodId(transaction.paymentMethodId);
     setOriginalAccountingMonth(transaction.accountingMonth);
     setOriginalAccountingYear(transaction.accountingYear);
-    setOriginalDestinationAccountingMonth(transaction.accountingMonth);
-    setOriginalDestinationAccountingYear(transaction.accountingYear);
-    setEditSourcePeriodOverridden(false);
-    setEditDestinationPeriodOverridden(false);
-  };
-
-  const startEditTransfer = (transfer: Transfer) => {
-    setEditingId(`x_${transfer.id}`); // Use entry ID format
-    const dateDisplay = formatDateDisplay(transfer.date);
-    setEditDate(dateDisplay);
-    setEditDescription(transfer.description || '');
-    setEditAmount(transfer.amount.toString());
-    setEditSourceAccount(`${transfer.sourceAccount.id}`);
-    setEditDestAccount(`${transfer.destinationAccount.id}`);
-    setEditAccountingMonth(transferSourcePeriod(transfer).month);
-    setEditAccountingYear(transferSourcePeriod(transfer).year);
-    setEditDestinationAccountingMonth(transferDestinationPeriod(transfer).month);
-    setEditDestinationAccountingYear(transferDestinationPeriod(transfer).year);
-    // Store original values to detect explicit changes
-    setOriginalDate(dateDisplay);
-    setOriginalPaymentMethodId(null);
-    setOriginalAccountingMonth(transferSourcePeriod(transfer).month);
-    setOriginalAccountingYear(transferSourcePeriod(transfer).year);
-    setOriginalDestinationAccountingMonth(transferDestinationPeriod(transfer).month);
-    setOriginalDestinationAccountingYear(transferDestinationPeriod(transfer).year);
-    setOriginalSourceAccount(`${transfer.sourceAccount.id}`);
-    setOriginalDestAccount(`${transfer.destinationAccount.id}`);
-    setEditSourcePeriodOverridden(false);
-    setEditDestinationPeriodOverridden(false);
   };
 
   const cancelEdit = () => {
@@ -1022,101 +709,51 @@ export default function Transactions({
     setEditItemId(null);
     setEditAccountingMonth(1);
     setEditAccountingYear(new Date().getFullYear());
-    setEditDestinationAccountingMonth(1);
-    setEditDestinationAccountingYear(new Date().getFullYear());
-    setEditSourceAccount('');
-    setEditDestAccount('');
-    setOriginalSourceAccount('');
-    setOriginalDestAccount('');
-    setEditSourcePeriodOverridden(false);
-    setEditDestinationPeriodOverridden(false);
     // Reset original values
     setOriginalDate('');
     setOriginalPaymentMethodId(null);
     setOriginalAccountingMonth(1);
     setOriginalAccountingYear(new Date().getFullYear());
-    setOriginalDestinationAccountingMonth(1);
-    setOriginalDestinationAccountingYear(new Date().getFullYear());
   };
 
   const handleUpdate = async () => {
-    if (!editAmount || !editingId || isSubmitting || !isValidDateFormat(editDate)) return;
+    if (readOnlyRef.current || !editAmount || !editingId || isSubmitting || !isValidDateFormat(editDate)) return;
 
-    const isTransferEdit = editingId.startsWith('x_');
     const numericId = parseInt(editingId.substring(2), 10);
 
     // Check if user explicitly changed accounting fields
     const accountingExplicitlyChanged =
       editAccountingMonth !== originalAccountingMonth || editAccountingYear !== originalAccountingYear;
-    const destinationAccountingExplicitlyChanged =
-      editDestinationAccountingMonth !== originalDestinationAccountingMonth ||
-      editDestinationAccountingYear !== originalDestinationAccountingYear;
-
     // Check if date or payment method changed (which would affect accounting calculation)
     const dateChanged = editDate !== originalDate;
     const paymentMethodChanged = editPaymentMethodId !== originalPaymentMethodId;
-    const sourceAccountChanged = editSourceAccount !== originalSourceAccount;
-    const destinationAccountChanged = editDestAccount !== originalDestAccount;
 
     setIsSubmitting(true);
     try {
-      if (isTransferEdit) {
-        // Update transfer
-        const source = parseAccountString(editSourceAccount);
-        const dest = parseAccountString(editDestAccount);
-        if (!source || !dest) return;
+      // Update transaction
+      if (!editPaymentMethodId) return;
 
-        const transferData: Parameters<typeof updateTransfer>[1] = {
-          date: parseDateInput(editDate),
-          amount: parseFloat(editAmount),
-          description: editDescription.trim(),
-          sourceAccountId: source.id,
-          destinationAccountId: dest.id,
-        };
+      const transactionData: Parameters<typeof updateTransaction>[1] = {
+        itemId: editItemId,
+        date: parseDateInput(editDate),
+        description: editDescription.trim(),
+        comment: editComment.trim(),
+        thirdParty: editThirdParty.trim() || undefined,
+        paymentMethodId: editPaymentMethodId,
+        amount: parseFloat(editAmount),
+      };
 
-        if (editSourcePeriodOverridden || accountingExplicitlyChanged) {
-          transferData.sourceAccountingMonth = editAccountingMonth;
-          transferData.sourceAccountingYear = editAccountingYear;
-        } else if (dateChanged || sourceAccountChanged) {
-          transferData.sourceAccountingMonth = editAccountingMonth;
-          transferData.sourceAccountingYear = editAccountingYear;
-        }
-
-        if (editDestinationPeriodOverridden || destinationAccountingExplicitlyChanged) {
-          transferData.destinationAccountingMonth = editDestinationAccountingMonth;
-          transferData.destinationAccountingYear = editDestinationAccountingYear;
-        } else if (dateChanged || destinationAccountChanged) {
-          transferData.destinationAccountingMonth = editDestinationAccountingMonth;
-          transferData.destinationAccountingYear = editDestinationAccountingYear;
-        }
-
-        await updateTransfer(numericId, transferData);
-      } else {
-        // Update transaction
-        if (!editPaymentMethodId) return;
-
-        const transactionData: Parameters<typeof updateTransaction>[1] = {
-          itemId: editItemId,
-          date: parseDateInput(editDate),
-          description: editDescription.trim(),
-          comment: editComment.trim(),
-          thirdParty: editThirdParty.trim() || undefined,
-          paymentMethodId: editPaymentMethodId,
-          amount: parseFloat(editAmount),
-        };
-
-        if (accountingExplicitlyChanged) {
-          // User explicitly changed accounting fields - send them
-          transactionData.accountingMonth = editAccountingMonth;
-          transactionData.accountingYear = editAccountingYear;
-        } else if (dateChanged || paymentMethodChanged) {
-          // Date or payment method changed but accounting wasn't touched - ask backend to recalculate
-          transactionData.recalculateAccounting = true;
-        }
-        // If nothing changed that affects accounting, don't send any accounting fields
-
-        await updateTransaction(numericId, transactionData);
+      if (accountingExplicitlyChanged) {
+        // User explicitly changed accounting fields - send them
+        transactionData.accountingMonth = editAccountingMonth;
+        transactionData.accountingYear = editAccountingYear;
+      } else if (dateChanged || paymentMethodChanged) {
+        // Date or payment method changed but accounting wasn't touched - ask backend to recalculate
+        transactionData.recalculateAccounting = true;
       }
+      // If nothing changed that affects accounting, don't send any accounting fields
+
+      await updateTransaction(numericId, transactionData);
       cancelEdit();
       await loadTransactions();
       onTransactionsChanged?.();
@@ -1128,24 +765,19 @@ export default function Transactions({
   };
 
   const handleDelete = async (entryId: string) => {
-    if (isSubmitting) return;
-    const isTransfer = entryId.startsWith('x_');
+    if (readOnlyRef.current || isSubmitting) return;
 
     const confirmed = await confirm({
-      title: isTransfer ? t('transactions.deleteTransferTitle') : t('transactions.deleteTransactionTitle'),
-      message: isTransfer ? t('transactions.deleteTransferConfirm') : t('transactions.deleteTransactionConfirm'),
+      title: t('transactions.deleteTransactionTitle'),
+      message: t('transactions.deleteTransactionConfirm'),
       confirmLabel: t('common.delete'),
       variant: 'danger',
     });
-    if (!confirmed) return;
+    if (!confirmed || readOnlyRef.current) return;
 
     setIsSubmitting(true);
     try {
-      if (isTransfer) {
-        await deleteTransfer(parseInt(entryId.substring(2), 10));
-      } else {
-        await deleteTransaction(parseInt(entryId.substring(2), 10));
-      }
+      await deleteTransaction(parseInt(entryId.substring(2), 10));
       await loadTransactions();
       onTransactionsChanged?.();
     } catch (error) {
@@ -1156,7 +788,7 @@ export default function Transactions({
   };
 
   const handleDismissWarning = async (transactionId: number) => {
-    if (isSubmitting) return;
+    if (readOnlyRef.current || isSubmitting) return;
     setIsSubmitting(true);
     try {
       await dismissTransactionWarning(transactionId);
@@ -1169,24 +801,9 @@ export default function Transactions({
   };
 
   // Calculate totals (on filtered entries - only transactions affect budget)
-  const filteredTx = filteredEntries.filter((e) => e.type === 'transaction').map((e) => e.transaction!);
+  const filteredTx = filteredEntries;
   const totalIncome = filteredTx.filter((t) => t.groupType === 'income').reduce((sum, t) => sum + t.amount, 0);
   const totalExpenses = filteredTx.filter((t) => t.groupType === 'expense').reduce((sum, t) => sum + t.amount, 0);
-
-  // Calculate total moved to savings accounts (transfers where destination is a savings account)
-  const filteredTransfers = filteredEntries.filter((e) => e.type === 'transfer').map((e) => e.transfer!);
-  const transferSideMatchesAccountingFilter = (transfer: Transfer, side: 'source' | 'destination') => {
-    if (!filters.accountingPeriod) return true;
-    const period = side === 'source' ? transferSourcePeriod(transfer) : transferDestinationPeriod(transfer);
-    return accountingPeriodKey(period.month, period.year) === filters.accountingPeriod;
-  };
-  const totalToSavings = filteredTransfers
-    .filter((t) => t.destinationAccount.isSavingsAccount && transferSideMatchesAccountingFilter(t, 'destination'))
-    .reduce((sum, t) => sum + t.amount, 0);
-  const totalFromSavings = filteredTransfers
-    .filter((t) => t.sourceAccount.isSavingsAccount && transferSideMatchesAccountingFilter(t, 'source'))
-    .reduce((sum, t) => sum + t.amount, 0);
-  const netSavings = totalToSavings - totalFromSavings;
 
   // Check if all filtered entries are selected
   const allFilteredSelected = filteredEntries.length > 0 && filteredEntries.every((e) => selectedIds.has(e.id));
@@ -1209,7 +826,7 @@ export default function Transactions({
         <div className="transactions-title-row">
           <h2>{t('transactions.title', { year })}</h2>
           <div className="transactions-actions">
-            {canReorderSelection && (
+            {!readOnly && canReorderSelection && (
               <div className="bulk-order-actions">
                 <button
                   type="button"
@@ -1280,7 +897,12 @@ export default function Transactions({
               </button>
             )}
             {!readOnly && (
-              <button className="btn-import" onClick={() => setShowImportModal(true)}>
+              <button
+                className="btn-import"
+                onClick={() => {
+                  if (!readOnlyRef.current) setShowImportModal(true);
+                }}
+              >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="17 8 12 3 7 8" />
@@ -1296,7 +918,7 @@ export default function Transactions({
           <div className="summary-item count">
             <span className="summary-label">{t('transactions.summaryShown')}</span>
             <span className="summary-value">
-              {filteredEntries.length} / {unifiedEntries.length}
+              {filteredEntries.length} / {transactionEntries.length}
             </span>
           </div>
           <div className="summary-item income">
@@ -1307,12 +929,6 @@ export default function Transactions({
             <span className="summary-label">{t('budget.expenses')}</span>
             <span className="summary-value">{formatCurrency(totalExpenses, true)}</span>
           </div>
-          {netSavings !== 0 && (
-            <div className={`summary-item savings ${netSavings >= 0 ? 'positive' : 'negative'}`}>
-              <span className="summary-label">{t('transactions.summarySavings')}</span>
-              <span className="summary-value">{formatCurrency(netSavings, true)}</span>
-            </div>
-          )}
           <div className={`summary-item balance ${totalIncome - totalExpenses >= 0 ? 'positive' : 'negative'}`}>
             <span className="summary-label">{t('transactions.summaryBalance')}</span>
             <span className="summary-value">{formatCurrency(totalIncome - totalExpenses, true)}</span>
@@ -1334,23 +950,20 @@ export default function Transactions({
         />
       )}
 
-      {/* Add Transaction/Transfer Form */}
-      {!readOnly && (
-        <NewTransactionForm
-          year={year}
-          yearId={yearId}
-          categories={allItems}
-          transactions={transactions}
-          paymentMethods={paymentMethods}
-          transferAccounts={transferAccounts}
-          isSubmitting={isSubmitting}
-          onSubmittingChange={setIsSubmitting}
-          onCreated={async () => {
-            await loadTransactions();
-            onTransactionsChanged?.();
-          }}
-        />
-      )}
+      {/* Add Transaction Form */}
+      <NewTransactionForm
+        yearId={yearId}
+        readOnly={readOnly}
+        categories={allItems}
+        transactions={transactions}
+        paymentMethods={paymentMethods}
+        isSubmitting={isSubmitting}
+        onSubmittingChange={setIsSubmitting}
+        onCreated={async () => {
+          await loadTransactions();
+          onTransactionsChanged?.();
+        }}
+      />
 
       {/* Transactions List */}
       <div className="transactions-list">
@@ -1518,7 +1131,6 @@ export default function Transactions({
                     className="column-filter category-filter-hierarchical"
                   >
                     <option value="">{t('transactions.all')}</option>
-                    <option value="section:transfer">{t('transactions.transfersSection')}</option>
                     {groups.filter((g) => g.type === 'income').length > 0 && (
                       <>
                         <option value="section:income">{t('transactions.sectionIncome')}</option>
@@ -1567,453 +1179,228 @@ export default function Transactions({
             </thead>
             <tbody>
               {filteredEntries.map((entry) => {
-                const isTransfer = entry.type === 'transfer';
                 const transaction = entry.transaction;
-                const transfer = entry.transfer;
-                const isPotentialDuplicate = !isTransfer && transaction?.warning === 'potential_duplicate';
+                const isPotentialDuplicate = transaction.warning === 'potential_duplicate';
 
                 return (
                   <tr
                     key={entry.id}
-                    className={`${isTransfer ? 'transfer' : transaction?.groupType} ${selectedIds.has(entry.id) ? 'selected' : ''} ${isPotentialDuplicate ? 'warning-row' : ''} ${editingId === entry.id ? 'editing-row' : ''}`}
+                    className={`${transaction.groupType} ${selectedIds.has(entry.id) ? 'selected' : ''} ${isPotentialDuplicate ? 'warning-row' : ''} ${editingId === entry.id ? 'editing-row' : ''}`}
                     title={isPotentialDuplicate ? t('transactions.potentialDuplicate') : undefined}
                   >
                     {editingId === entry.id ? (
-                      isTransfer ? (
-                        // Edit mode for transfers
-                        <>
-                          <td>
-                            <input type="checkbox" checked={selectedIds.has(entry.id)} disabled />
-                          </td>
-                          <td className="order-cell">
-                            <span className="order-placeholder" />
-                          </td>
-                          <td className="date-cell">
-                            <div className="date-input-wrapper edit-date-wrapper">
-                              <input
-                                type="text"
-                                value={editDate}
-                                onChange={(e) => handleEditDateChange(e.target.value)}
-                                placeholder={t('transactions.datePlaceholder')}
-                                className={`edit-input ${!isValidDateFormat(editDate) && editDate ? 'invalid' : ''}`}
-                                // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
-                                autoFocus
-                              />
-                              <input
-                                type="date"
-                                className="date-picker-hidden"
-                                value={isValidDateFormat(editDate) ? parseDateInput(editDate) : ''}
-                                onChange={(e) => {
-                                  if (e.target.value) {
-                                    const [y, m, d] = e.target.value.split('-');
-                                    handleEditDateChange(`${d}/${m}/${y}`);
-                                  }
-                                }}
-                              />
-                              <button
-                                type="button"
-                                className="date-picker-btn"
-                                onClick={(e) => {
-                                  const hiddenInput = e.currentTarget.previousElementSibling as HTMLInputElement;
-                                  hiddenInput?.showPicker?.();
-                                }}
-                                title={t('transactions.openCalendar')}
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                >
-                                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                                  <line x1="16" y1="2" x2="16" y2="6" />
-                                  <line x1="8" y1="2" x2="8" y2="6" />
-                                  <line x1="3" y1="10" x2="21" y2="10" />
-                                </svg>
-                              </button>
-                            </div>
-                          </td>
-                          <td className="accounting-edit-cell transfer-accounting-edit-cell">
-                            <div className="transfer-accounting-edit-row">
-                              <span className="transfer-period-label">{t('transactions.sourceAccountingShort')}</span>
-                              <select
-                                aria-label={t('transactions.sourceAccountingMonth')}
-                                value={editAccountingMonth}
-                                onChange={(e) => {
-                                  setEditAccountingMonth(Number(e.target.value));
-                                  setEditSourcePeriodOverridden(true);
-                                }}
-                                className="edit-select accounting-month-select"
-                              >
-                                {monthNames.map((name, i) => (
-                                  <option key={i + 1} value={i + 1}>
-                                    {name}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                aria-label={t('transactions.sourceAccountingYear')}
-                                type="number"
-                                value={editAccountingYear}
-                                onChange={(e) => {
-                                  setEditAccountingYear(Number(e.target.value));
-                                  setEditSourcePeriodOverridden(true);
-                                }}
-                                className="edit-input accounting-year-input"
-                                min="2000"
-                                max="2100"
-                              />
-                            </div>
-                            <div className="transfer-accounting-edit-row">
-                              <span className="transfer-period-label">
-                                {t('transactions.destinationAccountingShort')}
-                              </span>
-                              <select
-                                aria-label={t('transactions.destinationAccountingMonth')}
-                                value={editDestinationAccountingMonth}
-                                onChange={(e) => {
-                                  setEditDestinationAccountingMonth(Number(e.target.value));
-                                  setEditDestinationPeriodOverridden(true);
-                                }}
-                                className="edit-select accounting-month-select"
-                              >
-                                {monthNames.map((name, i) => (
-                                  <option key={i + 1} value={i + 1}>
-                                    {name}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                aria-label={t('transactions.destinationAccountingYear')}
-                                type="number"
-                                value={editDestinationAccountingYear}
-                                onChange={(e) => {
-                                  setEditDestinationAccountingYear(Number(e.target.value));
-                                  setEditDestinationPeriodOverridden(true);
-                                }}
-                                className="edit-input accounting-year-input"
-                                min="2000"
-                                max="2100"
-                              />
-                            </div>
-                          </td>
-                          <td>
-                            <div className="transfer-edit-accounts">
-                              <select
-                                value={editSourceAccount}
-                                onChange={(e) => handleEditSourceAccountChange(e.target.value)}
-                                className="edit-select"
-                              >
-                                <option value="">{t('transactions.sourceAccount')}</option>
-                                <optgroup label={t('accounts.paymentAccounts')}>
-                                  {transferAccounts
-                                    .filter((a) => !a.isSavingsAccount)
-                                    .map((a) => (
-                                      <option key={`pm_${a.id}`} value={`${a.id}`}>
-                                        {formatWithInstitution(a.name, a.institution)}
-                                      </option>
-                                    ))}
-                                </optgroup>
-                                <optgroup label={t('accounts.savingsAccounts')}>
-                                  {transferAccounts
-                                    .filter((a) => a.isSavingsAccount)
-                                    .map((a) => (
-                                      <option key={`si_${a.id}`} value={`${a.id}`}>
-                                        {formatWithInstitution(a.name, a.institution)}
-                                      </option>
-                                    ))}
-                                </optgroup>
-                              </select>
-                              <span className="transfer-arrow-small">→</span>
-                              <select
-                                value={editDestAccount}
-                                onChange={(e) => handleEditDestinationAccountChange(e.target.value)}
-                                className="edit-select"
-                              >
-                                <option value="">{t('transactions.destinationAccount')}</option>
-                                <optgroup label={t('accounts.paymentAccounts')}>
-                                  {transferAccounts
-                                    .filter((a) => !a.isSavingsAccount)
-                                    .map((a) => (
-                                      <option key={`pm_${a.id}`} value={`${a.id}`}>
-                                        {formatWithInstitution(a.name, a.institution)}
-                                      </option>
-                                    ))}
-                                </optgroup>
-                                <optgroup label={t('accounts.savingsAccounts')}>
-                                  {transferAccounts
-                                    .filter((a) => a.isSavingsAccount)
-                                    .map((a) => (
-                                      <option key={`si_${a.id}`} value={`${a.id}`}>
-                                        {formatWithInstitution(a.name, a.institution)}
-                                      </option>
-                                    ))}
-                                </optgroup>
-                              </select>
-                            </div>
-                          </td>
-                          <td>
+                      // Edit mode for transactions
+                      <>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(entry.id)}
+                            onChange={() => toggleSelect(entry.id)}
+                            disabled
+                          />
+                        </td>
+                        <td className="order-cell">
+                          <span className="order-placeholder" />
+                        </td>
+                        <td className="date-cell">
+                          <div className="date-input-wrapper edit-date-wrapper">
                             <input
                               type="text"
-                              value={editDescription}
-                              onChange={(e) => setEditDescription(e.target.value)}
-                              className="edit-input"
-                              placeholder={t('transactions.description')}
+                              value={editDate}
+                              onChange={(e) => setEditDate(e.target.value)}
+                              placeholder={t('transactions.datePlaceholder')}
+                              pattern="\d{2}/\d{2}/\d{4}"
+                              className={`edit-input ${!isValidDateFormat(editDate) && editDate ? 'invalid' : ''}`}
+                              // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
+                              autoFocus
                             />
-                          </td>
-                          <td>-</td>
-                          <td>-</td>
-                          <td>
-                            <span className="transfer-badge">{t('transactions.typeTransfer')}</span>
-                          </td>
-                          <td>
                             <input
-                              type="number"
-                              value={editAmount}
-                              onChange={(e) => setEditAmount(e.target.value)}
-                              step="0.01"
-                              className="edit-input amount"
+                              type="date"
+                              className="date-picker-hidden"
+                              value={isValidDateFormat(editDate) ? parseDateInput(editDate) : ''}
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  const [y, m, d] = e.target.value.split('-');
+                                  setEditDate(`${d}/${m}/${y}`);
+                                }
+                              }}
                             />
-                          </td>
-                          <td className="actions-cell">
-                            <button className="btn-icon save" onClick={handleUpdate} title={t('common.save')}>
-                              <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                              >
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                            </button>
-                            <button className="btn-icon cancel" onClick={cancelEdit} title={t('common.cancel')}>
-                              <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                              >
-                                <line x1="18" y1="6" x2="6" y2="18" />
-                                <line x1="6" y1="6" x2="18" y2="18" />
-                              </svg>
-                            </button>
-                          </td>
-                        </>
-                      ) : (
-                        // Edit mode for transactions
-                        <>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.has(entry.id)}
-                              onChange={() => toggleSelect(entry.id)}
-                              disabled
-                            />
-                          </td>
-                          <td className="order-cell">
-                            <span className="order-placeholder" />
-                          </td>
-                          <td className="date-cell">
-                            <div className="date-input-wrapper edit-date-wrapper">
-                              <input
-                                type="text"
-                                value={editDate}
-                                onChange={(e) => handleEditDateChange(e.target.value)}
-                                placeholder={t('transactions.datePlaceholder')}
-                                pattern="\d{2}/\d{2}/\d{4}"
-                                className={`edit-input ${!isValidDateFormat(editDate) && editDate ? 'invalid' : ''}`}
-                                // biome-ignore lint/a11y/noAutofocus: intentional UX - focus on edit
-                                autoFocus
-                              />
-                              <input
-                                type="date"
-                                className="date-picker-hidden"
-                                value={isValidDateFormat(editDate) ? parseDateInput(editDate) : ''}
-                                onChange={(e) => {
-                                  if (e.target.value) {
-                                    const [y, m, d] = e.target.value.split('-');
-                                    handleEditDateChange(`${d}/${m}/${y}`);
-                                  }
-                                }}
-                              />
-                              <button
-                                type="button"
-                                className="date-picker-btn"
-                                onClick={(e) => {
-                                  const hiddenInput = e.currentTarget.previousElementSibling as HTMLInputElement;
-                                  hiddenInput?.showPicker?.();
-                                }}
-                                title={t('transactions.openCalendar')}
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                >
-                                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                                  <line x1="16" y1="2" x2="16" y2="6" />
-                                  <line x1="8" y1="2" x2="8" y2="6" />
-                                  <line x1="3" y1="10" x2="21" y2="10" />
-                                </svg>
-                              </button>
-                            </div>
-                          </td>
-                          <td className="accounting-edit-cell">
-                            <select
-                              value={editAccountingMonth}
-                              onChange={(e) => setEditAccountingMonth(Number(e.target.value))}
-                              aria-label={t('transactions.accountingMonth')}
-                              className="edit-select accounting-month-select"
+                            <button
+                              type="button"
+                              className="date-picker-btn"
+                              onClick={(e) => {
+                                const hiddenInput = e.currentTarget.previousElementSibling as HTMLInputElement;
+                                hiddenInput?.showPicker?.();
+                              }}
+                              title={t('transactions.openCalendar')}
                             >
-                              {monthNames.map((name, i) => (
-                                <option key={i + 1} value={i + 1}>
-                                  {name}
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                                <line x1="16" y1="2" x2="16" y2="6" />
+                                <line x1="8" y1="2" x2="8" y2="6" />
+                                <line x1="3" y1="10" x2="21" y2="10" />
+                              </svg>
+                            </button>
+                          </div>
+                        </td>
+                        <td className="accounting-edit-cell">
+                          <select
+                            value={editAccountingMonth}
+                            onChange={(e) => setEditAccountingMonth(Number(e.target.value))}
+                            aria-label={t('transactions.accountingMonth')}
+                            className="edit-select accounting-month-select"
+                          >
+                            {monthNames.map((name, i) => (
+                              <option key={i + 1} value={i + 1}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            value={editAccountingYear}
+                            onChange={(e) => setEditAccountingYear(Number(e.target.value))}
+                            aria-label={t('transactions.accountingYear')}
+                            className="edit-input accounting-year-input"
+                            min="2000"
+                            max="2100"
+                          />
+                        </td>
+                        <td>
+                          <ThirdPartyAutocomplete
+                            value={editThirdParty}
+                            onChange={setEditThirdParty}
+                            onCommit={applyEditThirdPartySuggestion}
+                            placeholder={t('transactions.thirdParty')}
+                            className="edit-input"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={editDescription}
+                            onChange={(e) => setEditDescription(e.target.value)}
+                            className="edit-input"
+                            placeholder={t('transactions.description')}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={editComment}
+                            onChange={(e) => setEditComment(e.target.value)}
+                            className="edit-input"
+                            placeholder={t('transactions.comment')}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            value={editPaymentMethodId ?? ''}
+                            onChange={(e) => setEditPaymentMethodId(e.target.value ? Number(e.target.value) : null)}
+                            className="edit-select"
+                          >
+                            <option value="">{t('common.none')}</option>
+                            {paymentMethods
+                              .filter((m) => !m.isSavingsAccount)
+                              .map((method) => (
+                                <option key={method.id} value={method.id}>
+                                  {formatWithInstitution(method.name, method.institution)}
                                 </option>
                               ))}
-                            </select>
-                            <input
-                              type="number"
-                              value={editAccountingYear}
-                              onChange={(e) => setEditAccountingYear(Number(e.target.value))}
-                              aria-label={t('transactions.accountingYear')}
-                              className="edit-input accounting-year-input"
-                              min="2000"
-                              max="2100"
-                            />
-                          </td>
-                          <td>
-                            <ThirdPartyAutocomplete
-                              value={editThirdParty}
-                              onChange={setEditThirdParty}
-                              onCommit={applyEditThirdPartySuggestion}
-                              placeholder={t('transactions.thirdParty')}
-                              className="edit-input"
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              value={editDescription}
-                              onChange={(e) => setEditDescription(e.target.value)}
-                              className="edit-input"
-                              placeholder={t('transactions.description')}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              value={editComment}
-                              onChange={(e) => setEditComment(e.target.value)}
-                              className="edit-input"
-                              placeholder={t('transactions.comment')}
-                            />
-                          </td>
-                          <td>
-                            <select
-                              value={editPaymentMethodId ?? ''}
-                              onChange={(e) => setEditPaymentMethodId(e.target.value ? Number(e.target.value) : null)}
-                              className="edit-select"
-                            >
-                              <option value="">{t('common.none')}</option>
-                              {paymentMethods
-                                .filter((m) => !m.isSavingsAccount)
-                                .map((method) => (
-                                  <option key={method.id} value={method.id}>
-                                    {formatWithInstitution(method.name, method.institution)}
-                                  </option>
-                                ))}
-                              {paymentMethods.some((m) => m.isSavingsAccount) && (
-                                <optgroup label={t('accounts.savingsAccounts')}>
-                                  {paymentMethods
-                                    .filter((m) => m.isSavingsAccount)
-                                    .map((method) => (
-                                      <option key={method.id} value={method.id}>
-                                        {formatWithInstitution(method.name, method.institution)}
-                                      </option>
-                                    ))}
-                                </optgroup>
-                              )}
-                            </select>
-                          </td>
-                          <td>
-                            <select
-                              value={editItemId || ''}
-                              onChange={(e) => setEditItemId(e.target.value ? Number(e.target.value) : null)}
-                              className="edit-select"
-                            >
-                              <option value="">{t('transactions.uncategorized')}</option>
-                              <optgroup label={t('budget.income')}>
-                                {incomeItems.map((item) => (
-                                  <option key={item.id} value={item.id}>
-                                    {item.groupName} → {item.name}
-                                  </option>
-                                ))}
-                              </optgroup>
-                              <optgroup label={t('budget.expenses')}>
-                                {expenseItems.map((item) => (
-                                  <option key={item.id} value={item.id}>
-                                    {item.groupName} → {item.name}
-                                  </option>
-                                ))}
-                              </optgroup>
-                              {savingsCategoryItems.length > 0 && (
-                                <optgroup label={t('budget.savings')}>
-                                  {savingsCategoryItems.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                      {item.name}
+                            {paymentMethods.some((m) => m.isSavingsAccount) && (
+                              <optgroup label={t('accounts.savingsAccounts')}>
+                                {paymentMethods
+                                  .filter((m) => m.isSavingsAccount)
+                                  .map((method) => (
+                                    <option key={method.id} value={method.id}>
+                                      {formatWithInstitution(method.name, method.institution)}
                                     </option>
                                   ))}
-                                </optgroup>
-                              )}
-                            </select>
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              value={editAmount}
-                              onChange={(e) => setEditAmount(e.target.value)}
-                              step="0.01"
-                              className="edit-input amount"
-                            />
-                          </td>
-                          <td className="actions-cell">
-                            <button className="btn-icon save" onClick={handleUpdate} title={t('common.save')}>
-                              <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                              >
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                            </button>
-                            <button className="btn-icon cancel" onClick={cancelEdit} title={t('common.cancel')}>
-                              <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                              >
-                                <line x1="18" y1="6" x2="6" y2="18" />
-                                <line x1="6" y1="6" x2="18" y2="18" />
-                              </svg>
-                            </button>
-                          </td>
-                        </>
-                      )
+                              </optgroup>
+                            )}
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            value={editItemId || ''}
+                            onChange={(e) => setEditItemId(e.target.value ? Number(e.target.value) : null)}
+                            className="edit-select"
+                          >
+                            <option value="">{t('transactions.uncategorized')}</option>
+                            <optgroup label={t('budget.income')}>
+                              {incomeItems.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.groupName} → {item.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label={t('budget.expenses')}>
+                              {expenseItems.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.groupName} → {item.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                            {savingsCategoryItems.length > 0 && (
+                              <optgroup label={t('budget.savings')}>
+                                {savingsCategoryItems.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            value={editAmount}
+                            onChange={(e) => setEditAmount(e.target.value)}
+                            step="0.01"
+                            className="edit-input amount"
+                          />
+                        </td>
+                        <td className="actions-cell">
+                          <button
+                            className="btn-icon save"
+                            disabled={readOnly || isSubmitting}
+                            onClick={handleUpdate}
+                            title={t('common.save')}
+                          >
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          </button>
+                          <button className="btn-icon cancel" onClick={cancelEdit} title={t('common.cancel')}>
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                          </button>
+                        </td>
+                      </>
                     ) : (
                       <>
                         <td>
@@ -2066,24 +1453,14 @@ export default function Transactions({
                         </td>
                         <td className="date-cell">{formatDateDisplay(entry.date)}</td>
                         <td className="accounting-cell">
-                          {isTransfer && transfer
-                            ? formatTransferAccountingPeriod(transfer, monthNames)
-                            : formatAccountingPeriod(entry.accountingMonth, entry.accountingYear, monthNames)}
+                          {formatAccountingPeriod(entry.accountingMonth, entry.accountingYear, monthNames)}
                         </td>
                         <td className="third-party-cell">
-                          {isTransfer ? (
-                            <span className="transfer-accounts">
-                              <span className="transfer-source">{transfer?.sourceAccount.name}</span>
-                              <span className="transfer-arrow-small">→</span>
-                              <span className="transfer-dest">{transfer?.destinationAccount.name}</span>
-                            </span>
-                          ) : (
-                            transaction?.thirdParty || <span className="empty-field">-</span>
-                          )}
+                          {transaction.thirdParty || <span className="empty-field">-</span>}
                         </td>
                         <td className="description-cell">
                           {entry.description || <span className="empty-field">-</span>}
-                          {!isTransfer && transaction?.createdBy && (
+                          {transaction.createdBy && (
                             <span className="transaction-creator" title={transaction.createdBy.email}>
                               {t('transactions.createdBy', {
                                 name: transaction.createdBy.name || transaction.createdBy.email,
@@ -2092,52 +1469,25 @@ export default function Transactions({
                           )}
                         </td>
                         <td className="comment-cell">
-                          {!isTransfer && transaction?.comment ? (
-                            transaction.comment
-                          ) : (
-                            <span className="empty-field">-</span>
-                          )}
+                          {transaction.comment ? transaction.comment : <span className="empty-field">-</span>}
                         </td>
                         <td className="payment-cell">
-                          {isTransfer ? (
-                            <span className="empty-field">-</span>
-                          ) : (
-                            transaction?.paymentMethod || <span className="empty-field">-</span>
-                          )}
+                          {transaction.paymentMethod || <span className="empty-field">-</span>}
                         </td>
                         <td className="category-cell">
-                          {isTransfer ? (
-                            <span className="transfer-badge">
-                              <svg
-                                width="12"
-                                height="12"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                              >
-                                <polyline points="17 1 21 5 17 9" />
-                                <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-                                <polyline points="7 23 3 19 7 15" />
-                                <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-                              </svg>
-                              {t('transactions.typeTransfer')}
-                            </span>
-                          ) : transaction?.groupName && transaction?.itemName ? (
+                          {transaction.groupName && transaction.itemName ? (
                             `${transaction.groupName} → ${transaction.itemName}`
                           ) : (
                             <span className="uncategorized">{t('transactions.uncategorized')}</span>
                           )}
                         </td>
-                        <td
-                          className={`amount-cell ${isTransfer ? (transfer?.sourceAccount.isSavingsAccount || transfer?.destinationAccount.isSavingsAccount ? 'savings-transfer' : 'transfer') : transaction?.groupType} ${entry.amount < 0 ? 'negative' : ''}`}
-                        >
+                        <td className={`amount-cell ${transaction.groupType} ${entry.amount < 0 ? 'negative' : ''}`}>
                           {formatCurrency(entry.amount, true)}
                         </td>
                         <td className="actions-cell">
                           {!readOnly && (
                             <>
-                              {!isTransfer && transaction?.warning === 'potential_duplicate' && (
+                              {transaction.warning === 'potential_duplicate' && (
                                 <button
                                   className="btn-icon dismiss-warning"
                                   onClick={() => handleDismissWarning(transaction.id)}
@@ -2157,9 +1507,7 @@ export default function Transactions({
                               )}
                               <button
                                 className="btn-icon edit"
-                                onClick={() =>
-                                  isTransfer ? startEditTransfer(transfer!) : startEditTransaction(transaction!)
-                                }
+                                onClick={() => startEditTransaction(transaction)}
                                 title={t('common.edit')}
                               >
                                 <svg
@@ -2205,7 +1553,7 @@ export default function Transactions({
         {filteredEntries.length === 0 && (
           <div className="empty-transactions" role="status">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              {unifiedEntries.length === 0 ? (
+              {transactionEntries.length === 0 ? (
                 <>
                   <line x1="12" y1="1" x2="12" y2="23" />
                   <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
@@ -2217,7 +1565,7 @@ export default function Transactions({
                 </>
               )}
             </svg>
-            <p>{t(unifiedEntries.length === 0 ? 'transactions.empty' : 'transactions.emptyFiltered')}</p>
+            <p>{t(transactionEntries.length === 0 ? 'transactions.empty' : 'transactions.emptyFiltered')}</p>
             {hasActiveFilters && (
               <button className="btn-link" onClick={clearFilters}>
                 {t('transactions.clearFilters')}

@@ -25,11 +25,17 @@ for 2026 and a Personal budget for 2026.
 4. Click **Add year**.
 
 Tallix copies category items from the latest preceding year in that budget, with planned
-amounts reset to zero and no transactions copied. Opening account balances start from that
-year's December closing balances as fixed snapshots; you can edit them independently.
+amounts reset to zero and no transactions copied. Opening account balances are linked to that
+year's calculated December closing balances. Changes to an earlier balance or recorded activity
+flow through later linked years. You can override an opening balance after confirming a warning
+that its link will be broken, and restore the link from Accounts.
 If there is no preceding year, the year starts empty apart from savings account categories.
 Existing transactions, planned values, account balances and asset values stay in their years.
 Category groups are shared across the budget.
+
+The balance-link migration reconnects all existing later years, including openings previously
+stored as snapshots, so their displayed balances can change. Explicit overrides saved after this
+change remain independent. Parent-budget starting-year overrides keep their existing behavior.
 
 ## Delete a budget
 

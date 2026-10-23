@@ -196,7 +196,8 @@ function deferred<T>() {
 async function renderTransactions(
   transactions: Transaction[] = [transaction()],
   transfers: Transfer[] = [],
-  onTransactionsChanged = vi.fn()
+  onTransactionsChanged = vi.fn(),
+  readOnly = false
 ) {
   mockedApi.fetchTransactions.mockResolvedValue(transactions);
   mockedApi.fetchPaymentMethods.mockResolvedValue(paymentMethods);
@@ -208,21 +209,28 @@ async function renderTransactions(
   document.body.appendChild(container);
   let root: Root;
 
+  const page = (isReadOnly: boolean) => (
+    <I18nProvider>
+      <SettingsProvider>
+        <Transactions
+          year={2026}
+          yearId={77}
+          groups={groups}
+          onTransactionsChanged={onTransactionsChanged}
+          readOnly={isReadOnly}
+        />
+      </SettingsProvider>
+    </I18nProvider>
+  );
   await act(async () => {
     root = createRoot(container);
     mountedRoots.push(root);
-    root.render(
-      <I18nProvider>
-        <SettingsProvider>
-          <Transactions year={2026} yearId={77} groups={groups} onTransactionsChanged={onTransactionsChanged} />
-        </SettingsProvider>
-      </I18nProvider>
-    );
+    root.render(page(readOnly));
   });
 
   await flush();
 
-  return { container, root: root! };
+  return { container, root: root!, setReadOnly: (value: boolean) => act(() => root.render(page(value))) };
 }
 
 function byPlaceholder(container: HTMLElement, placeholder: string): HTMLInputElement {
@@ -235,17 +243,6 @@ function selectByClass(container: HTMLElement, className: string): HTMLSelectEle
   const select = container.querySelector<HTMLSelectElement>(`select.${className}`);
   if (!select) throw new Error(`Missing select ${className}`);
   return select;
-}
-
-function setPaymentMethodFilter(container: HTMLElement, labelText: string) {
-  const option = Array.from(container.querySelectorAll<HTMLLabelElement>('.multi-select-option')).find((label) =>
-    label.textContent?.includes(labelText)
-  );
-  const checkbox = option?.querySelector<HTMLInputElement>('input[type="checkbox"]');
-  if (!checkbox) throw new Error(`Missing payment method filter ${labelText}`);
-  act(() => {
-    checkbox.click();
-  });
 }
 
 beforeEach(() => {
@@ -298,7 +295,7 @@ describe('transaction filters', () => {
     });
     expect(commentFilter.value).toBe('');
     expect(selectByClass(container, 'accounting-period-filter').value).toBe('');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(6);
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(5);
     expect(container.querySelector('.btn-clear-filters')).toBeNull();
   });
 
@@ -346,30 +343,7 @@ describe('transaction filters', () => {
     expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(0);
   });
 
-  it('counts savings only in the savings side accounting period', async () => {
-    const { container } = await renderTransactions(
-      [],
-      [
-        transfer({
-          date: '2026-08-24',
-          accountingMonth: 9,
-          accountingYear: 2026,
-          sourceAccountingMonth: 9,
-          sourceAccountingYear: 2026,
-          destinationAccountingMonth: 8,
-          destinationAccountingYear: 2026,
-        }),
-      ]
-    );
-    const accountingFilter = selectByClass(container, 'accounting-period-filter');
-    change(accountingFilter, '2026-8');
-    expect(container.querySelector('.summary-item.savings')).not.toBeNull();
-    change(accountingFilter, '2026-9');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
-    expect(container.querySelector('.summary-item.savings')).toBeNull();
-  });
-
-  it('filters transactions and transfers by accounting month and year, then clears the filter', async () => {
+  it('filters transactions by accounting month and year, then clears the filter', async () => {
     const { container } = await renderTransactions(
       [
         transaction({ id: 1, description: 'February purchase' }),
@@ -388,9 +362,9 @@ describe('transaction filters', () => {
     ]);
 
     change(accountingFilter, '2026-2');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(2);
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
     expect(container.textContent).toContain('February purchase');
-    expect(container.textContent).toContain('February transfer');
+    expect(container.textContent).not.toContain('February transfer');
     expect(container.textContent).not.toContain('Next-year purchase');
     expect(container.textContent).not.toContain('March purchase');
 
@@ -398,90 +372,11 @@ describe('transaction filters', () => {
       container.querySelector<HTMLButtonElement>('.btn-clear-filters')!.click();
     });
     expect(accountingFilter.value).toBe('');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(4);
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(3);
 
     change(accountingFilter, '2027-2');
     expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
     expect(container.textContent).toContain('Next-year purchase');
-  });
-
-  it('matches a split-period transfer from either accounting side without duplicating the row', async () => {
-    const { container } = await renderTransactions(
-      [],
-      [
-        transfer({
-          id: 11,
-          date: '2026-08-24',
-          description: 'Revolut top-up',
-          sourceAccount: transferAccounts[1],
-          destinationAccount: transferAccounts[0],
-          accountingMonth: 9,
-          accountingYear: 2026,
-          sourceAccountingMonth: 9,
-          sourceAccountingYear: 2026,
-          destinationAccountingMonth: 8,
-          destinationAccountingYear: 2026,
-        }),
-      ]
-    );
-
-    expect(container.textContent).toContain('September 2026 → August 2026');
-
-    const accountingFilter = selectByClass(container, 'accounting-period-filter');
-    expect(Array.from(accountingFilter.options).map((option) => option.value)).toEqual(['', '2026-8', '2026-9']);
-
-    change(accountingFilter, '2026-8');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
-    expect(container.textContent).toContain('Revolut top-up');
-
-    change(accountingFilter, '2026-9');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
-    expect(container.textContent).toContain('Revolut top-up');
-  });
-
-  it('correlates accounting month and payment method filters to the same transfer side', async () => {
-    const { container } = await renderTransactions(
-      [],
-      [
-        transfer({
-          id: 12,
-          date: '2026-08-24',
-          description: 'Cembra to Revolut',
-          sourceAccount: transferAccounts[1],
-          destinationAccount: transferAccounts[0],
-          accountingMonth: 9,
-          accountingYear: 2026,
-          sourceAccountingMonth: 9,
-          sourceAccountingYear: 2026,
-          destinationAccountingMonth: 8,
-          destinationAccountingYear: 2026,
-        }),
-      ]
-    );
-
-    const accountingFilter = selectByClass(container, 'accounting-period-filter');
-    setPaymentMethodFilter(container, 'Credit Card');
-    change(accountingFilter, '2026-9');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
-    expect(container.textContent).toContain('Cembra to Revolut');
-
-    act(() => {
-      container.querySelector<HTMLButtonElement>('.btn-clear-filters')!.click();
-    });
-    await flush();
-    setPaymentMethodFilter(container, 'Checking (Bank)');
-    change(accountingFilter, '2026-9');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(0);
-    expect(container.textContent).not.toContain('Cembra to Revolut');
-
-    act(() => {
-      container.querySelector<HTMLButtonElement>('.btn-link')!.click();
-    });
-    await flush();
-    setPaymentMethodFilter(container, 'Checking (Bank)');
-    change(selectByClass(container, 'accounting-period-filter'), '2026-8');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
-    expect(container.textContent).toContain('Cembra to Revolut');
   });
 });
 
@@ -519,7 +414,7 @@ describe('new transaction form', () => {
     expect(selectByClass(container, 'payment-method-select').value).toBe('');
     expect(selectByClass(container, 'category-select').value).toBe('');
     expect(mockedApi.fetchTransactions).toHaveBeenCalledTimes(2);
-    expect(mockedApi.fetchTransfers).toHaveBeenCalledTimes(2);
+    expect(mockedApi.fetchTransfers).not.toHaveBeenCalled();
     expect(onTransactionsChanged).toHaveBeenCalledTimes(1);
   });
 
@@ -637,187 +532,6 @@ describe('new transaction form', () => {
   });
 });
 
-describe('new transfer form', () => {
-  it.each([
-    ['24/08/2026', '2026-08-24', 9, 2026, 8],
-    ['20/08/2026', '2026-08-20', 9, 2026, 8],
-    ['24/12/2026', '2026-12-24', 1, 2027, 12],
-  ])('uses each account cutoff when creating a transfer on %s', async (displayDate, isoDate, sourceMonth, sourceYear, destinationMonth) => {
-    mockedApi.fetchPaymentMethods.mockResolvedValueOnce(
-      paymentMethods.map((method) => ({
-        ...method,
-        settlementDay: method.id === 101 ? 20 : null,
-      }))
-    );
-    mockedApi.createTransfer.mockResolvedValue(transfer({ id: 99 }));
-    const { container } = await renderTransactions([], []);
-    act(() => {
-      Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-        .find((button) => button.textContent?.includes('Transfer'))!
-        .click();
-    });
-    change(byPlaceholder(container, 'DD/MM/YYYY'), displayDate);
-    const accountSelects = container.querySelectorAll<HTMLSelectElement>('select.account-select');
-    change(accountSelects[0], '101');
-    change(accountSelects[1], '100');
-    change(byPlaceholder(container, 'Amount'), '200');
-    expect(container.querySelector<HTMLSelectElement>('select[aria-label="Source accounting month"]')!.value).toBe(
-      String(sourceMonth)
-    );
-    expect(container.querySelector<HTMLSelectElement>('select[aria-label="Destination accounting month"]')!.value).toBe(
-      String(destinationMonth)
-    );
-    submit(container.querySelector('form.transaction-form')!);
-    await flush();
-    expect(mockedApi.createTransfer).toHaveBeenCalledWith(
-      2026,
-      expect.objectContaining({
-        date: isoDate,
-        amount: 200,
-        sourceAccountId: 101,
-        destinationAccountId: 100,
-        sourceAccountingMonth: sourceMonth,
-        sourceAccountingYear: sourceYear,
-        destinationAccountingMonth: destinationMonth,
-        destinationAccountingYear: 2026,
-      })
-    );
-  });
-
-  it('creates a transfer and resets transfer-only fields after success', async () => {
-    mockedApi.createTransfer.mockResolvedValue(transfer({ id: 99 }));
-    const { container } = await renderTransactions();
-
-    act(() => {
-      Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-        .find((button) => button.textContent?.includes('Transfer'))
-        ?.click();
-    });
-    expect(container.querySelector('input[placeholder="Comment"]')).toBeNull();
-    change(byPlaceholder(container, 'DD/MM/YYYY'), '17/03/2026');
-    change(selectByClass(container, 'account-select'), '100');
-    const accountSelects = container.querySelectorAll<HTMLSelectElement>('select.account-select');
-    change(accountSelects[1], '200');
-    change(byPlaceholder(container, 'Description (optional)'), '  Save it  ');
-    change(byPlaceholder(container, 'Amount'), '125');
-    submit(container.querySelector('form.transaction-form')!);
-    await flush();
-
-    expect(mockedApi.createTransfer).toHaveBeenCalledWith(2026, {
-      date: '2026-03-17',
-      amount: 125,
-      description: 'Save it',
-      sourceAccountId: 100,
-      destinationAccountId: 200,
-      sourceAccountingMonth: 3,
-      sourceAccountingYear: 2026,
-      destinationAccountingMonth: 3,
-      destinationAccountingYear: 2026,
-    });
-    expect(byPlaceholder(container, 'DD/MM/YYYY').value).toBe('17/03/2026');
-    expect(accountSelects[0].value).toBe('');
-    expect(accountSelects[1].value).toBe('');
-    expect(byPlaceholder(container, 'Description (optional)').value).toBe('');
-    expect(byPlaceholder(container, 'Amount').value).toBe('');
-  });
-});
-
-describe('transfer editing', () => {
-  it('saves a manual destination accounting period without changing the source period', async () => {
-    mockedApi.updateTransfer.mockResolvedValue(
-      transfer({
-        id: 7,
-        date: '2026-08-24',
-        description: 'Revolut top-up',
-        sourceAccount: transferAccounts[1],
-        destinationAccount: transferAccounts[0],
-        accountingMonth: 9,
-        accountingYear: 2026,
-        sourceAccountingMonth: 9,
-        sourceAccountingYear: 2026,
-        destinationAccountingMonth: 8,
-        destinationAccountingYear: 2026,
-      })
-    );
-    const { container } = await renderTransactions(
-      [],
-      [
-        transfer({
-          id: 7,
-          date: '2026-08-24',
-          description: 'Revolut top-up',
-          sourceAccount: transferAccounts[1],
-          destinationAccount: transferAccounts[0],
-          accountingMonth: 9,
-          accountingYear: 2026,
-          sourceAccountingMonth: 9,
-          sourceAccountingYear: 2026,
-          destinationAccountingMonth: 9,
-          destinationAccountingYear: 2026,
-        }),
-      ]
-    );
-
-    act(() => {
-      container.querySelector<HTMLButtonElement>('button.btn-icon.edit')!.click();
-    });
-
-    change(container.querySelector<HTMLSelectElement>('select[aria-label="Destination accounting month"]')!, '8');
-    act(() => {
-      container.querySelector<HTMLButtonElement>('button.btn-icon.save')!.click();
-    });
-    await flush();
-
-    expect(mockedApi.updateTransfer).toHaveBeenCalledWith(7, {
-      date: '2026-08-24',
-      amount: 50,
-      description: 'Revolut top-up',
-      sourceAccountId: 101,
-      destinationAccountId: 100,
-      destinationAccountingMonth: 8,
-      destinationAccountingYear: 2026,
-    });
-  });
-
-  it('does not send accounting periods when only ordinary transfer fields change', async () => {
-    mockedApi.updateTransfer.mockResolvedValue(transfer({ id: 8, description: 'Renamed transfer' }));
-    const { container } = await renderTransactions(
-      [],
-      [
-        transfer({
-          id: 8,
-          description: 'Original transfer',
-          sourceAccountingMonth: 2,
-          sourceAccountingYear: 2026,
-          destinationAccountingMonth: 2,
-          destinationAccountingYear: 2026,
-        }),
-      ]
-    );
-
-    act(() => {
-      container.querySelector<HTMLButtonElement>('button.btn-icon.edit')!.click();
-    });
-    const descriptionInput = Array.from(container.querySelectorAll<HTMLInputElement>('input.edit-input')).find(
-      (input) => input.value === 'Original transfer'
-    );
-    if (!descriptionInput) throw new Error('Missing transfer description input');
-    change(descriptionInput, 'Renamed transfer');
-    act(() => {
-      container.querySelector<HTMLButtonElement>('button.btn-icon.save')!.click();
-    });
-    await flush();
-
-    expect(mockedApi.updateTransfer).toHaveBeenCalledWith(8, {
-      date: '2026-02-04',
-      amount: 50,
-      description: 'Renamed transfer',
-      sourceAccountId: 100,
-      destinationAccountId: 200,
-    });
-  });
-});
-
 describe('new transaction typing render cost', () => {
   it('does not reformat table dates when typing in the add form draft fields', async () => {
     const dateSpy = vi.spyOn(utils, 'formatDateDisplay');
@@ -831,5 +545,239 @@ describe('new transaction typing render cost', () => {
     await flush();
 
     expect(dateSpy.mock.calls.length).toBe(0);
+  });
+});
+
+function click(container: HTMLElement, selector: string) {
+  const button = container.querySelector<HTMLButtonElement>(selector);
+  if (!button) throw new Error(`Missing button ${selector}`);
+  act(() => button.click());
+}
+
+describe('transaction mutation contracts', () => {
+  it('saves ordinary fields without changing accounting and cancels without writing', async () => {
+    const onChanged = vi.fn();
+    const { container } = await renderTransactions([transaction()], [], onChanged);
+    click(container, '.btn-icon.edit');
+    change(
+      Array.from(container.querySelectorAll<HTMLInputElement>('input.edit-input')).find(
+        (input) => input.value === 'Existing purchase'
+      )!,
+      '  Updated purchase  '
+    );
+    click(container, '.btn-icon.save');
+    await flush();
+    expect(mockedApi.updateTransaction).toHaveBeenCalledWith(1, {
+      itemId: 20,
+      date: '2026-02-03',
+      description: 'Updated purchase',
+      comment: '',
+      thirdParty: 'Market',
+      paymentMethodId: 100,
+      amount: 12.5,
+    });
+    expect(onChanged).toHaveBeenCalledOnce();
+    click(container, '.btn-icon.edit');
+    click(container, '.btn-icon.cancel');
+    expect(mockedApi.updateTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('recalculates after a date change unless accounting is explicitly overridden', async () => {
+    const { container } = await renderTransactions();
+    click(container, '.btn-icon.edit');
+    change(container.querySelector('input.edit-input[placeholder="DD/MM/YYYY"]')!, '24/02/2026');
+    click(container, '.btn-icon.save');
+    await flush();
+    expect(mockedApi.updateTransaction.mock.calls[0][1]).toMatchObject({ recalculateAccounting: true });
+    click(container, '.btn-icon.edit');
+    change(container.querySelector('input.edit-input[placeholder="DD/MM/YYYY"]')!, '24/02/2026');
+    change(container.querySelector('select.accounting-month-select')!, '4');
+    click(container, '.btn-icon.save');
+    await flush();
+    expect(mockedApi.updateTransaction.mock.calls[1][1]).toMatchObject({ accountingMonth: 4, accountingYear: 2026 });
+    expect(mockedApi.updateTransaction.mock.calls[1][1]).not.toHaveProperty('recalculateAccounting');
+    click(container, '.btn-icon.edit');
+    change(container.querySelector('tbody select.edit-select:not(.accounting-month-select)')!, '101');
+    click(container, '.btn-icon.save');
+    await flush();
+    expect(mockedApi.updateTransaction.mock.calls[2][1]).toMatchObject({
+      paymentMethodId: 101,
+      recalculateAccounting: true,
+    });
+  });
+
+  it('requires confirmation for single and bulk deletion and refreshes after success', async () => {
+    const onChanged = vi.fn();
+    const { container } = await renderTransactions([transaction({ id: 1 }), transaction({ id: 2 })], [], onChanged);
+    click(container, '.btn-icon.delete');
+    click(container, '.confirm-dialog-btn.cancel');
+    await flush();
+    expect(mockedApi.deleteTransaction).not.toHaveBeenCalled();
+    click(container, '.btn-icon.delete');
+    click(container, '.confirm-dialog-btn.confirm');
+    await flush();
+    expect(mockedApi.deleteTransaction).toHaveBeenCalledWith(2);
+    click(container, 'thead input[type="checkbox"]');
+    click(container, '.transactions-actions .btn-danger');
+    click(container, '.confirm-dialog-btn.confirm');
+    await flush();
+    expect(mockedApi.bulkDeleteTransactions).toHaveBeenCalledWith([2, 1]);
+    expect(mockedApi.deleteTransfer).not.toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses stored priorities only when server priority is absent', async () => {
+    localStorage.setItem('tallix_transaction_sort_priorities:77', JSON.stringify({ 1: 9, 2: 20, 3: 10 }));
+    const { container } = await renderTransactions([
+      transaction({ id: 1, description: 'Fallback', sortPriority: null }),
+      transaction({ id: 2, description: 'Server', sortPriority: 1 }),
+      transaction({ id: 3, description: 'Zero server', sortPriority: 0 }),
+    ]);
+    expect(Array.from(container.querySelectorAll('tbody .description-cell')).map((cell) => cell.textContent)).toEqual([
+      'Fallback',
+      'Server',
+      'Zero server',
+    ]);
+  });
+
+  it('reorders all same-date transactions including filtered records and retains order after reload', async () => {
+    const rows = [
+      transaction({ id: 1, description: 'Visible one' }),
+      transaction({ id: 2, description: 'Hidden two' }),
+      transaction({ id: 3, description: 'Visible three' }),
+    ];
+    const { container } = await renderTransactions(rows, [transfer({ id: 99, date: '2026-02-03' })]);
+    const descriptionFilter = container.querySelector<HTMLInputElement>('.filter-row th:nth-child(6) input')!;
+    change(descriptionFilter, 'Visible');
+    click(container, 'tbody tr:last-child .reorder');
+    await flush();
+    expect(mockedApi.reorderTransactionEntries).toHaveBeenCalledWith([
+      { type: 'transaction', id: 3, sortPriority: 3 },
+      { type: 'transaction', id: 2, sortPriority: 1 },
+      { type: 'transaction', id: 1, sortPriority: 2 },
+    ]);
+    click(container, '.btn-clear-filters');
+    expect(Array.from(container.querySelectorAll('tbody .description-cell')).map((cell) => cell.textContent)).toEqual([
+      'Visible three',
+      'Visible one',
+      'Hidden two',
+    ]);
+    click(container, '.btn-icon.edit');
+    click(container, '.btn-icon.save');
+    await flush();
+    expect(Array.from(container.querySelectorAll('tbody .description-cell')).map((cell) => cell.textContent)).toEqual([
+      'Visible three',
+      'Visible one',
+      'Hidden two',
+    ]);
+  });
+});
+
+function handler(element: Element, name: string): (...args: unknown[]) => void {
+  const propsKey = Object.keys(element).find((key) => key.startsWith('__reactProps$'));
+  if (!propsKey) throw new Error('Missing React event props');
+  return (element as unknown as Record<string, Record<string, (...args: unknown[]) => void>>)[propsKey][name];
+}
+
+describe('transaction domain and role boundaries', () => {
+  it('loads transaction data only and excludes transfer rows, controls and summaries', async () => {
+    const { container } = await renderTransactions([transaction()], [transfer()]);
+    expect(mockedApi.fetchTransfers).not.toHaveBeenCalled();
+    expect(mockedApi.fetchTransferAccounts).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(container.textContent).not.toContain('Move to savings');
+    expect(container.querySelector('.form-type-toggle')).toBeNull();
+    expect(container.querySelector('.account-select')).toBeNull();
+    expect(container.querySelector('option[value="section:transfer"]')).toBeNull();
+    expect(container.querySelector('.summary-item.savings')).toBeNull();
+    expect(container.querySelector('.btn-import')).not.toBeNull();
+  });
+
+  it('allows read-only filtering while disabling every mutation control', async () => {
+    const { container } = await renderTransactions(
+      [transaction({ warning: 'potential_duplicate' })],
+      [],
+      vi.fn(),
+      true
+    );
+    expect(container.querySelector('.transaction-form')).toBeNull();
+    expect(container.querySelector('.btn-import, .edit, .delete, .dismiss-warning')).toBeNull();
+    expect(
+      Array.from(container.querySelectorAll<HTMLInputElement>('.col-select input, tbody td:first-child input')).every(
+        (input) => input.disabled
+      )
+    ).toBe(true);
+    expect(
+      Array.from(container.querySelectorAll<HTMLButtonElement>('button.reorder')).every((button) => button.disabled)
+    ).toBe(true);
+    change(container.querySelector('input.comment-filter')!, 'no match');
+    expect(container.textContent).toContain('No transactions match the filters');
+    expect(mockedApi.updateTransaction).not.toHaveBeenCalled();
+    expect(mockedApi.deleteTransaction).not.toHaveBeenCalled();
+  });
+
+  it('revokes stale create, edit, warning, reorder and selection handlers on a role change', async () => {
+    const { container, setReadOnly } = await renderTransactions([
+      transaction({ warning: 'potential_duplicate' }),
+      transaction({ id: 2 }),
+    ]);
+    change(byPlaceholder(container, 'DD/MM/YYYY'), '03/02/2026');
+    change(byPlaceholder(container, 'Amount'), '20');
+    change(selectByClass(container, 'category-select'), '20');
+    change(selectByClass(container, 'payment-method-select'), '100');
+    const create = handler(container.querySelector('form')!, 'onSubmit');
+    const reorder = handler(container.querySelector('.reorder')!, 'onClick');
+    const importTransactions = handler(container.querySelector('.btn-import')!, 'onClick');
+    const warning = handler(container.querySelector('.dismiss-warning')!, 'onClick');
+    const select = handler(container.querySelector('tbody input[type="checkbox"]')!, 'onChange');
+    click(container, 'tbody input[type="checkbox"]');
+    click(container, '.btn-icon.edit');
+    const save = handler(container.querySelector('.btn-icon.save')!, 'onClick');
+    setReadOnly(true);
+    expect(container.querySelector('.editing-row, .bulk-order-actions, .transaction-form')).toBeNull();
+    act(() => {
+      create({ preventDefault: vi.fn() });
+      reorder();
+      importTransactions();
+      warning();
+      select();
+      save();
+    });
+    await flush();
+    expect(mockedApi.createTransaction).not.toHaveBeenCalled();
+    expect(mockedApi.updateTransaction).not.toHaveBeenCalled();
+    expect(mockedApi.dismissTransactionWarning).not.toHaveBeenCalled();
+    expect(mockedApi.reorderTransactionEntries).not.toHaveBeenCalled();
+    expect(container.querySelector('tbody tr.selected')).toBeNull();
+  });
+
+  it.each(['single', 'bulk'])('blocks a pending %s delete confirmation after write access is revoked', async (kind) => {
+    const { container, setReadOnly } = await renderTransactions();
+    if (kind === 'bulk') {
+      click(container, 'thead input[type="checkbox"]');
+      click(container, '.transactions-actions .btn-danger');
+    } else click(container, '.btn-icon.delete');
+    expect(container.querySelector('.confirm-dialog')).not.toBeNull();
+    setReadOnly(true);
+    click(container, '.confirm-dialog-btn.confirm');
+    await flush();
+    expect(mockedApi.deleteTransaction).not.toHaveBeenCalled();
+    expect(mockedApi.bulkDeleteTransactions).not.toHaveBeenCalled();
+  });
+
+  it('does not reorder across dates or while an edit is open', async () => {
+    const { container } = await renderTransactions([
+      transaction({ id: 1, date: '2026-02-03' }),
+      transaction({ id: 2, date: '2026-02-04' }),
+    ]);
+    click(container, 'tbody .reorder');
+    await flush();
+    expect(mockedApi.reorderTransactionEntries).not.toHaveBeenCalled();
+    click(container, 'thead input[type="checkbox"]');
+    expect(container.querySelector('.bulk-order-actions')).toBeNull();
+    click(container, '.btn-icon.edit');
+    expect(
+      Array.from(container.querySelectorAll<HTMLButtonElement>('.reorder')).every((button) => button.disabled)
+    ).toBe(true);
   });
 });

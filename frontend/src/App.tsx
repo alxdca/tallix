@@ -23,6 +23,7 @@ import Login from './components/Login';
 import Settings from './components/Settings';
 import Sidebar from './components/Sidebar';
 import Transactions from './components/Transactions';
+import Transfers from './components/Transfers';
 import UserSettings from './components/UserSettings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { I18nProvider, useI18n } from './contexts/I18nContext';
@@ -163,7 +164,12 @@ function AppContent() {
 
   const loadData = useCallback(
     async (silent = false) => {
-      if (localStorage.getItem(ACTIVE_BUDGET_KEY) !== String(activeBudgetId)) return;
+      if (
+        activeBudgetId === null ||
+        localStorage.getItem(ACTIVE_BUDGET_KEY) !== String(activeBudgetId) ||
+        localStorage.getItem(budgetYearKey(activeBudgetId)) !== String(selectedYear)
+      )
+        return;
       const version = ++requestVersion.current;
       if (!silent) setLoading(true);
       try {
@@ -305,7 +311,7 @@ function AppContent() {
     );
 
   // Views that should show the budget header with balance boxes
-  const budgetViews = ['current', 'budget-planning', 'playground', 'transactions', 'accounts', 'assets'];
+  const budgetViews = ['current', 'budget-planning', 'playground', 'transactions', 'transfers', 'accounts', 'assets'];
   const showBudgetHeader = budgetViews.includes(activeView) && !loading && !error;
 
   const renderContent = () => {
@@ -365,6 +371,15 @@ function AppContent() {
             readOnly={activeBudget?.role === 'read'}
           />
         );
+      case 'transfers':
+        return (
+          <Transfers
+            year={currentYear}
+            yearId={yearId}
+            onTransactionsChanged={refreshData}
+            readOnly={activeBudget?.role === 'read'}
+          />
+        );
       case 'settings':
         return (
           <Settings
@@ -376,7 +391,14 @@ function AppContent() {
           />
         );
       case 'accounts':
-        return protectReadOnly(<Accounts year={currentYear} months={months} onDataChanged={refreshData} />);
+        return (
+          <Accounts
+            year={currentYear}
+            months={months}
+            onDataChanged={refreshData}
+            readOnly={activeBudget?.role === 'read'}
+          />
+        );
       case 'assets':
         return protectReadOnly(<Assets onDataChanged={refreshData} />);
       case 'budget-planning':

@@ -194,6 +194,27 @@ input[type="number"]::-webkit-inner-spin-button {
   flex-direction: column;
   padding: 16px 12px;
   gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.nav-subpages {
+  margin: 2px 0 4px 24px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-color);
+}
+
+.nav-subpages .nav-sub-item {
+  margin-top: 2px;
+  font-size: 0.875rem;
+}
+
+.nav-item.nav-group-active {
+  color: var(--text-primary);
+}
+
+.nav-item.nav-group-active .nav-icon {
+  color: var(--accent-budget-light);
 }
 
 .nav-item {
@@ -1109,6 +1130,12 @@ td.zero {
   .nav-item {
     justify-content: center;
     padding: 12px;
+  }
+
+  .nav-subpages {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
   }
 
   .header {
@@ -2295,6 +2322,7 @@ td.zero {
 
 .transactions-summary {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
 }
 
@@ -2615,6 +2643,57 @@ td.zero {
 
 .transactions-table .col-description {
   width: 180px;
+}
+
+.transfer-records-table {
+  min-width: 1200px;
+}
+
+.transfer-records-table .col-accounting {
+  width: 200px;
+}
+
+.transfer-records-table .col-source,
+.transfer-records-table .col-destination {
+  width: 200px;
+}
+
+.transfer-records-table .accounting-cell {
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+.transfer-records-table .transfer-accounting-edit-cell,
+.transfer-records-table .transfer-edit-accounts {
+  display: table-cell;
+}
+
+.transfer-records-table .transfer-accounting-group {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .transfer-accounting-row .transfer-accounting-group {
+    flex: 1 1 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .transfer-accounting-row .transfer-accounting-group span {
+    flex-basis: 100%;
+    white-space: normal;
+  }
+
+  .transfer-accounting-row .accounting-month-select {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+  }
+
+  .transfer-accounting-row .accounting-year-input {
+    flex: 0 0 80px;
+    width: 80px;
+  }
 }
 
 .accounting-edit-cell {
@@ -5634,41 +5713,6 @@ td.zero {
   cursor: not-allowed;
 }
 
-/* Transaction/Transfer Type Toggle */
-.form-type-toggle {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.type-toggle-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border: 1px solid var(--border-primary);
-  border-radius: var(--border-radius);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.type-toggle-btn:hover {
-  background: var(--bg-tertiary);
-}
-
-.type-toggle-btn.active {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: white;
-}
-
-.type-toggle-btn.active svg {
-  stroke: white;
-}
-
 /* Transfer form elements */
 .form-select.account-select {
   flex: 1;
@@ -7623,6 +7667,71 @@ td.zero {
 .user-settings-budget-current {
   color: var(--text-muted);
   font-size: 0.75rem;
+}
+
+/* Account opening links and calculated closing column */
+.accounts-view .account-initial {
+  min-width: 180px;
+}
+
+.accounts-view .account-closing-col,
+.accounts-view .account-closing {
+  min-width: 145px;
+  border-left: 1px solid var(--border-color);
+  font-weight: 600;
+}
+
+.accounts-view .account-closing {
+  font-family: var(--font-mono);
+}
+
+.accounts-view .account-closing.negative,
+.accounts-view .accounts-action-error {
+  color: var(--accent-negative);
+}
+
+.accounts-view .account-edit-balance {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+}
+
+.accounts-view .account-edit-balance:focus-visible,
+.accounts-view .account-restore-link:focus-visible {
+  outline: 2px solid var(--accent-budget);
+  outline-offset: 2px;
+}
+
+.accounts-view .account-balance-link,
+.accounts-view .account-balance-override {
+  display: block;
+  margin-top: 4px;
+  margin-left: 0;
+  font-size: 0.72rem;
+  white-space: normal;
+}
+
+.accounts-view .account-balance-override {
+  color: var(--text-secondary);
+}
+
+.accounts-view .account-restore-link {
+  display: block;
+  margin: 4px 0 0 auto;
+  padding: 2px 0;
+  background: transparent;
+  border: 0;
+  color: var(--accent-budget);
+  font-size: 0.72rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.accounts-view .account-edit-balance:disabled,
+.accounts-view .account-restore-link:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .account-balance-link {

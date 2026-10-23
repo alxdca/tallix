@@ -217,6 +217,7 @@ export const accountBalances = pgTable(
       .notNull(),
     initialBalance: decimal('initial_balance', { precision: 12, scale: 2 }).notNull().default('0'),
     inheritedFromParent: boolean('inherited_from_parent').notNull().default(false),
+    openingBalanceOverridden: boolean('opening_balance_overridden').notNull().default(false),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

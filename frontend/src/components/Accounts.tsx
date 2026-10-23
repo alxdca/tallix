@@ -9,12 +9,13 @@ import {
   Title,
   Tooltip,
 } from 'chart.js';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Line } from 'react-chartjs-2';
-import { type Account, fetchAccounts, setAccountBalance } from '../api';
+import { ACTIVE_BUDGET_KEY, type Account, fetchAccounts, restoreAccountBalanceLink, setAccountBalance } from '../api';
 import { useI18n } from '../contexts/I18nContext';
 import { useFormatCurrency } from '../hooks/useFormatCurrency';
 import { logger } from '../utils/logger';
+import ConfirmDialog from './ConfirmDialog';
 
 // Register Chart.js components
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
@@ -23,15 +24,25 @@ interface AccountsProps {
   year: number;
   months: string[];
   onDataChanged: () => void;
+  readOnly?: boolean;
 }
 
 interface AccountTotals {
   initialBalance: number;
+  endOfYearBalance: number;
   monthlyBalances: number[];
   monthlyMovements: number[];
 }
 
 type AccountsTab = 'table' | 'chart';
+
+function closingBalance(account: Account): number {
+  return account.endOfYearBalance ?? account.monthlyBalances[11] ?? 0;
+}
+
+function hasBalanceLink(account: Account): boolean {
+  return Boolean(account.inheritedFromParent || account.linkedFromYear != null);
+}
 
 function calculateMonthlyMovements(initialBalance: number, monthlyBalances: number[]): number[] {
   return monthlyBalances.map((balance, i) => {
@@ -46,10 +57,11 @@ function calculateTotals(accountList: Account[]): AccountTotals {
     .fill(0)
     .map((_, i) => accountList.reduce((sum, a) => sum + (a.monthlyBalances[i] || 0), 0));
   const monthlyMovements = calculateMonthlyMovements(initialBalance, monthlyBalances);
-  return { initialBalance, monthlyBalances, monthlyMovements };
+  const endOfYearBalance = accountList.reduce((sum, account) => sum + closingBalance(account), 0);
+  return { initialBalance, endOfYearBalance, monthlyBalances, monthlyMovements };
 }
 
-export default function Accounts({ year, months, onDataChanged }: AccountsProps) {
+export default function Accounts({ year, months, onDataChanged, readOnly = false }: AccountsProps) {
   const formatCurrency = useFormatCurrency();
   const { t } = useI18n();
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -59,26 +71,60 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<AccountsTab>('table');
 
-  // Show all months in the accounts view
+  const [actionError, setActionError] = useState<string | null>(null);
+  const budgetId = localStorage.getItem(ACTIVE_BUDGET_KEY);
+  const scope = useMemo(() => ({ year, readOnly, budgetId }), [year, readOnly, budgetId]);
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const mounted = useRef(false);
+  const submittingScope = useRef<typeof scope | null>(null);
+  const [pendingOverride, setPendingOverride] = useState<{
+    accountId: number;
+    value: number;
+    scope: typeof scope;
+  } | null>(null);
+
+  const isCurrentScope = useCallback(
+    (source: typeof scope) =>
+      mounted.current && currentScope.current === source && localStorage.getItem(ACTIVE_BUDGET_KEY) === source.budgetId,
+    []
+  );
+
+  // Show all twelve months, including December even when the last activity was earlier.
   const activeMonths = useMemo(() => months, [months]);
 
-  const loadAccounts = useCallback(async () => {
-    try {
-      setLoading(true);
-      const data = await fetchAccounts(year);
-      setAccounts(data.accounts);
-    } catch (error) {
-      logger.error('Failed to load accounts', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [year]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
-    loadAccounts();
-  }, [loadAccounts]);
+    let cancelled = false;
+    setEditingBalance(null);
+    setEditValue('');
+    setPendingOverride(null);
+    setActionError(null);
+    setIsSubmitting(false);
+    submittingScope.current = null;
+    setLoading(true);
+    fetchAccounts(year)
+      .then((data) => {
+        if (!cancelled && isCurrentScope(scope)) setAccounts(data.accounts);
+      })
+      .catch((error) => logger.error('Failed to load accounts', error))
+      .finally(() => {
+        if (!cancelled && isCurrentScope(scope)) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [year, scope, isCurrentScope]);
 
   const startEditBalance = (account: Account) => {
+    if (readOnly || submittingScope.current || !isCurrentScope(scope)) return;
+    setActionError(null);
     setEditingBalance(account.id);
     setEditValue(account.initialBalance.toString());
   };
@@ -86,28 +132,50 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
   const cancelEdit = () => {
     setEditingBalance(null);
     setEditValue('');
+    setPendingOverride(null);
+    setActionError(null);
   };
 
-  const saveBalance = async (account: Account) => {
-    if (isSubmitting) return;
-
-    const newBalance = parseFloat(editValue);
-    if (Number.isNaN(newBalance)) {
+  const updateBalance = async (accountId: number, value: number | null, source: typeof scope, breakLink = false) => {
+    if (source.readOnly || !isCurrentScope(source) || submittingScope.current) return;
+    submittingScope.current = source;
+    setIsSubmitting(true);
+    setActionError(null);
+    setPendingOverride(null);
+    try {
+      if (value === null) {
+        await restoreAccountBalanceLink(source.year, accountId);
+      } else if (breakLink) {
+        await setAccountBalance(source.year, accountId, value, true);
+      } else {
+        await setAccountBalance(source.year, accountId, value);
+      }
+      if (!isCurrentScope(source)) return;
+      const data = await fetchAccounts(source.year);
+      if (!isCurrentScope(source)) return;
+      setAccounts(data.accounts);
       cancelEdit();
+      onDataChanged();
+    } catch (error) {
+      logger.error(value === null ? 'Failed to restore balance link' : 'Failed to save balance', error);
+      if (isCurrentScope(source)) setActionError(value === null ? 'accounts.restoreFailed' : 'accounts.saveFailed');
+    } finally {
+      if (isCurrentScope(source) && submittingScope.current === source) {
+        submittingScope.current = null;
+        setIsSubmitting(false);
+      }
+    }
+  };
+
+  const saveBalance = (account: Account) => {
+    if (readOnly || submittingScope.current || !isCurrentScope(scope) || editingBalance !== account.id) return;
+    const value = Number(editValue);
+    if (!editValue.trim() || !Number.isFinite(value)) return;
+    if (hasBalanceLink(account)) {
+      setPendingOverride({ accountId: account.id, value, scope });
       return;
     }
-
-    setIsSubmitting(true);
-    try {
-      await setAccountBalance(year, account.id, newBalance);
-      await loadAccounts();
-      onDataChanged();
-      cancelEdit();
-    } catch (error) {
-      logger.error('Failed to save balance', error);
-    } finally {
-      setIsSubmitting(false);
-    }
+    void updateBalance(account.id, value, scope);
   };
 
   const savingsAccounts = accounts.filter((a) => a.isSavingsAccount);
@@ -234,6 +302,10 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
     );
   }
 
+  const renderClosingBalance = (value: number, className = '') => (
+    <td className={`account-closing ${className} ${value < 0 ? 'negative' : ''}`}>{formatCurrency(value, true)}</td>
+  );
+
   const renderAccountTable = (accountList: Account[], title: string, totals: AccountTotals) => {
     if (accountList.length === 0) return null;
 
@@ -251,6 +323,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                     {month.substring(0, 3)}
                   </th>
                 ))}
+                <th className="account-closing-col">{t('accounts.endOfYearBalance')}</th>
               </tr>
             </thead>
             <tbody>
@@ -263,12 +336,14 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                       {account.institution && <span className="institution-badge">{account.institution}</span>}
                     </td>
                     <td className="account-initial">
-                      {editingBalance === account.id ? (
+                      {!readOnly && editingBalance === account.id ? (
                         <div className="inline-edit">
                           <input
                             type="number"
                             step="0.01"
                             value={editValue}
+                            aria-label={t('accounts.editBalanceFor', { name: account.name })}
+                            disabled={isSubmitting || pendingOverride !== null}
                             onChange={(e) => setEditValue(e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') saveBalance(account);
@@ -279,6 +354,8 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                             autoFocus
                           />
                           <button
+                            type="button"
+                            aria-label={t('accounts.saveBalance')}
                             className="btn-icon save"
                             onClick={() => saveBalance(account)}
                             disabled={isSubmitting}
@@ -294,7 +371,13 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                               <polyline points="20 6 9 17 4 12" />
                             </svg>
                           </button>
-                          <button className="btn-icon cancel" onClick={cancelEdit}>
+                          <button
+                            type="button"
+                            aria-label={t('accounts.cancelEdit')}
+                            className="btn-icon cancel"
+                            onClick={cancelEdit}
+                            disabled={isSubmitting}
+                          >
                             <svg
                               width="14"
                               height="14"
@@ -308,21 +391,48 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                             </svg>
                           </button>
                         </div>
+                      ) : readOnly ? (
+                        <span className="balance-value">{formatCurrency(account.initialBalance, true)}</span>
                       ) : (
-                        <span
-                          className="balance-value editable"
+                        <button
+                          type="button"
+                          className="balance-value editable account-edit-balance"
                           onClick={() => startEditBalance(account)}
-                          title={t(
-                            account.inheritedFromParent ? 'accounts.editInheritedBalance' : 'accounts.clickToEdit'
-                          )}
+                          disabled={isSubmitting}
+                          aria-label={t('accounts.editBalanceFor', { name: account.name })}
+                          title={t(hasBalanceLink(account) ? 'accounts.editInheritedBalance' : 'accounts.clickToEdit')}
                         >
                           {formatCurrency(account.initialBalance, true)}
-                        </span>
+                        </button>
                       )}
                       {account.inheritedFromParent && (
                         <span className="account-balance-link" title={t('accounts.inheritedBalanceHelp')}>
                           {t('accounts.inheritedBalance')}
                         </span>
+                      )}
+                      {account.linkedFromYear != null && (
+                        <span
+                          className="account-balance-link"
+                          title={t('accounts.linkedFromYearHelp', { year: account.linkedFromYear })}
+                        >
+                          {t('accounts.linkedFromYear', { year: account.linkedFromYear })}
+                        </span>
+                      )}
+                      {account.openingBalanceOverridden && (
+                        <span className="account-balance-override" title={t('accounts.manualOverrideHelp')}>
+                          {t('accounts.manualOverride')}
+                        </span>
+                      )}
+                      {account.canRestoreBalanceLink && !hasBalanceLink(account) && !readOnly && (
+                        <button
+                          type="button"
+                          className="account-restore-link"
+                          aria-label={t('accounts.restoreLinkFor', { name: account.name })}
+                          disabled={isSubmitting}
+                          onClick={() => void updateBalance(account.id, null, scope)}
+                        >
+                          {t('accounts.restoreLink')}
+                        </button>
                       )}
                     </td>
                     {account.monthlyBalances.map((balance, i) => (
@@ -338,6 +448,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                         </div>
                       </td>
                     ))}
+                    {renderClosingBalance(closingBalance(account))}
                   </tr>
                 );
               })}
@@ -359,6 +470,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                     </div>
                   </td>
                 ))}
+                {renderClosingBalance(totals.endOfYearBalance, 'total-value')}
               </tr>
             </tfoot>
           </table>
@@ -384,6 +496,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                     {month.substring(0, 3)}
                   </th>
                 ))}
+                <th className="account-closing-col">{t('accounts.endOfYearBalance')}</th>
               </tr>
             </thead>
             <tbody>
@@ -404,6 +517,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                       </div>
                     </td>
                   ))}
+                  {renderClosingBalance(paymentTotals.endOfYearBalance)}
                 </tr>
               )}
               {savingsAccounts.length > 0 && (
@@ -423,6 +537,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                       </div>
                     </td>
                   ))}
+                  {renderClosingBalance(savingsTotals.endOfYearBalance)}
                 </tr>
               )}
             </tbody>
@@ -445,6 +560,7 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
                     </div>
                   </td>
                 ))}
+                {renderClosingBalance(overallTotals.endOfYearBalance, 'total-value grand-total')}
               </tr>
             </tfoot>
           </table>
@@ -471,6 +587,23 @@ export default function Accounts({ year, months, onDataChanged }: AccountsProps)
 
   return (
     <div className="accounts-view">
+      <ConfirmDialog
+        isOpen={pendingOverride !== null && pendingOverride.scope === scope && !readOnly}
+        title={t('accounts.breakLinkTitle')}
+        message={t('accounts.breakLinkWarning')}
+        confirmLabel={t('accounts.confirmOverride')}
+        variant="warning"
+        onCancel={() => setPendingOverride(null)}
+        onConfirm={() => {
+          if (pendingOverride)
+            void updateBalance(pendingOverride.accountId, pendingOverride.value, pendingOverride.scope, true);
+        }}
+      />
+      {actionError && (
+        <p className="accounts-action-error" role="alert">
+          {t(actionError)}
+        </p>
+      )}
       <div className="accounts-header">
         <div className="accounts-header-top">
           <div>

@@ -431,6 +431,18 @@ async function materializeInheritedChildBalances(tx: DbClient, parentBudgetId: n
     );
     const effectiveAccountIds = new Set(effectiveOpeningByPaymentMethod.keys());
 
+    // Old backups may represent manual parent overrides only with inherited=false.
+    // Persist their effective override before detaching removes that legacy signal.
+    for (const account of accounts) {
+      const row = childBalanceRowsByPaymentMethod.get(account.id);
+      if (account.openingBalanceOverridden && row && !row.openingBalanceOverridden) {
+        await tx
+          .update(accountBalances)
+          .set({ openingBalanceOverridden: true, updatedAt: new Date() })
+          .where(eq(accountBalances.id, row.id));
+      }
+    }
+
     for (const inheritedRow of inheritedRows) {
       const effectiveOpening = effectiveOpeningByPaymentMethod.get(inheritedRow.paymentMethodId);
       if (effectiveOpening === undefined) {
@@ -438,6 +450,7 @@ async function materializeInheritedChildBalances(tx: DbClient, parentBudgetId: n
           .update(accountBalances)
           .set({
             inheritedFromParent: false,
+            openingBalanceOverridden: true,
             updatedAt: new Date(),
           })
           .where(eq(accountBalances.id, inheritedRow.id));
@@ -449,6 +462,7 @@ async function materializeInheritedChildBalances(tx: DbClient, parentBudgetId: n
         .set({
           initialBalance: effectiveOpening,
           inheritedFromParent: false,
+          openingBalanceOverridden: true,
           updatedAt: new Date(),
         })
         .where(eq(accountBalances.id, inheritedRow.id));
@@ -461,6 +475,7 @@ async function materializeInheritedChildBalances(tx: DbClient, parentBudgetId: n
         paymentMethodId: account.id,
         initialBalance: new Decimal(String(account.initialBalance)).toDecimalPlaces(2).toFixed(2),
         inheritedFromParent: false,
+        openingBalanceOverridden: true,
       }));
 
     if (missingInheritedBalances.length > 0) {
@@ -476,6 +491,7 @@ async function materializeInheritedChildBalances(tx: DbClient, parentBudgetId: n
         .update(accountBalances)
         .set({
           inheritedFromParent: false,
+          openingBalanceOverridden: true,
           updatedAt: new Date(),
         })
         .where(eq(accountBalances.id, inheritedRow.id));

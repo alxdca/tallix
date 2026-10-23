@@ -622,6 +622,10 @@ export interface Account {
   isSavingsAccount: boolean;
   initialBalance: number;
   inheritedFromParent?: boolean;
+  endOfYearBalance?: number;
+  linkedFromYear?: number | null;
+  canRestoreBalanceLink?: boolean;
+  openingBalanceOverridden?: boolean;
   monthlyBalances: number[]; // Expected balance at end of each month (1-12)
 }
 
@@ -636,12 +640,25 @@ export async function fetchAccounts(year: number): Promise<AccountsResponse> {
   return response.json();
 }
 
-export async function setAccountBalance(year: number, paymentMethodId: number, initialBalance: number): Promise<void> {
+export async function setAccountBalance(
+  year: number,
+  paymentMethodId: number,
+  initialBalance: number,
+  breakLink?: boolean
+): Promise<void> {
   const response = await authFetch(`${API_BASE}/accounts/${year}/balance`, {
     method: 'PUT',
-    body: JSON.stringify({ paymentMethodId, initialBalance }),
+    body: JSON.stringify({ paymentMethodId, initialBalance, ...(breakLink ? { breakLink: true } : {}) }),
   });
   await ensureOk(response, 'Failed to set account balance');
+}
+
+export async function restoreAccountBalanceLink(year: number, paymentMethodId: number): Promise<void> {
+  const response = await authFetch(`${API_BASE}/accounts/${year}/balance/restore-link`, {
+    method: 'PUT',
+    body: JSON.stringify({ paymentMethodId }),
+  });
+  await ensureOk(response, 'Failed to restore account balance link');
 }
 
 export async function togglePaymentMethodSavings(id: number, isSavingsAccount: boolean): Promise<void> {

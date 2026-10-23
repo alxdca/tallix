@@ -12,6 +12,7 @@ import {
   transactions,
   transfers,
 } from '../db/schema.js';
+import { AppError } from '../middleware/errorHandler.js';
 
 // Configure Decimal.js for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -24,6 +25,10 @@ export interface Account {
   isSavingsAccount: boolean;
   initialBalance: number;
   inheritedFromParent: boolean;
+  endOfYearBalance: number;
+  linkedFromYear: number | null;
+  canRestoreBalanceLink: boolean;
+  openingBalanceOverridden: boolean;
   monthlyBalances: number[]; // Expected balance at end of each month (1-12)
 }
 
@@ -32,7 +37,18 @@ export interface AccountsResponse {
   lastActiveMonth: number; // 1-12, the last month with any settled transaction/transfer
 }
 
-// Get all accounts for a year with their balances
+interface ResolvedAccounts {
+  response: AccountsResponse;
+  openings: Map<number, Decimal>;
+  closings: Map<number, Decimal>;
+}
+
+interface BalanceResolution {
+  // Scoped to one read: values cannot become stale after a mutation or leak tenants.
+  years: Map<string, ResolvedAccounts>;
+}
+
+// Get all accounts for a year with their balances.
 export async function getAccountsForYear(
   tx: DbClient,
   year: number,
@@ -40,18 +56,32 @@ export async function getAccountsForYear(
   userId: string,
   visitedBudgetIds = new Set<number>()
 ): Promise<AccountsResponse> {
+  return (await resolveAccountsForYear(tx, year, budgetId, userId, visitedBudgetIds, { years: new Map() })).response;
+}
+
+async function resolveAccountsForYear(
+  tx: DbClient,
+  year: number,
+  budgetId: number,
+  userId: string,
+  parentAncestors: Set<number>,
+  resolution: BalanceResolution
+): Promise<ResolvedAccounts> {
+  const key = `${budgetId}:${year}`;
+  const cached = resolution.years.get(key);
+  if (cached) return cached;
   // Get year ID for this budget
   const budgetYear = await tx.query.budgetYears.findFirst({
     where: and(eq(budgetYears.year, year), eq(budgetYears.budgetId, budgetId)),
   });
 
   if (!budgetYear) {
-    return { accounts: [], lastActiveMonth: 0 };
+    return { response: { accounts: [], lastActiveMonth: 0 }, openings: new Map(), closings: new Map() };
   }
 
   const yearId = budgetYear.id;
   const budgetYearIds = await tx
-    .select({ id: budgetYears.id })
+    .select({ id: budgetYears.id, year: budgetYears.year })
     .from(budgetYears)
     .where(eq(budgetYears.budgetId, budgetId));
   const budgetYearIdValues = budgetYearIds.map((row) => row.id);
@@ -82,39 +112,63 @@ export async function getAccountsForYear(
   // Get initial balances for all accounts
   const balances = await tx.select().from(accountBalances).where(eq(accountBalances.yearId, yearId));
 
-  // Use Decimal for precise balance calculations
-  const balanceRowsByPaymentMethod = new Map(balances.map((balance) => [balance.paymentMethodId, balance]));
-  const requestedInheritedPaymentMethodIds = paymentMethodAccounts
-    .filter((pm) => balanceRowsByPaymentMethod.get(pm.id)?.inheritedFromParent !== false)
-    .map((pm) => pm.id);
-  const inheritedBalanceMap =
-    requestedInheritedPaymentMethodIds.length > 0
-      ? await getInheritedOpeningBalances(
-          tx,
-          budgetId,
-          year,
-          userId,
-          requestedInheritedPaymentMethodIds,
-          visitedBudgetIds
-        )
+  const childBudget = await tx.query.budgets.findFirst({
+    where: and(eq(budgets.id, budgetId), eq(budgets.userId, userId)),
+    columns: { parentBudgetId: true, startYear: true },
+  });
+  const parentStartYear = childBudget?.parentBudgetId != null && childBudget.startYear === year;
+  const previousYear = budgetYearIds
+    .filter((row) => row.year < year)
+    .sort((left, right) => right.year - left.year)[0]?.year;
+
+  // Parent start-year semantics take precedence even when extra earlier child years exist.
+  // Read eligible sources for overridden accounts too, so the UI can offer restoration.
+  const inheritedBalanceMap = parentStartYear
+    ? await getInheritedOpeningBalances(
+        tx,
+        budgetId,
+        year,
+        userId,
+        paymentMethodAccounts.map((pm) => pm.id),
+        parentAncestors,
+        resolution
+      )
+    : new Map<number, Decimal>();
+  const previousBalances =
+    !parentStartYear && previousYear !== undefined
+      ? (await resolveAccountsForYear(tx, previousYear, budgetId, userId, parentAncestors, resolution)).closings
       : new Map<number, Decimal>();
+  const balanceRowsByPaymentMethod = new Map(balances.map((balance) => [balance.paymentMethodId, balance]));
   const balanceMap = new Map<number, Decimal>();
-  const inheritedFromParentMap = new Map<number, boolean>();
+  const openingMetadata = new Map<
+    number,
+    Pick<Account, 'inheritedFromParent' | 'linkedFromYear' | 'canRestoreBalanceLink' | 'openingBalanceOverridden'>
+  >();
 
   for (const pm of paymentMethodAccounts) {
     const balanceRow = balanceRowsByPaymentMethod.get(pm.id);
-    const inheritedBalance = inheritedBalanceMap.get(pm.id);
-
-    if (inheritedBalance) {
-      balanceMap.set(pm.id, inheritedBalance);
-      inheritedFromParentMap.set(pm.id, true);
-      continue;
-    }
-
-    if (balanceRow) {
-      balanceMap.set(pm.id, new Decimal(balanceRow.initialBalance));
-      inheritedFromParentMap.set(pm.id, false);
-    }
+    // Legacy backups may lack the new flag: an explicit parent override still wins.
+    const overridden =
+      balanceRow?.openingBalanceOverridden === true || (parentStartYear && balanceRow?.inheritedFromParent === false);
+    const parentBalance = inheritedBalanceMap.get(pm.id);
+    const previousBalance = previousBalances.get(pm.id);
+    const canRestoreBalanceLink = parentBalance !== undefined || previousBalance !== undefined;
+    const inheritedFromParent = !overridden && parentBalance !== undefined;
+    const linkedFromYear = !overridden && previousBalance !== undefined ? previousYear! : null;
+    balanceMap.set(
+      pm.id,
+      inheritedFromParent
+        ? parentBalance!
+        : linkedFromYear !== null
+          ? previousBalance!.toDecimalPlaces(2)
+          : new Decimal(balanceRow?.initialBalance ?? '0')
+    );
+    openingMetadata.set(pm.id, {
+      inheritedFromParent,
+      linkedFromYear,
+      canRestoreBalanceLink,
+      openingBalanceOverridden: overridden,
+    });
   }
 
   // Calculate monthly transaction totals for payment method accounts
@@ -222,6 +276,7 @@ export async function getAccountsForYear(
 
   // Build account list
   const accounts: Account[] = [];
+  const closings = new Map<number, Decimal>();
 
   for (const pm of paymentMethodAccounts) {
     const initialBalance = balanceMap.get(pm.id) || new Decimal(0);
@@ -277,6 +332,8 @@ export async function getAccountsForYear(
       monthlyBalances.push(cumulative.toNumber());
     }
 
+    closings.set(pm.id, cumulative.toDecimalPlaces(2));
+
     // Build display name: "Name (Institution)" or just "Name" if no institution
     const displayName = pm.institution ? `${pm.name} (${pm.institution})` : pm.name;
 
@@ -287,7 +344,8 @@ export async function getAccountsForYear(
       sortOrder: pm.sortOrder,
       isSavingsAccount: pm.isSavingsAccount,
       initialBalance: initialBalance.toNumber(),
-      inheritedFromParent: inheritedFromParentMap.get(pm.id) ?? false,
+      ...openingMetadata.get(pm.id)!,
+      endOfYearBalance: cumulative.toNumber(),
       monthlyBalances,
     });
   }
@@ -308,7 +366,9 @@ export async function getAccountsForYear(
     }
   }
 
-  return { accounts, lastActiveMonth };
+  const result = { response: { accounts, lastActiveMonth }, openings: balanceMap, closings };
+  resolution.years.set(key, result);
+  return result;
 }
 
 // Set initial balance for an account
@@ -325,7 +385,7 @@ export async function setAccountBalance(
     where: and(eq(paymentMethods.id, paymentMethodId), eq(paymentMethods.userId, userId)),
   });
   if (!pm) {
-    throw new Error('Payment method not found or does not belong to you');
+    throw new AppError(404, 'Payment method not found or does not belong to you');
   }
 
   // Get year ID for this budget
@@ -334,7 +394,7 @@ export async function setAccountBalance(
   });
 
   if (!budgetYear) {
-    throw new Error('Year not found');
+    throw new AppError(404, 'Year not found');
   }
 
   const yearId = budgetYear.id;
@@ -347,12 +407,14 @@ export async function setAccountBalance(
       paymentMethodId,
       initialBalance: initialBalance.toString(),
       inheritedFromParent: false,
+      openingBalanceOverridden: true,
     })
     .onConflictDoUpdate({
       target: [accountBalances.yearId, accountBalances.paymentMethodId],
       set: {
         initialBalance: initialBalance.toString(),
         inheritedFromParent: false,
+        openingBalanceOverridden: true,
         updatedAt: new Date(),
       },
     });
@@ -364,8 +426,46 @@ export async function getEffectiveInitialBalanceMap(
   budgetId: number,
   userId: string
 ): Promise<Map<number, Decimal>> {
+  return (await resolveAccountsForYear(tx, year, budgetId, userId, new Set(), { years: new Map() })).openings;
+}
+
+export async function restoreAccountBalanceLink(
+  tx: DbClient,
+  year: number,
+  paymentMethodId: number,
+  budgetId: number,
+  userId: string
+): Promise<void> {
+  const pm = await tx.query.paymentMethods.findFirst({
+    where: and(eq(paymentMethods.id, paymentMethodId), eq(paymentMethods.userId, userId)),
+  });
+  if (!pm || pm.linkedPaymentMethodId) {
+    throw new AppError(404, 'Payment method not found or does not belong to you');
+  }
+  const budgetYear = await tx.query.budgetYears.findFirst({
+    where: and(eq(budgetYears.year, year), eq(budgetYears.budgetId, budgetId)),
+  });
+  if (!budgetYear) throw new AppError(404, 'Year not found');
   const { accounts } = await getAccountsForYear(tx, year, budgetId, userId);
-  return new Map(accounts.map((account) => [account.id, new Decimal(String(account.initialBalance))]));
+  const account = accounts.find((candidate) => candidate.id === paymentMethodId);
+  if (!account?.canRestoreBalanceLink) throw new AppError(400, 'No balance link is available for this account');
+  const budget = await tx.query.budgets.findFirst({
+    where: and(eq(budgets.id, budgetId), eq(budgets.userId, userId)),
+    columns: { parentBudgetId: true, startYear: true },
+  });
+  const inheritedFromParent = budget?.parentBudgetId != null && budget.startYear === year;
+  await tx
+    .insert(accountBalances)
+    .values({
+      yearId: budgetYear.id,
+      paymentMethodId,
+      openingBalanceOverridden: false,
+      inheritedFromParent,
+    })
+    .onConflictDoUpdate({
+      target: [accountBalances.yearId, accountBalances.paymentMethodId],
+      set: { openingBalanceOverridden: false, inheritedFromParent, updatedAt: new Date() },
+    });
 }
 
 async function getInheritedOpeningBalances(
@@ -374,7 +474,8 @@ async function getInheritedOpeningBalances(
   year: number,
   userId: string,
   paymentMethodIds: number[],
-  visitedBudgetIds: Set<number>
+  visitedBudgetIds: Set<number>,
+  resolution: BalanceResolution
 ): Promise<Map<number, Decimal>> {
   const childBudget = await tx.query.budgets.findFirst({
     where: and(eq(budgets.id, budgetId), eq(budgets.userId, userId)),
@@ -389,7 +490,7 @@ async function getInheritedOpeningBalances(
     return new Map();
   }
 
-  if (visitedBudgetIds.has(budgetId)) {
+  if (visitedBudgetIds.has(budgetId) || visitedBudgetIds.has(childBudget.parentBudgetId)) {
     return new Map();
   }
 
@@ -408,7 +509,8 @@ async function getInheritedOpeningBalances(
         childBudget.parentBudgetId!,
         userId,
         paymentMethodIds,
-        nextVisitedBudgetIds
+        nextVisitedBudgetIds,
+        resolution
       )
     );
   }
@@ -420,7 +522,8 @@ async function getInheritedOpeningBalances(
       childBudget.parentBudgetId,
       userId,
       paymentMethodIds,
-      nextVisitedBudgetIds
+      nextVisitedBudgetIds,
+      resolution
     );
   } finally {
     await tx.execute(sql`SELECT set_config('app.budget_id', ${String(budgetId)}, true)`);
@@ -432,7 +535,8 @@ async function readParentInheritedOpeningBalances(
   parentBudgetId: number,
   userId: string,
   paymentMethodIds: number[],
-  visitedBudgetIds: Set<number>
+  visitedBudgetIds: Set<number>,
+  resolution: BalanceResolution
 ): Promise<Map<number, Decimal>> {
   const parentBudget = await tx.query.budgets.findFirst({
     where: and(eq(budgets.id, parentBudgetId), eq(budgets.userId, userId)),
@@ -443,20 +547,19 @@ async function readParentInheritedOpeningBalances(
     return new Map();
   }
 
-  const parentAccounts = await getAccountsForYear(
+  const parentAccounts = await resolveAccountsForYear(
     tx,
     parentBudget.startYear,
     parentBudget.id,
     userId,
-    visitedBudgetIds
+    visitedBudgetIds,
+    resolution
   );
   const requestedIds = new Set(paymentMethodIds);
   const inheritedBalances = new Map<number, Decimal>();
 
-  for (const account of parentAccounts.accounts) {
-    if (requestedIds.has(account.id)) {
-      inheritedBalances.set(account.id, new Decimal(String(account.monthlyBalances[11] ?? 0)).toDecimalPlaces(2));
-    }
+  for (const [accountId, closing] of parentAccounts.closings) {
+    if (requestedIds.has(accountId)) inheritedBalances.set(accountId, closing);
   }
 
   return inheritedBalances;

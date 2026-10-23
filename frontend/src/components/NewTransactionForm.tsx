@@ -1,50 +1,38 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  type AccountIdentifier,
-  createTransaction,
-  createTransfer,
-  type PaymentMethod,
-  type Transaction,
-} from '../api';
+import { type FormEvent, useCallback, useMemo, useRef, useState } from 'react';
+import { createTransaction, type PaymentMethod, type Transaction } from '../api';
 import { useI18n } from '../contexts/I18nContext';
 import type { GroupType } from '../types';
 import { getTodayDisplay, isValidDateFormat, parseDateInput } from '../utils';
 import { logger } from '../utils/logger';
 import ThirdPartyAutocomplete from './ThirdPartyAutocomplete';
 import { getRecentlyUsedCategories } from './transactionCategories';
-import {
-  calculateAccountingPeriod,
-  formatWithInstitution,
-  normalizeThirdParty,
-  parseAccountString,
-} from './transactionFormUtils';
+import { formatWithInstitution, normalizeThirdParty } from './transactionFormUtils';
 
 interface NewTransactionFormProps {
-  year: number;
   yearId: number;
   categories: { id: number; name: string; groupName: string; groupType: GroupType }[];
   transactions: Transaction[];
   paymentMethods: PaymentMethod[];
-  transferAccounts: AccountIdentifier[];
   isSubmitting: boolean;
   onSubmittingChange: (isSubmitting: boolean) => void;
   onCreated: () => Promise<void>;
+  readOnly?: boolean;
 }
 
 export default function NewTransactionForm({
-  year,
   yearId,
   categories,
   transactions,
   paymentMethods,
-  transferAccounts,
   isSubmitting,
   onSubmittingChange,
   onCreated,
+  readOnly = false,
 }: NewTransactionFormProps) {
-  const { t, monthNames } = useI18n();
+  const { t } = useI18n();
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   // Form state (dates stored in DD/MM/YYYY display format)
-  const [newEntryType, setNewEntryType] = useState<'transaction' | 'transfer'>('transaction');
   const [newDate, setNewDate] = useState(getTodayDisplay);
   const [newDescription, setNewDescription] = useState('');
   const [newComment, setNewComment] = useState('');
@@ -54,16 +42,6 @@ export default function NewTransactionForm({
   const [newItemId, setNewItemId] = useState<number | null>(null);
   const [autoItemFromThirdParty, setAutoItemFromThirdParty] = useState(false);
   const [autoPaymentMethodFromThirdParty, setAutoPaymentMethodFromThirdParty] = useState(false);
-  // Transfer-specific form state
-  const [newSourceAccount, setNewSourceAccount] = useState(''); // Account ID
-  const [newDestAccount, setNewDestAccount] = useState('');
-  const [newSourceAccountingMonth, setNewSourceAccountingMonth] = useState<number>(1);
-  const [newSourceAccountingYear, setNewSourceAccountingYear] = useState<number>(year);
-  const [newDestinationAccountingMonth, setNewDestinationAccountingMonth] = useState<number>(1);
-  const [newDestinationAccountingYear, setNewDestinationAccountingYear] = useState<number>(year);
-  const [sourcePeriodOverridden, setSourcePeriodOverridden] = useState(false);
-  const [destinationPeriodOverridden, setDestinationPeriodOverridden] = useState(false);
-
   const incomeItems = categories.filter((item) => item.groupType === 'income');
   const expenseItems = categories.filter((item) => item.groupType === 'expense');
   const savingsCategoryItems = categories.filter((item) => item.groupType === 'savings');
@@ -71,44 +49,6 @@ export default function NewTransactionForm({
     () => getRecentlyUsedCategories(categories, transactions),
     [categories, transactions]
   );
-
-  const getTransferSettlementDay = useCallback(
-    (accountId: string): number | null => {
-      const id = Number(accountId);
-      if (!Number.isInteger(id)) return null;
-      const transferAccount = transferAccounts.find((account) => account.id === id);
-      if (transferAccount?.settlementDay !== undefined) return transferAccount.settlementDay ?? null;
-      return paymentMethods.find((method) => method.id === id)?.settlementDay ?? null;
-    },
-    [paymentMethods, transferAccounts]
-  );
-
-  useEffect(() => {
-    if (!isValidDateFormat(newDate)) return;
-    const sourceAccount = transferAccounts.find((account) => `${account.id}` === newSourceAccount);
-    const destinationAccount = transferAccounts.find((account) => `${account.id}` === newDestAccount);
-    const isoDate = parseDateInput(newDate);
-
-    if (sourceAccount && !sourcePeriodOverridden) {
-      const period = calculateAccountingPeriod(isoDate, getTransferSettlementDay(newSourceAccount));
-      setNewSourceAccountingMonth(period.month);
-      setNewSourceAccountingYear(period.year);
-    }
-
-    if (destinationAccount && !destinationPeriodOverridden) {
-      const period = calculateAccountingPeriod(isoDate, getTransferSettlementDay(newDestAccount));
-      setNewDestinationAccountingMonth(period.month);
-      setNewDestinationAccountingYear(period.year);
-    }
-  }, [
-    newDate,
-    newSourceAccount,
-    newDestAccount,
-    transferAccounts,
-    getTransferSettlementDay,
-    sourcePeriodOverridden,
-    destinationPeriodOverridden,
-  ]);
 
   const applyNewThirdPartySuggestion = useCallback(
     (value: string, source: 'blur' | 'select' = 'blur') => {
@@ -153,100 +93,42 @@ export default function NewTransactionForm({
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
-    if (!newAmount || isSubmitting || !isValidDateFormat(newDate)) return;
+    if (readOnlyRef.current || !newAmount || isSubmitting || !isValidDateFormat(newDate)) return;
 
-    if (newEntryType === 'transaction') {
-      if (!newItemId || !newPaymentMethodId) return;
+    if (!newItemId || !newPaymentMethodId) return;
 
-      onSubmittingChange(true);
-      try {
-        await createTransaction({
-          yearId,
-          itemId: newItemId,
-          date: parseDateInput(newDate), // Convert DD/MM/YYYY to YYYY-MM-DD
-          description: newDescription.trim() || undefined,
-          comment: newComment.trim() || undefined,
-          thirdParty: newThirdParty.trim() || undefined,
-          paymentMethodId: newPaymentMethodId,
-          amount: parseFloat(newAmount),
-        });
-        setNewDescription('');
-        setNewComment('');
-        setNewThirdParty('');
-        setNewPaymentMethodId(null);
-        setAutoPaymentMethodFromThirdParty(false);
-        setNewAmount('');
-        setNewItemId(null);
-        setAutoItemFromThirdParty(false);
-        await onCreated();
-      } catch (error) {
-        logger.error('Failed to create transaction', error);
-      } finally {
-        onSubmittingChange(false);
-      }
-    } else {
-      // Transfer
-      const source = parseAccountString(newSourceAccount);
-      const dest = parseAccountString(newDestAccount);
-      if (!source || !dest) return;
-
-      onSubmittingChange(true);
-      try {
-        await createTransfer(year, {
-          date: parseDateInput(newDate),
-          amount: parseFloat(newAmount),
-          description: newDescription.trim() || undefined,
-          sourceAccountId: source.id,
-          destinationAccountId: dest.id,
-          sourceAccountingMonth: newSourceAccountingMonth,
-          sourceAccountingYear: newSourceAccountingYear,
-          destinationAccountingMonth: newDestinationAccountingMonth,
-          destinationAccountingYear: newDestinationAccountingYear,
-        });
-        setNewDescription('');
-        setNewAmount('');
-        setNewSourceAccount('');
-        setNewDestAccount('');
-        setSourcePeriodOverridden(false);
-        setDestinationPeriodOverridden(false);
-        await onCreated();
-      } catch (error) {
-        logger.error('Failed to create transfer', error);
-      } finally {
-        onSubmittingChange(false);
-      }
+    onSubmittingChange(true);
+    try {
+      await createTransaction({
+        yearId,
+        itemId: newItemId,
+        date: parseDateInput(newDate), // Convert DD/MM/YYYY to YYYY-MM-DD
+        description: newDescription.trim() || undefined,
+        comment: newComment.trim() || undefined,
+        thirdParty: newThirdParty.trim() || undefined,
+        paymentMethodId: newPaymentMethodId,
+        amount: parseFloat(newAmount),
+      });
+      setNewDescription('');
+      setNewComment('');
+      setNewThirdParty('');
+      setNewPaymentMethodId(null);
+      setAutoPaymentMethodFromThirdParty(false);
+      setNewAmount('');
+      setNewItemId(null);
+      setAutoItemFromThirdParty(false);
+      await onCreated();
+    } catch (error) {
+      logger.error('Failed to create transaction', error);
+    } finally {
+      onSubmittingChange(false);
     }
   };
 
+  if (readOnly) return null;
+
   return (
     <div className="transaction-form-card">
-      <div className="form-type-toggle">
-        <button
-          type="button"
-          className={`type-toggle-btn ${newEntryType === 'transaction' ? 'active' : ''}`}
-          onClick={() => setNewEntryType('transaction')}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="12" y1="1" x2="12" y2="23" />
-            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-          </svg>
-          {t('transactions.typeTransaction')}
-        </button>
-        <button
-          type="button"
-          className={`type-toggle-btn ${newEntryType === 'transfer' ? 'active' : ''}`}
-          onClick={() => setNewEntryType('transfer')}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="17 1 21 5 17 9" />
-            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-            <polyline points="7 23 3 19 7 15" />
-            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-          </svg>
-          {t('transactions.typeTransfer')}
-        </button>
-      </div>
-
       <form onSubmit={handleCreate} className="transaction-form">
         <div className="form-row">
           <div className="date-input-wrapper">
@@ -287,77 +169,13 @@ export default function NewTransactionForm({
             </button>
           </div>
 
-          {newEntryType === 'transaction' ? (
-            <ThirdPartyAutocomplete
-              value={newThirdParty}
-              onChange={setNewThirdParty}
-              onCommit={applyNewThirdPartySuggestion}
-              placeholder={t('transactions.thirdPartyPlaceholder')}
-              className="form-input third-party-input"
-            />
-          ) : (
-            <>
-              <select
-                value={newSourceAccount}
-                onChange={(e) => {
-                  setNewSourceAccount(e.target.value);
-                  setSourcePeriodOverridden(false);
-                }}
-                className="form-select account-select"
-                required
-              >
-                <option value="">{t('transactions.sourceAccount')}</option>
-                <optgroup label={t('accounts.paymentAccounts')}>
-                  {transferAccounts
-                    .filter((a) => !a.isSavingsAccount)
-                    .map((a) => (
-                      <option key={`pm_${a.id}`} value={`${a.id}`}>
-                        {formatWithInstitution(a.name, a.institution)}
-                      </option>
-                    ))}
-                </optgroup>
-                <optgroup label={t('accounts.savingsAccounts')}>
-                  {transferAccounts
-                    .filter((a) => a.isSavingsAccount)
-                    .map((a) => (
-                      <option key={`si_${a.id}`} value={`${a.id}`}>
-                        {formatWithInstitution(a.name, a.institution)}
-                      </option>
-                    ))}
-                </optgroup>
-              </select>
-              <span className="transfer-arrow">→</span>
-              <select
-                value={newDestAccount}
-                onChange={(e) => {
-                  setNewDestAccount(e.target.value);
-                  setDestinationPeriodOverridden(false);
-                }}
-                className="form-select account-select"
-                required
-              >
-                <option value="">{t('transactions.destinationAccount')}</option>
-                <optgroup label={t('accounts.paymentAccounts')}>
-                  {transferAccounts
-                    .filter((a) => !a.isSavingsAccount)
-                    .map((a) => (
-                      <option key={`pm_${a.id}`} value={`${a.id}`}>
-                        {formatWithInstitution(a.name, a.institution)}
-                      </option>
-                    ))}
-                </optgroup>
-                <optgroup label={t('accounts.savingsAccounts')}>
-                  {transferAccounts
-                    .filter((a) => a.isSavingsAccount)
-                    .map((a) => (
-                      <option key={`si_${a.id}`} value={`${a.id}`}>
-                        {formatWithInstitution(a.name, a.institution)}
-                      </option>
-                    ))}
-                </optgroup>
-              </select>
-            </>
-          )}
+          <ThirdPartyAutocomplete
+            value={newThirdParty}
+            onChange={setNewThirdParty}
+            onCommit={applyNewThirdPartySuggestion}
+            placeholder={t('transactions.thirdPartyPlaceholder')}
+            className="form-input third-party-input"
+          />
 
           <input
             type="text"
@@ -368,184 +186,101 @@ export default function NewTransactionForm({
           />
         </div>
 
-        {newEntryType === 'transaction' && (
-          <div className="form-row">
-            <select
-              value={newPaymentMethodId ?? ''}
-              onChange={(e) => {
-                setNewPaymentMethodId(e.target.value ? Number(e.target.value) : null);
-                setAutoPaymentMethodFromThirdParty(false);
-              }}
-              className="form-select payment-method-select"
-            >
-              <option value="">{t('transactions.paymentMethod')}</option>
-              {paymentMethods
-                .filter((m) => !m.isSavingsAccount)
-                .map((method) => (
-                  <option key={method.id} value={method.id}>
-                    {formatWithInstitution(method.name, method.institution)}
-                  </option>
-                ))}
-              {paymentMethods.some((m) => m.isSavingsAccount) && (
-                <optgroup label={t('accounts.savingsAccounts')}>
-                  {paymentMethods
-                    .filter((m) => m.isSavingsAccount)
-                    .map((method) => (
-                      <option key={method.id} value={method.id}>
-                        {formatWithInstitution(method.name, method.institution)}
-                      </option>
-                    ))}
-                </optgroup>
-              )}
-            </select>
-            <input
-              type="number"
-              placeholder={t('transactions.amountPlaceholder')}
-              value={newAmount}
-              onChange={(e) => setNewAmount(e.target.value)}
-              step="0.01"
-              className="form-input amount-input"
-            />
-            <input
-              type="text"
-              aria-label={t('transactions.comment')}
-              placeholder={t('transactions.commentPlaceholder')}
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              className="form-input comment-input"
-            />
-          </div>
-        )}
-
-        {newEntryType === 'transfer' && (
-          <div className="form-row transfer-accounting-row">
-            <label className="transfer-accounting-group">
-              <span>{t('transactions.sourceAccountingMonth')}</span>
-              <select
-                aria-label={t('transactions.sourceAccountingMonth')}
-                value={newSourceAccountingMonth}
-                onChange={(e) => {
-                  setNewSourceAccountingMonth(Number(e.target.value));
-                  setSourcePeriodOverridden(true);
-                }}
-                className="form-select accounting-month-select"
-              >
-                {monthNames.map((name, i) => (
-                  <option key={i + 1} value={i + 1}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <input
-                aria-label={t('transactions.sourceAccountingYear')}
-                type="number"
-                value={newSourceAccountingYear}
-                onChange={(e) => {
-                  setNewSourceAccountingYear(Number(e.target.value));
-                  setSourcePeriodOverridden(true);
-                }}
-                className="form-input accounting-year-input"
-                min="2000"
-                max="2100"
-              />
-            </label>
-            <label className="transfer-accounting-group">
-              <span>{t('transactions.destinationAccountingMonth')}</span>
-              <select
-                aria-label={t('transactions.destinationAccountingMonth')}
-                value={newDestinationAccountingMonth}
-                onChange={(e) => {
-                  setNewDestinationAccountingMonth(Number(e.target.value));
-                  setDestinationPeriodOverridden(true);
-                }}
-                className="form-select accounting-month-select"
-              >
-                {monthNames.map((name, i) => (
-                  <option key={i + 1} value={i + 1}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <input
-                aria-label={t('transactions.destinationAccountingYear')}
-                type="number"
-                value={newDestinationAccountingYear}
-                onChange={(e) => {
-                  setNewDestinationAccountingYear(Number(e.target.value));
-                  setDestinationPeriodOverridden(true);
-                }}
-                className="form-input accounting-year-input"
-                min="2000"
-                max="2100"
-              />
-            </label>
-          </div>
-        )}
+        <div className="form-row">
+          <select
+            value={newPaymentMethodId ?? ''}
+            onChange={(e) => {
+              setNewPaymentMethodId(e.target.value ? Number(e.target.value) : null);
+              setAutoPaymentMethodFromThirdParty(false);
+            }}
+            className="form-select payment-method-select"
+          >
+            <option value="">{t('transactions.paymentMethod')}</option>
+            {paymentMethods
+              .filter((m) => !m.isSavingsAccount)
+              .map((method) => (
+                <option key={method.id} value={method.id}>
+                  {formatWithInstitution(method.name, method.institution)}
+                </option>
+              ))}
+            {paymentMethods.some((m) => m.isSavingsAccount) && (
+              <optgroup label={t('accounts.savingsAccounts')}>
+                {paymentMethods
+                  .filter((m) => m.isSavingsAccount)
+                  .map((method) => (
+                    <option key={method.id} value={method.id}>
+                      {formatWithInstitution(method.name, method.institution)}
+                    </option>
+                  ))}
+              </optgroup>
+            )}
+          </select>
+          <input
+            type="number"
+            placeholder={t('transactions.amountPlaceholder')}
+            value={newAmount}
+            onChange={(e) => setNewAmount(e.target.value)}
+            step="0.01"
+            className="form-input amount-input"
+          />
+          <input
+            type="text"
+            aria-label={t('transactions.comment')}
+            placeholder={t('transactions.commentPlaceholder')}
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value)}
+            className="form-input comment-input"
+          />
+        </div>
 
         <div className="form-row">
-          {newEntryType === 'transaction' ? (
-            <select
-              value={newItemId || ''}
-              onChange={(e) => {
-                setNewItemId(e.target.value ? Number(e.target.value) : null);
-                setAutoItemFromThirdParty(false);
-              }}
-              className="form-select category-select"
-              required
-            >
-              <option value="">{t('transactions.selectCategory')}</option>
-              {recentlyUsedCategoryItems.length > 0 && (
-                <optgroup label={t('transactions.recentlyUsedCategories')}>
-                  {recentlyUsedCategoryItems.map((item) => (
-                    <option key={`recent_${item.id}`} value={item.id}>
-                      {item.groupName} → {item.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              <optgroup label={t('budget.income')}>
-                {incomeItems.map((item) => (
-                  <option key={item.id} value={item.id}>
+          <select
+            value={newItemId || ''}
+            onChange={(e) => {
+              setNewItemId(e.target.value ? Number(e.target.value) : null);
+              setAutoItemFromThirdParty(false);
+            }}
+            className="form-select category-select"
+            required
+          >
+            <option value="">{t('transactions.selectCategory')}</option>
+            {recentlyUsedCategoryItems.length > 0 && (
+              <optgroup label={t('transactions.recentlyUsedCategories')}>
+                {recentlyUsedCategoryItems.map((item) => (
+                  <option key={`recent_${item.id}`} value={item.id}>
                     {item.groupName} → {item.name}
                   </option>
                 ))}
               </optgroup>
-              <optgroup label={t('budget.expenses')}>
-                {expenseItems.map((item) => (
+            )}
+            <optgroup label={t('budget.income')}>
+              {incomeItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.groupName} → {item.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label={t('budget.expenses')}>
+              {expenseItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.groupName} → {item.name}
+                </option>
+              ))}
+            </optgroup>
+            {savingsCategoryItems.length > 0 && (
+              <optgroup label={t('budget.savings')}>
+                {savingsCategoryItems.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.groupName} → {item.name}
+                    {item.name}
                   </option>
                 ))}
               </optgroup>
-              {savingsCategoryItems.length > 0 && (
-                <optgroup label={t('budget.savings')}>
-                  {savingsCategoryItems.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-          ) : (
-            <input
-              type="number"
-              placeholder={t('transactions.amountPlaceholder')}
-              value={newAmount}
-              onChange={(e) => setNewAmount(e.target.value)}
-              step="0.01"
-              className="form-input amount-input"
-            />
-          )}
+            )}
+          </select>
           <button
             type="submit"
             className="btn-primary"
-            disabled={
-              !newAmount ||
-              isSubmitting ||
-              (newEntryType === 'transaction' && !newItemId) ||
-              (newEntryType === 'transfer' && (!newSourceAccount || !newDestAccount))
-            }
+            disabled={readOnly || !newAmount || !newItemId || !newPaymentMethodId || isSubmitting}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="5" x2="12" y2="19" />

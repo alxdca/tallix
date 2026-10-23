@@ -143,7 +143,7 @@ describe('transfer accounting balances', () => {
     expect(december.accounts.find((account) => account.id === ctx.revolut.id)!.monthlyBalances[11]).toBe(200);
     expect(december.accounts.find((account) => account.id === ctx.cembra.id)!.monthlyBalances[11]).toBe(0);
     expect(january.accounts.find((account) => account.id === ctx.cembra.id)!.monthlyBalances[0]).toBe(-200);
-    expect(january.accounts.find((account) => account.id === ctx.revolut.id)!.monthlyBalances[0]).toBe(0);
+    expect(january.accounts.find((account) => account.id === ctx.revolut.id)!.monthlyBalances[0]).toBe(200);
     expect(december.lastActiveMonth).toBe(12);
     expect(january.lastActiveMonth).toBe(1);
   });

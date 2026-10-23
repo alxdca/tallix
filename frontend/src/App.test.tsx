@@ -6,6 +6,8 @@ import App from './App';
 import * as api from './api';
 import type { BudgetData, BudgetSummary } from './types';
 
+let pendingTransferMutation: Promise<void> = Promise.resolve();
+
 vi.mock('./contexts/AuthContext', () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useAuth: () => ({
@@ -56,6 +58,12 @@ vi.mock('./components/Sidebar', () => ({
       <button type="button" onClick={() => props.onViewChange('accounts')}>
         Accounts
       </button>
+      <button type="button" onClick={() => props.onViewChange('transactions')}>
+        Transactions
+      </button>
+      <button type="button" onClick={() => props.onViewChange('transfers')}>
+        Transfers
+      </button>
       <button type="button" onClick={() => props.onViewChange('settings')}>
         Settings
       </button>
@@ -83,7 +91,11 @@ vi.mock('./components/BudgetSpreadsheet', () => ({
 }));
 
 vi.mock('./components/Accounts', () => ({
-  default: (props: any) => <div data-testid="accounts">Accounts {props.year}</div>,
+  default: (props: any) => (
+    <div data-testid="accounts" data-read-only={props.readOnly}>
+      Accounts {props.year}
+    </div>
+  ),
 }));
 
 vi.mock('./components/Settings', () => ({
@@ -122,7 +134,28 @@ vi.mock('./components/Login', () => ({
 }));
 
 vi.mock('./components/Transactions', () => ({
-  default: (props: any) => <div data-testid="transactions">Transactions {props.year}</div>,
+  default: (props: any) => (
+    <div data-testid="transactions" data-read-only={props.readOnly} data-year-id={props.yearId}>
+      Transactions {props.year}
+    </div>
+  ),
+}));
+
+vi.mock('./components/Transfers', () => ({
+  default: (props: any) => (
+    <div data-testid="transfers" data-read-only={props.readOnly} data-year-id={props.yearId}>
+      Transfers {props.year}
+      <button
+        type="button"
+        onClick={async () => {
+          await pendingTransferMutation;
+          await props.onTransactionsChanged?.();
+        }}
+      >
+        Save transfer
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('./components/UserSettings', () => ({
@@ -303,6 +336,7 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem('tallix_locale', 'en');
   vi.clearAllMocks();
+  pendingTransferMutation = Promise.resolve();
   setupApi();
 });
 
@@ -318,6 +352,65 @@ afterEach(() => {
 });
 
 describe('budget and year selection', () => {
+  it('ignores a prior year refresh when a pending transfer save completes after changing years', async () => {
+    const pending = deferred<void>();
+    pendingTransferMutation = pending.promise;
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026 remaining 2726');
+    click(container, 'Transfers');
+    click(container, 'Save transfer');
+
+    const yearSelect = container.querySelector<HTMLSelectElement>('select[aria-label="Year"]')!;
+    act(() => {
+      yearSelect.value = '2025';
+      yearSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await waitForText(container, 'Transfers 2025');
+    const requestCount = mockedApi.fetchBudgetData.mock.calls.length;
+    await act(async () => {
+      pending.resolve();
+      await pending.promise;
+    });
+    await flush();
+
+    expect(mockedApi.fetchBudgetData).toHaveBeenCalledTimes(requestCount);
+    expect(container.querySelector('[data-testid="header"]')?.textContent).toContain('Header 2025');
+    expect(container.querySelector('[data-testid="transfers"]')?.getAttribute('data-year-id')).toBe('20250');
+  });
+
+  it('opens independent transaction and transfer subpages with the current budget context and header', async () => {
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026 remaining 2726');
+
+    click(container, 'Transactions');
+    expect(container.querySelector('[data-testid="transactions"]')?.getAttribute('data-read-only')).toBe('false');
+    expect(container.querySelector('[data-testid="transfers"]')).toBeNull();
+
+    click(container, 'Transfers');
+    await waitForText(container, 'Transfers 2026');
+    expect(container.querySelector('[data-testid="transfers"]')?.getAttribute('data-year-id')).toBe('20260');
+    expect(container.querySelector('[data-testid="transactions"]')).toBeNull();
+    expect(container.querySelector('[data-testid="header"]')).not.toBeNull();
+    const yearSelect = container.querySelector<HTMLSelectElement>('select[aria-label="Year"]')!;
+    act(() => {
+      yearSelect.value = '2025';
+      yearSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await waitForText(container, 'Transfers 2025');
+    expect(container.querySelector('[data-testid="transfers"]')?.getAttribute('data-year-id')).toBe('20250');
+    expect(container.querySelector('[data-testid="header"]')?.textContent).toContain('2025');
+
+    changeBudget(container, '3');
+    await waitForText(container, 'Header 2027 remaining 2727');
+    click(container, 'Transfers');
+    await waitForText(container, 'Transfers 2027');
+    expect(container.querySelector('[data-testid="transfers"]')?.getAttribute('data-read-only')).toBe('true');
+    click(container, 'Transactions');
+    expect(container.querySelector('[data-testid="transactions"]')?.getAttribute('data-read-only')).toBe('true');
+    click(container, 'Accounts');
+    expect(container.querySelector('[data-testid="accounts"]')?.getAttribute('data-read-only')).toBe('true');
+  });
+
   it('loads data, summary and accounts for the selected budget year when switching past and future budgets', async () => {
     const { container } = await renderApp();
     await waitForText(container, 'Header 2026 remaining 2726');

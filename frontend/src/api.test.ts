@@ -8,6 +8,8 @@ import {
   fetchAccounts,
   fetchBudgetData,
   fetchBudgetSummary,
+  restoreAccountBalanceLink,
+  setAccountBalance,
   shareBudget,
 } from './api';
 
@@ -192,5 +194,38 @@ describe('budget api year routing', () => {
         body: JSON.stringify({ question: 'What did I spend?', conversationHistory: [], year: 2025 }),
       })
     );
+  });
+});
+
+describe('account opening balance API', () => {
+  it('preserves ordinary opening payload and explicitly marks a confirmed link override', async () => {
+    await setAccountBalance(2027, 42, 1500.25);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/accounts/2027/balance',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ paymentMethodId: 42, initialBalance: 1500.25 }),
+      })
+    );
+    await setAccountBalance(2027, 42, 1500.25, true);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/accounts/2027/balance',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ paymentMethodId: 42, initialBalance: 1500.25, breakLink: true }),
+      })
+    );
+  });
+
+  it('restores the account link in the active budget and propagates server errors', async () => {
+    localStorage.setItem(ACTIVE_BUDGET_KEY, '42');
+    await restoreAccountBalanceLink(2027, 9);
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/accounts/2027/balance/restore-link', {
+      method: 'PUT',
+      body: JSON.stringify({ paymentMethodId: 9 }),
+      headers: { 'Content-Type': 'application/json', 'X-Budget-Id': '42' },
+    });
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'No balance link available' }, { status: 400 }));
+    await expect(restoreAccountBalanceLink(2027, 9)).rejects.toThrow('No balance link available');
   });
 });

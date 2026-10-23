@@ -1,6 +1,12 @@
 # Accounts and Payment Methods
 
-An opening balance marked **Linked** follows the same account's December closing balance in the parent budget. If that parent balance changes, the child's opening balance updates. Editing a linked opening balance in the child replaces it with your own value and stops the link for that account. Deleting the parent keeps the child's latest opening balances as fixed values.
+The **End-of-year balance** column shows each account's calculated December closing balance, with totals for payment accounts, savings accounts, and all accounts. It includes recorded transactions and transfers according to their accounting periods and cannot be edited directly.
+
+An opening balance marked **Linked** follows the same account's end-of-year balance in the preceding available year of the selected budget. Changes to earlier transactions, transfers, or opening balances update later linked years when refreshed. If a year is missing, the next available year follows the nearest preceding year.
+
+To set an independent opening balance, edit it and save. A confirmation warns that this breaks the link: future changes to the previous closing balance will stop updating this opening. The account then shows an override status. **Restore link** resumes automatic updates. An override affects that account and year; its calculated closing balance still feeds later linked years.
+
+For a budget created from a parent budget, the declared starting year keeps its parent-budget link. Explicit starting-year overrides are preserved. Deleting the parent keeps the child's latest opening balances as fixed values.
 
 Payment methods represent how you pay (cards, bank accounts, etc). They also power account balances and projections.
 
