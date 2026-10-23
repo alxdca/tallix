@@ -7670,13 +7670,41 @@ td.zero {
 }
 
 /* Account opening links and calculated closing column */
-.accounts-view .account-initial {
-  min-width: 180px;
+.accounts-view .accounts-table {
+  table-layout: fixed;
+  min-width: 1584px;
+}
+
+.accounts-view .account-month-col {
+  width: auto;
+}
+
+.accounts-view .account-initial-col,
+.accounts-view .account-initial,
+.accounts-view .account-closing-col,
+.accounts-view .account-closing {
+  width: 112px;
+  min-width: 112px;
+  max-width: 112px;
+  padding-inline: 6px;
+}
+
+.accounts-view .account-initial-col,
+.accounts-view .account-closing-col {
+  white-space: normal;
+}
+
+.accounts-view .inline-edit {
+  flex-wrap: wrap;
+}
+
+.accounts-view .balance-input {
+  width: 100%;
+  min-width: 0;
 }
 
 .accounts-view .account-closing-col,
 .accounts-view .account-closing {
-  min-width: 145px;
   border-left: 1px solid var(--border-color);
   font-weight: 600;
 }
@@ -7691,6 +7719,7 @@ td.zero {
 }
 
 .accounts-view .account-edit-balance {
+  padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
@@ -7703,8 +7732,7 @@ td.zero {
   outline-offset: 2px;
 }
 
-.accounts-view .account-balance-link,
-.accounts-view .account-balance-override {
+.accounts-view .account-balance-link {
   display: block;
   margin-top: 4px;
   margin-left: 0;
@@ -7712,13 +7740,27 @@ td.zero {
   white-space: normal;
 }
 
+.accounts-view .account-balance-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+  white-space: normal;
+}
+
+.accounts-view .account-balance-status > * {
+  min-width: 0;
+}
+
 .accounts-view .account-balance-override {
   color: var(--text-secondary);
+  font-size: 0.72rem;
 }
 
 .accounts-view .account-restore-link {
-  display: block;
-  margin: 4px 0 0 auto;
+  display: inline-flex;
+  margin: 0;
   padding: 2px 0;
   background: transparent;
   border: 0;

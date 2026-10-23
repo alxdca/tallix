@@ -23,6 +23,7 @@ export interface Account {
   institution: string | null;
   sortOrder: number;
   isSavingsAccount: boolean;
+  savingsType: string | null;
   initialBalance: number;
   inheritedFromParent: boolean;
   endOfYearBalance: number;
@@ -343,6 +344,7 @@ async function resolveAccountsForYear(
       institution: pm.institution,
       sortOrder: pm.sortOrder,
       isSavingsAccount: pm.isSavingsAccount,
+      savingsType: pm.savingsType,
       initialBalance: initialBalance.toNumber(),
       ...openingMetadata.get(pm.id)!,
       endOfYearBalance: cumulative.toNumber(),

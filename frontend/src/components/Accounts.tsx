@@ -9,7 +9,7 @@ import {
   Title,
   Tooltip,
 } from 'chart.js';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Line } from 'react-chartjs-2';
 import { ACTIVE_BUDGET_KEY, type Account, fetchAccounts, restoreAccountBalanceLink, setAccountBalance } from '../api';
 import { useI18n } from '../contexts/I18nContext';
@@ -63,7 +63,7 @@ function calculateTotals(accountList: Account[]): AccountTotals {
 
 export default function Accounts({ year, months, onDataChanged, readOnly = false }: AccountsProps) {
   const formatCurrency = useFormatCurrency();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingBalance, setEditingBalance] = useState<number | null>(null);
@@ -178,12 +178,35 @@ export default function Accounts({ year, months, onDataChanged, readOnly = false
     void updateBalance(account.id, value, scope);
   };
 
-  const savingsAccounts = accounts.filter((a) => a.isSavingsAccount);
-  const paymentAccounts = accounts.filter((a) => !a.isSavingsAccount);
-
-  // Calculate totals
-  const paymentTotals = useMemo(() => calculateTotals(paymentAccounts), [paymentAccounts]);
-  const savingsTotals = useMemo(() => calculateTotals(savingsAccounts), [savingsAccounts]);
+  const sortedAccounts = useMemo(
+    () => [...accounts].sort((a, b) => a.name.localeCompare(b.name, locale, { sensitivity: 'base' })),
+    [accounts, locale]
+  );
+  const accountSections = useMemo(
+    () =>
+      [
+        {
+          key: 'payment',
+          title: t('accounts.paymentAccounts'),
+          accounts: sortedAccounts.filter((account) => !account.isSavingsAccount),
+        },
+        {
+          key: 'savings',
+          title: t('accounts.savingsAccounts'),
+          accounts: sortedAccounts.filter(
+            (account) => account.isSavingsAccount && account.savingsType !== 'investissements'
+          ),
+        },
+        {
+          key: 'investments',
+          title: t('accounts.investmentAccounts'),
+          accounts: sortedAccounts.filter(
+            (account) => account.isSavingsAccount && account.savingsType === 'investissements'
+          ),
+        },
+      ].map((section) => ({ ...section, totals: calculateTotals(section.accounts) })),
+    [sortedAccounts, t]
+  );
   const overallTotals = useMemo(() => calculateTotals(accounts), [accounts]);
 
   // Chart colors
@@ -199,7 +222,7 @@ export default function Accounts({ year, months, onDataChanged, readOnly = false
   const chartData = useMemo(() => {
     const labels = [t('accounts.initial'), ...activeMonths.map((m) => m.substring(0, 3))];
 
-    const datasets = accounts.map((account, index) => {
+    const datasets = sortedAccounts.map((account, index) => {
       const color = chartColors[index % chartColors.length];
       const label = account.institution ? `${account.name} (${account.institution})` : account.name;
       return {
@@ -215,7 +238,7 @@ export default function Accounts({ year, months, onDataChanged, readOnly = false
     });
 
     // Add total line
-    if (accounts.length > 1) {
+    if (sortedAccounts.length > 1) {
       const totalData = [overallTotals.initialBalance, ...overallTotals.monthlyBalances];
       datasets.push({
         label: t('accounts.totalLabel'),
@@ -230,7 +253,7 @@ export default function Accounts({ year, months, onDataChanged, readOnly = false
     }
 
     return { labels, datasets };
-  }, [accounts, activeMonths, overallTotals, t]);
+  }, [sortedAccounts, activeMonths, overallTotals, t]);
 
   const chartOptions = useMemo(
     () => ({
@@ -329,6 +352,7 @@ export default function Accounts({ year, months, onDataChanged, readOnly = false
             <tbody>
               {accountList.map((account) => {
                 const movements = calculateMonthlyMovements(account.initialBalance, account.monthlyBalances);
+                const canRestoreLink = account.canRestoreBalanceLink && !hasBalanceLink(account) && !readOnly;
                 return (
                   <tr key={account.id}>
                     <td className="account-name">
@@ -418,21 +442,25 @@ export default function Accounts({ year, months, onDataChanged, readOnly = false
                           {t('accounts.linkedFromYear', { year: account.linkedFromYear })}
                         </span>
                       )}
-                      {account.openingBalanceOverridden && (
-                        <span className="account-balance-override" title={t('accounts.manualOverrideHelp')}>
-                          {t('accounts.manualOverride')}
-                        </span>
-                      )}
-                      {account.canRestoreBalanceLink && !hasBalanceLink(account) && !readOnly && (
-                        <button
-                          type="button"
-                          className="account-restore-link"
-                          aria-label={t('accounts.restoreLinkFor', { name: account.name })}
-                          disabled={isSubmitting}
-                          onClick={() => void updateBalance(account.id, null, scope)}
-                        >
-                          {t('accounts.restoreLink')}
-                        </button>
+                      {(account.openingBalanceOverridden || canRestoreLink) && (
+                        <div className="account-balance-status">
+                          {account.openingBalanceOverridden && (
+                            <span className="account-balance-override" title={t('accounts.manualOverrideHelp')}>
+                              {t('accounts.manualOverride')}
+                            </span>
+                          )}
+                          {canRestoreLink && (
+                            <button
+                              type="button"
+                              className="account-restore-link"
+                              aria-label={t('accounts.restoreLinkFor', { name: account.name })}
+                              disabled={isSubmitting}
+                              onClick={() => void updateBalance(account.id, null, scope)}
+                            >
+                              {t('accounts.restoreLink')}
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
                     {account.monthlyBalances.map((balance, i) => (
@@ -500,46 +528,28 @@ export default function Accounts({ year, months, onDataChanged, readOnly = false
               </tr>
             </thead>
             <tbody>
-              {paymentAccounts.length > 0 && (
-                <tr className="subtotal-row">
-                  <td className="account-name">{t('accounts.paymentAccounts')}</td>
-                  <td className="account-initial">{formatCurrency(paymentTotals.initialBalance, true)}</td>
-                  {paymentTotals.monthlyBalances.map((balance, i) => (
-                    <td key={i} className="account-month-cell">
-                      <div
-                        className={`account-movement ${paymentTotals.monthlyMovements[i] > 0 ? 'positive' : paymentTotals.monthlyMovements[i] < 0 ? 'negative' : ''}`}
-                      >
-                        {paymentTotals.monthlyMovements[i] !== 0 && (paymentTotals.monthlyMovements[i] > 0 ? '+' : '')}
-                        {formatCurrency(paymentTotals.monthlyMovements[i])}
-                      </div>
-                      <div className={`account-balance ${balance < 0 ? 'negative' : ''}`}>
-                        {formatCurrency(balance, true)}
-                      </div>
-                    </td>
-                  ))}
-                  {renderClosingBalance(paymentTotals.endOfYearBalance)}
-                </tr>
-              )}
-              {savingsAccounts.length > 0 && (
-                <tr className="subtotal-row">
-                  <td className="account-name">{t('accounts.savingsAccounts')}</td>
-                  <td className="account-initial">{formatCurrency(savingsTotals.initialBalance, true)}</td>
-                  {savingsTotals.monthlyBalances.map((balance, i) => (
-                    <td key={i} className="account-month-cell">
-                      <div
-                        className={`account-movement ${savingsTotals.monthlyMovements[i] > 0 ? 'positive' : savingsTotals.monthlyMovements[i] < 0 ? 'negative' : ''}`}
-                      >
-                        {savingsTotals.monthlyMovements[i] !== 0 && (savingsTotals.monthlyMovements[i] > 0 ? '+' : '')}
-                        {formatCurrency(savingsTotals.monthlyMovements[i])}
-                      </div>
-                      <div className={`account-balance ${balance < 0 ? 'negative' : ''}`}>
-                        {formatCurrency(balance, true)}
-                      </div>
-                    </td>
-                  ))}
-                  {renderClosingBalance(savingsTotals.endOfYearBalance)}
-                </tr>
-              )}
+              {accountSections
+                .filter((section) => section.accounts.length > 0)
+                .map(({ key, title, totals }) => (
+                  <tr key={key} className="subtotal-row">
+                    <td className="account-name">{title}</td>
+                    <td className="account-initial">{formatCurrency(totals.initialBalance, true)}</td>
+                    {totals.monthlyBalances.map((balance, i) => (
+                      <td key={i} className="account-month-cell">
+                        <div
+                          className={`account-movement ${totals.monthlyMovements[i] > 0 ? 'positive' : totals.monthlyMovements[i] < 0 ? 'negative' : ''}`}
+                        >
+                          {totals.monthlyMovements[i] !== 0 && (totals.monthlyMovements[i] > 0 ? '+' : '')}
+                          {formatCurrency(totals.monthlyMovements[i])}
+                        </div>
+                        <div className={`account-balance ${balance < 0 ? 'negative' : ''}`}>
+                          {formatCurrency(balance, true)}
+                        </div>
+                      </td>
+                    ))}
+                    {renderClosingBalance(totals.endOfYearBalance)}
+                  </tr>
+                ))}
             </tbody>
             <tfoot>
               <tr className="grand-total-row">
@@ -579,8 +589,9 @@ export default function Accounts({ year, months, onDataChanged, readOnly = false
 
   const renderTableView = () => (
     <>
-      {renderAccountTable(paymentAccounts, t('accounts.paymentAccounts'), paymentTotals)}
-      {renderAccountTable(savingsAccounts, t('accounts.savingsAccounts'), savingsTotals)}
+      {accountSections.map(({ key, accounts: sectionAccounts, title, totals }) => (
+        <Fragment key={key}>{renderAccountTable(sectionAccounts, title, totals)}</Fragment>
+      ))}
       {renderOverallTotal()}
     </>
   );

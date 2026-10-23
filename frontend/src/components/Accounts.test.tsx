@@ -1,4 +1,5 @@
 import { act } from 'react';
+import { Line } from 'react-chartjs-2';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Account } from '../api';
@@ -21,7 +22,7 @@ vi.mock('chart.js', () => ({
 }));
 
 vi.mock('react-chartjs-2', () => ({
-  Line: () => null,
+  Line: vi.fn(() => null),
 }));
 
 vi.mock('../utils/logger', () => ({
@@ -111,6 +112,7 @@ beforeEach(() => {
   mockedApi.restoreAccountBalanceLink.mockReset();
   mockedApi.restoreAccountBalanceLink.mockResolvedValue(undefined);
   mockedApi.setAccountBalance.mockResolvedValue(undefined);
+  vi.mocked(Line).mockClear();
 });
 
 afterEach(() => {
@@ -187,6 +189,74 @@ async function edit(container: HTMLElement, value: string) {
 }
 
 describe('account closing balances and links', () => {
+  it.each([
+    ['en', ['Payment accounts', 'Savings accounts', 'Investment accounts']],
+    ['fr', ['Comptes de paiement', "Comptes d'épargne", "Comptes d'investissement"]],
+  ])('separates investments and alphabetizes accounts with accurate totals in %s', async (locale, titles) => {
+    localStorage.setItem('tallix_locale', locale);
+    const fixtures = [
+      { id: 1, name: 'Zulu bonds', isSavingsAccount: true, savingsType: 'investissements' as const, balance: 70 },
+      { id: 2, name: 'Zulu checking', isSavingsAccount: false, balance: 20 },
+      { id: 3, name: 'Zulu savings', isSavingsAccount: true, savingsType: 'epargne' as const, balance: 40 },
+      {
+        id: 4,
+        name: 'alpha investments',
+        isSavingsAccount: true,
+        savingsType: 'investissements' as const,
+        balance: 60,
+      },
+      { id: 5, name: 'Pension', isSavingsAccount: true, savingsType: 'prevoyance' as const, balance: 50 },
+      { id: 6, name: 'alpha checking', isSavingsAccount: false, balance: 10 },
+      { id: 7, name: 'Épargne', isSavingsAccount: true, savingsType: null, balance: 30 },
+    ];
+    const { container } = await renderAccounts(
+      fixtures.map(({ balance, ...fields }) =>
+        account({
+          ...fields,
+          institution: null,
+          initialBalance: balance,
+          monthlyBalances: Array(12).fill(balance),
+          endOfYearBalance: balance,
+        })
+      )
+    );
+    const sections = Array.from(container.querySelectorAll('.accounts-section:not(.overall-total)'));
+    expect(sections.map((section) => section.querySelector('h3')?.textContent)).toEqual(titles);
+    expect(
+      sections.map((section) => Array.from(section.querySelectorAll('tbody .account-name'), (cell) => cell.textContent))
+    ).toEqual([
+      ['alpha checking', 'Zulu checking'],
+      ['Épargne', 'Pension', 'Zulu savings'],
+      ['alpha investments', 'Zulu bonds'],
+    ]);
+    expect(sections.map((section) => section.querySelector('tfoot .account-initial')?.textContent)).toEqual([
+      '30.00',
+      '120.00',
+      '130.00',
+    ]);
+    expect(sections.map((section) => section.querySelector('tfoot .account-closing')?.textContent)).toEqual([
+      '30.00',
+      '120.00',
+      '130.00',
+    ]);
+    expect(
+      Array.from(container.querySelectorAll('.overall-total tbody .account-closing'), (cell) => cell.textContent)
+    ).toEqual(['30.00', '120.00', '130.00']);
+    expect(container.querySelector('.overall-total tfoot .account-closing')?.textContent).toBe('280.00');
+
+    await click(container, '.accounts-tab:last-child');
+    expect(vi.mocked(Line).mock.calls[0][0].data.datasets.map((dataset) => dataset.label)).toEqual([
+      'alpha checking',
+      'alpha investments',
+      'Épargne',
+      'Pension',
+      'Zulu bonds',
+      'Zulu checking',
+      'Zulu savings',
+      'Total',
+    ]);
+  });
+
   it('shows December closing in all closing columns, including every subtotal and overall total', async () => {
     const { container } = await renderAccounts([
       account({ monthlyBalances: [100, ...Array(10).fill(200), 321], endOfYearBalance: 321 }),

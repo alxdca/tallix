@@ -620,6 +620,7 @@ export interface Account {
   institution: string | null;
   sortOrder: number;
   isSavingsAccount: boolean;
+  savingsType?: SavingsType | null;
   initialBalance: number;
   inheritedFromParent?: boolean;
   endOfYearBalance?: number;

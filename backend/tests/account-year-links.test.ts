@@ -84,6 +84,19 @@ afterAll(async () => {
 });
 
 describe('calculated closing and live year opening balances', () => {
+  it('includes savings types so account views can distinguish savings and investments', async () => {
+    const ctx = await setup();
+    expect(await ctx.account(2025)).toMatchObject({ isSavingsAccount: false, savingsType: null });
+    await adminDb
+      .update(schema.paymentMethods)
+      .set({ savingsType: 'investissements' })
+      .where(eq(schema.paymentMethods.id, ctx.savings.id));
+    expect(await ctx.account(2025, ctx.savings.id)).toMatchObject({
+      isSavingsAccount: true,
+      savingsType: 'investissements',
+    });
+  });
+
   it('migrates only legacy explicit parent start-year overrides, relinking all later snapshots', async () => {
     const migration = readFileSync(
       new URL('../drizzle/0036_add_opening_balance_overrides.sql', import.meta.url),
