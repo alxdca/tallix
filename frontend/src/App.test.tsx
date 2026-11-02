@@ -61,9 +61,6 @@ vi.mock('./components/Sidebar', () => ({
       <button type="button" onClick={() => props.onViewChange('transactions')}>
         Transactions
       </button>
-      <button type="button" onClick={() => props.onViewChange('transfers')}>
-        Transfers
-      </button>
       <button type="button" onClick={() => props.onViewChange('settings')}>
         Settings
       </button>
@@ -137,14 +134,6 @@ vi.mock('./components/Transactions', () => ({
   default: (props: any) => (
     <div data-testid="transactions" data-read-only={props.readOnly} data-year-id={props.yearId}>
       Transactions {props.year}
-    </div>
-  ),
-}));
-
-vi.mock('./components/Transfers', () => ({
-  default: (props: any) => (
-    <div data-testid="transfers" data-read-only={props.readOnly} data-year-id={props.yearId}>
-      Transfers {props.year}
       <button
         type="button"
         onClick={async () => {
@@ -357,7 +346,7 @@ describe('budget and year selection', () => {
     pendingTransferMutation = pending.promise;
     const { container } = await renderApp();
     await waitForText(container, 'Header 2026 remaining 2726');
-    click(container, 'Transfers');
+    click(container, 'Transactions');
     click(container, 'Save transfer');
 
     const yearSelect = container.querySelector<HTMLSelectElement>('select[aria-label="Year"]')!;
@@ -365,7 +354,7 @@ describe('budget and year selection', () => {
       yearSelect.value = '2025';
       yearSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    await waitForText(container, 'Transfers 2025');
+    await waitForText(container, 'Transactions 2025');
     const requestCount = mockedApi.fetchBudgetData.mock.calls.length;
     await act(async () => {
       pending.resolve();
@@ -375,37 +364,31 @@ describe('budget and year selection', () => {
 
     expect(mockedApi.fetchBudgetData).toHaveBeenCalledTimes(requestCount);
     expect(container.querySelector('[data-testid="header"]')?.textContent).toContain('Header 2025');
-    expect(container.querySelector('[data-testid="transfers"]')?.getAttribute('data-year-id')).toBe('20250');
+    expect(container.querySelector('[data-testid="transactions"]')?.getAttribute('data-year-id')).toBe('20250');
   });
 
-  it('opens independent transaction and transfer subpages with the current budget context and header', async () => {
+  it('keeps transactions and transfers on one page with the current budget context and header', async () => {
     const { container } = await renderApp();
     await waitForText(container, 'Header 2026 remaining 2726');
 
     click(container, 'Transactions');
     expect(container.querySelector('[data-testid="transactions"]')?.getAttribute('data-read-only')).toBe('false');
-    expect(container.querySelector('[data-testid="transfers"]')).toBeNull();
-
-    click(container, 'Transfers');
-    await waitForText(container, 'Transfers 2026');
-    expect(container.querySelector('[data-testid="transfers"]')?.getAttribute('data-year-id')).toBe('20260');
-    expect(container.querySelector('[data-testid="transactions"]')).toBeNull();
+    await waitForText(container, 'Transactions 2026');
+    expect(container.querySelector('[data-testid="transactions"]')?.getAttribute('data-year-id')).toBe('20260');
     expect(container.querySelector('[data-testid="header"]')).not.toBeNull();
     const yearSelect = container.querySelector<HTMLSelectElement>('select[aria-label="Year"]')!;
     act(() => {
       yearSelect.value = '2025';
       yearSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    await waitForText(container, 'Transfers 2025');
-    expect(container.querySelector('[data-testid="transfers"]')?.getAttribute('data-year-id')).toBe('20250');
+    await waitForText(container, 'Transactions 2025');
+    expect(container.querySelector('[data-testid="transactions"]')?.getAttribute('data-year-id')).toBe('20250');
     expect(container.querySelector('[data-testid="header"]')?.textContent).toContain('2025');
 
     changeBudget(container, '3');
     await waitForText(container, 'Header 2027 remaining 2727');
-    click(container, 'Transfers');
-    await waitForText(container, 'Transfers 2027');
-    expect(container.querySelector('[data-testid="transfers"]')?.getAttribute('data-read-only')).toBe('true');
     click(container, 'Transactions');
+    await waitForText(container, 'Transactions 2027');
     expect(container.querySelector('[data-testid="transactions"]')?.getAttribute('data-read-only')).toBe('true');
     click(container, 'Accounts');
     expect(container.querySelector('[data-testid="accounts"]')?.getAttribute('data-read-only')).toBe('true');

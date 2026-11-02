@@ -198,25 +198,6 @@ input[type="number"]::-webkit-inner-spin-button {
   overflow-y: auto;
 }
 
-.nav-subpages {
-  margin: 2px 0 4px 24px;
-  padding-left: 8px;
-  border-left: 1px solid var(--border-color);
-}
-
-.nav-subpages .nav-sub-item {
-  margin-top: 2px;
-  font-size: 0.875rem;
-}
-
-.nav-item.nav-group-active {
-  color: var(--text-primary);
-}
-
-.nav-item.nav-group-active .nav-icon {
-  color: var(--accent-budget-light);
-}
-
 .nav-item {
   display: flex;
   align-items: center;
@@ -1130,12 +1111,6 @@ td.zero {
   .nav-item {
     justify-content: center;
     padding: 12px;
-  }
-
-  .nav-subpages {
-    margin-left: 0;
-    padding-left: 0;
-    border-left: none;
   }
 
   .header {
@@ -2643,33 +2618,6 @@ td.zero {
 
 .transactions-table .col-description {
   width: 180px;
-}
-
-.transfer-records-table {
-  min-width: 1200px;
-}
-
-.transfer-records-table .col-accounting {
-  width: 200px;
-}
-
-.transfer-records-table .col-source,
-.transfer-records-table .col-destination {
-  width: 200px;
-}
-
-.transfer-records-table .accounting-cell {
-  white-space: normal;
-  overflow-wrap: normal;
-}
-
-.transfer-records-table .transfer-accounting-edit-cell,
-.transfer-records-table .transfer-edit-accounts {
-  display: table-cell;
-}
-
-.transfer-records-table .transfer-accounting-group {
-  flex-wrap: wrap;
 }
 
 @media (max-width: 768px) {
@@ -5711,6 +5659,47 @@ td.zero {
 .transfers-view .btn-delete:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Transfer form elements */
+.form-select.account-select {
+  flex: 1;
+  min-width: 150px;
+}
+
+/* Transaction/Transfer Type Toggle */
+.form-type-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.type-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--border-radius);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.type-toggle-btn:hover {
+  background: var(--bg-tertiary);
+}
+
+.type-toggle-btn.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: white;
+}
+
+.type-toggle-btn.active svg {
+  stroke: white;
 }
 
 /* Transfer form elements */

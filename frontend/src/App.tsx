@@ -23,7 +23,6 @@ import Login from './components/Login';
 import Settings from './components/Settings';
 import Sidebar from './components/Sidebar';
 import Transactions from './components/Transactions';
-import Transfers from './components/Transfers';
 import UserSettings from './components/UserSettings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { I18nProvider, useI18n } from './contexts/I18nContext';
@@ -311,7 +310,7 @@ function AppContent() {
     );
 
   // Views that should show the budget header with balance boxes
-  const budgetViews = ['current', 'budget-planning', 'playground', 'transactions', 'transfers', 'accounts', 'assets'];
+  const budgetViews = ['current', 'budget-planning', 'playground', 'transactions', 'accounts', 'assets'];
   const showBudgetHeader = budgetViews.includes(activeView) && !loading && !error;
 
   const renderContent = () => {
@@ -367,15 +366,6 @@ function AppContent() {
             year={currentYear}
             yearId={yearId}
             groups={budgetData?.groups || []}
-            onTransactionsChanged={refreshData}
-            readOnly={activeBudget?.role === 'read'}
-          />
-        );
-      case 'transfers':
-        return (
-          <Transfers
-            year={currentYear}
-            yearId={yearId}
             onTransactionsChanged={refreshData}
             readOnly={activeBudget?.role === 'read'}
           />

@@ -32,7 +32,7 @@ Potential duplicates are highlighted with a warning background. You can dismiss 
 
 ## Transfers
 
-Transfers represent money moved between accounts and do not affect budget categories. Keep them separate from standard transactions to avoid inflating expenses or income.
+Transfers represent money moved between accounts and do not affect budget categories. They appear alongside transactions in the Transactions view, where you can create, edit, delete, and reorder both types. Use the form type selector to add a transfer and the category filter to show only transfers. Transfers never increase income or expense totals. Each transfer shows its source and destination accounts and accounting periods.
 
 Transfers have one accounting period per side. The source side uses the source payment method settlement day, and the destination side uses the destination payment method settlement day. For example, a card top-up into Revolut can debit the card in September while crediting Revolut in August.
 

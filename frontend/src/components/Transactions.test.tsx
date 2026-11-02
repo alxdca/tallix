@@ -245,6 +245,23 @@ function selectByClass(container: HTMLElement, className: string): HTMLSelectEle
   return select;
 }
 
+function setPaymentMethodFilter(container: HTMLElement, labelText: string) {
+  const option = Array.from(container.querySelectorAll<HTMLLabelElement>('.multi-select-option')).find((label) =>
+    label.textContent?.includes(labelText)
+  );
+  const checkbox = option?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+  if (!checkbox) throw new Error(`Missing payment method filter ${labelText}`);
+  act(() => {
+    checkbox.click();
+  });
+}
+
+function click(container: HTMLElement, selector: string) {
+  const button = container.querySelector<HTMLButtonElement>(selector);
+  if (!button) throw new Error(`Missing button ${selector}`);
+  act(() => button.click());
+}
+
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   localStorage.clear();
@@ -295,7 +312,7 @@ describe('transaction filters', () => {
     });
     expect(commentFilter.value).toBe('');
     expect(selectByClass(container, 'accounting-period-filter').value).toBe('');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(5);
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(6);
     expect(container.querySelector('.btn-clear-filters')).toBeNull();
   });
 
@@ -343,7 +360,30 @@ describe('transaction filters', () => {
     expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(0);
   });
 
-  it('filters transactions by accounting month and year, then clears the filter', async () => {
+  it('counts savings only in the savings side accounting period', async () => {
+    const { container } = await renderTransactions(
+      [],
+      [
+        transfer({
+          date: '2026-08-24',
+          accountingMonth: 9,
+          accountingYear: 2026,
+          sourceAccountingMonth: 9,
+          sourceAccountingYear: 2026,
+          destinationAccountingMonth: 8,
+          destinationAccountingYear: 2026,
+        }),
+      ]
+    );
+    const accountingFilter = selectByClass(container, 'accounting-period-filter');
+    change(accountingFilter, '2026-8');
+    expect(container.querySelector('.summary-item.savings')).not.toBeNull();
+    change(accountingFilter, '2026-9');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+    expect(container.querySelector('.summary-item.savings')).toBeNull();
+  });
+
+  it('filters transactions and transfers by accounting month and year, then clears the filter', async () => {
     const { container } = await renderTransactions(
       [
         transaction({ id: 1, description: 'February purchase' }),
@@ -362,9 +402,9 @@ describe('transaction filters', () => {
     ]);
 
     change(accountingFilter, '2026-2');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(2);
     expect(container.textContent).toContain('February purchase');
-    expect(container.textContent).not.toContain('February transfer');
+    expect(container.textContent).toContain('February transfer');
     expect(container.textContent).not.toContain('Next-year purchase');
     expect(container.textContent).not.toContain('March purchase');
 
@@ -372,11 +412,90 @@ describe('transaction filters', () => {
       container.querySelector<HTMLButtonElement>('.btn-clear-filters')!.click();
     });
     expect(accountingFilter.value).toBe('');
-    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(3);
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(4);
 
     change(accountingFilter, '2027-2');
     expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
     expect(container.textContent).toContain('Next-year purchase');
+  });
+
+  it('matches a split-period transfer from either accounting side without duplicating the row', async () => {
+    const { container } = await renderTransactions(
+      [],
+      [
+        transfer({
+          id: 11,
+          date: '2026-08-24',
+          description: 'Revolut top-up',
+          sourceAccount: transferAccounts[1],
+          destinationAccount: transferAccounts[0],
+          accountingMonth: 9,
+          accountingYear: 2026,
+          sourceAccountingMonth: 9,
+          sourceAccountingYear: 2026,
+          destinationAccountingMonth: 8,
+          destinationAccountingYear: 2026,
+        }),
+      ]
+    );
+
+    expect(container.textContent).toContain('September 2026 → August 2026');
+
+    const accountingFilter = selectByClass(container, 'accounting-period-filter');
+    expect(Array.from(accountingFilter.options).map((option) => option.value)).toEqual(['', '2026-8', '2026-9']);
+
+    change(accountingFilter, '2026-8');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+    expect(container.textContent).toContain('Revolut top-up');
+
+    change(accountingFilter, '2026-9');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+    expect(container.textContent).toContain('Revolut top-up');
+  });
+
+  it('correlates accounting month and payment method filters to the same transfer side', async () => {
+    const { container } = await renderTransactions(
+      [],
+      [
+        transfer({
+          id: 12,
+          date: '2026-08-24',
+          description: 'Cembra to Revolut',
+          sourceAccount: transferAccounts[1],
+          destinationAccount: transferAccounts[0],
+          accountingMonth: 9,
+          accountingYear: 2026,
+          sourceAccountingMonth: 9,
+          sourceAccountingYear: 2026,
+          destinationAccountingMonth: 8,
+          destinationAccountingYear: 2026,
+        }),
+      ]
+    );
+
+    const accountingFilter = selectByClass(container, 'accounting-period-filter');
+    setPaymentMethodFilter(container, 'Credit Card');
+    change(accountingFilter, '2026-9');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+    expect(container.textContent).toContain('Cembra to Revolut');
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('.btn-clear-filters')!.click();
+    });
+    await flush();
+    setPaymentMethodFilter(container, 'Checking (Bank)');
+    change(accountingFilter, '2026-9');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(0);
+    expect(container.textContent).not.toContain('Cembra to Revolut');
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('.btn-link')!.click();
+    });
+    await flush();
+    setPaymentMethodFilter(container, 'Checking (Bank)');
+    change(selectByClass(container, 'accounting-period-filter'), '2026-8');
+    expect(container.querySelectorAll('.transactions-table tbody tr')).toHaveLength(1);
+    expect(container.textContent).toContain('Cembra to Revolut');
   });
 });
 
@@ -414,7 +533,7 @@ describe('new transaction form', () => {
     expect(selectByClass(container, 'payment-method-select').value).toBe('');
     expect(selectByClass(container, 'category-select').value).toBe('');
     expect(mockedApi.fetchTransactions).toHaveBeenCalledTimes(2);
-    expect(mockedApi.fetchTransfers).not.toHaveBeenCalled();
+    expect(mockedApi.fetchTransfers).toHaveBeenCalledTimes(2);
     expect(onTransactionsChanged).toHaveBeenCalledTimes(1);
   });
 
@@ -532,6 +651,187 @@ describe('new transaction form', () => {
   });
 });
 
+describe('new transfer form', () => {
+  it.each([
+    ['24/08/2026', '2026-08-24', 9, 2026, 8],
+    ['20/08/2026', '2026-08-20', 9, 2026, 8],
+    ['24/12/2026', '2026-12-24', 1, 2027, 12],
+  ])('uses each account cutoff when creating a transfer on %s', async (displayDate, isoDate, sourceMonth, sourceYear, destinationMonth) => {
+    mockedApi.fetchPaymentMethods.mockResolvedValueOnce(
+      paymentMethods.map((method) => ({
+        ...method,
+        settlementDay: method.id === 101 ? 20 : null,
+      }))
+    );
+    mockedApi.createTransfer.mockResolvedValue(transfer({ id: 99 }));
+    const { container } = await renderTransactions([], []);
+    act(() => {
+      Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent?.includes('Transfer'))!
+        .click();
+    });
+    change(byPlaceholder(container, 'DD/MM/YYYY'), displayDate);
+    const accountSelects = container.querySelectorAll<HTMLSelectElement>('select.account-select');
+    change(accountSelects[0], '101');
+    change(accountSelects[1], '100');
+    change(byPlaceholder(container, 'Amount'), '200');
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="Source accounting month"]')!.value).toBe(
+      String(sourceMonth)
+    );
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="Destination accounting month"]')!.value).toBe(
+      String(destinationMonth)
+    );
+    submit(container.querySelector('form.transaction-form')!);
+    await flush();
+    expect(mockedApi.createTransfer).toHaveBeenCalledWith(
+      2026,
+      expect.objectContaining({
+        date: isoDate,
+        amount: 200,
+        sourceAccountId: 101,
+        destinationAccountId: 100,
+        sourceAccountingMonth: sourceMonth,
+        sourceAccountingYear: sourceYear,
+        destinationAccountingMonth: destinationMonth,
+        destinationAccountingYear: 2026,
+      })
+    );
+  });
+
+  it('creates a transfer and resets transfer-only fields after success', async () => {
+    mockedApi.createTransfer.mockResolvedValue(transfer({ id: 99 }));
+    const { container } = await renderTransactions();
+
+    act(() => {
+      Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent?.includes('Transfer'))
+        ?.click();
+    });
+    expect(container.querySelector('input[placeholder="Comment"]')).toBeNull();
+    change(byPlaceholder(container, 'DD/MM/YYYY'), '17/03/2026');
+    change(selectByClass(container, 'account-select'), '100');
+    const accountSelects = container.querySelectorAll<HTMLSelectElement>('select.account-select');
+    change(accountSelects[1], '200');
+    change(byPlaceholder(container, 'Description (optional)'), '  Save it  ');
+    change(byPlaceholder(container, 'Amount'), '125');
+    submit(container.querySelector('form.transaction-form')!);
+    await flush();
+
+    expect(mockedApi.createTransfer).toHaveBeenCalledWith(2026, {
+      date: '2026-03-17',
+      amount: 125,
+      description: 'Save it',
+      sourceAccountId: 100,
+      destinationAccountId: 200,
+      sourceAccountingMonth: 3,
+      sourceAccountingYear: 2026,
+      destinationAccountingMonth: 3,
+      destinationAccountingYear: 2026,
+    });
+    expect(byPlaceholder(container, 'DD/MM/YYYY').value).toBe('17/03/2026');
+    expect(accountSelects[0].value).toBe('');
+    expect(accountSelects[1].value).toBe('');
+    expect(byPlaceholder(container, 'Description (optional)').value).toBe('');
+    expect(byPlaceholder(container, 'Amount').value).toBe('');
+  });
+});
+
+describe('transfer editing', () => {
+  it('saves a manual destination accounting period without changing the source period', async () => {
+    mockedApi.updateTransfer.mockResolvedValue(
+      transfer({
+        id: 7,
+        date: '2026-08-24',
+        description: 'Revolut top-up',
+        sourceAccount: transferAccounts[1],
+        destinationAccount: transferAccounts[0],
+        accountingMonth: 9,
+        accountingYear: 2026,
+        sourceAccountingMonth: 9,
+        sourceAccountingYear: 2026,
+        destinationAccountingMonth: 8,
+        destinationAccountingYear: 2026,
+      })
+    );
+    const { container } = await renderTransactions(
+      [],
+      [
+        transfer({
+          id: 7,
+          date: '2026-08-24',
+          description: 'Revolut top-up',
+          sourceAccount: transferAccounts[1],
+          destinationAccount: transferAccounts[0],
+          accountingMonth: 9,
+          accountingYear: 2026,
+          sourceAccountingMonth: 9,
+          sourceAccountingYear: 2026,
+          destinationAccountingMonth: 9,
+          destinationAccountingYear: 2026,
+        }),
+      ]
+    );
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('button.btn-icon.edit')!.click();
+    });
+
+    change(container.querySelector<HTMLSelectElement>('select[aria-label="Destination accounting month"]')!, '8');
+    act(() => {
+      container.querySelector<HTMLButtonElement>('button.btn-icon.save')!.click();
+    });
+    await flush();
+
+    expect(mockedApi.updateTransfer).toHaveBeenCalledWith(7, {
+      date: '2026-08-24',
+      amount: 50,
+      description: 'Revolut top-up',
+      sourceAccountId: 101,
+      destinationAccountId: 100,
+      destinationAccountingMonth: 8,
+      destinationAccountingYear: 2026,
+    });
+  });
+
+  it('does not send accounting periods when only ordinary transfer fields change', async () => {
+    mockedApi.updateTransfer.mockResolvedValue(transfer({ id: 8, description: 'Renamed transfer' }));
+    const { container } = await renderTransactions(
+      [],
+      [
+        transfer({
+          id: 8,
+          description: 'Original transfer',
+          sourceAccountingMonth: 2,
+          sourceAccountingYear: 2026,
+          destinationAccountingMonth: 2,
+          destinationAccountingYear: 2026,
+        }),
+      ]
+    );
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('button.btn-icon.edit')!.click();
+    });
+    const descriptionInput = Array.from(container.querySelectorAll<HTMLInputElement>('input.edit-input')).find(
+      (input) => input.value === 'Original transfer'
+    );
+    if (!descriptionInput) throw new Error('Missing transfer description input');
+    change(descriptionInput, 'Renamed transfer');
+    act(() => {
+      container.querySelector<HTMLButtonElement>('button.btn-icon.save')!.click();
+    });
+    await flush();
+
+    expect(mockedApi.updateTransfer).toHaveBeenCalledWith(8, {
+      date: '2026-02-04',
+      amount: 50,
+      description: 'Renamed transfer',
+      sourceAccountId: 100,
+      destinationAccountId: 200,
+    });
+  });
+});
+
 describe('new transaction typing render cost', () => {
   it('does not reformat table dates when typing in the add form draft fields', async () => {
     const dateSpy = vi.spyOn(utils, 'formatDateDisplay');
@@ -548,13 +848,7 @@ describe('new transaction typing render cost', () => {
   });
 });
 
-function click(container: HTMLElement, selector: string) {
-  const button = container.querySelector<HTMLButtonElement>(selector);
-  if (!button) throw new Error(`Missing button ${selector}`);
-  act(() => button.click());
-}
-
-describe('transaction mutation contracts', () => {
+describe('unified mutation and role boundaries', () => {
   it('saves ordinary fields without changing accounting and cancels without writing', async () => {
     const onChanged = vi.fn();
     const { container } = await renderTransactions([transaction()], [], onChanged);
@@ -640,7 +934,7 @@ describe('transaction mutation contracts', () => {
     ]);
   });
 
-  it('reorders all same-date transactions including filtered records and retains order after reload', async () => {
+  it('reorders same-date transactions and transfers including filtered records and retains order after reload', async () => {
     const rows = [
       transaction({ id: 1, description: 'Visible one' }),
       transaction({ id: 2, description: 'Hidden two' }),
@@ -652,15 +946,18 @@ describe('transaction mutation contracts', () => {
     click(container, 'tbody tr:last-child .reorder');
     await flush();
     expect(mockedApi.reorderTransactionEntries).toHaveBeenCalledWith([
-      { type: 'transaction', id: 3, sortPriority: 3 },
-      { type: 'transaction', id: 2, sortPriority: 1 },
-      { type: 'transaction', id: 1, sortPriority: 2 },
+      { type: 'transaction', id: 3, sortPriority: 4 },
+      { type: 'transaction', id: 2, sortPriority: 2 },
+      { type: 'transaction', id: 1, sortPriority: 3 },
+      { type: 'transfer', id: 99, sortPriority: 1 },
     ]);
+    mockedApi.fetchTransfers.mockResolvedValue([transfer({ id: 99, date: '2026-02-03', sortPriority: 1 })]);
     click(container, '.btn-clear-filters');
     expect(Array.from(container.querySelectorAll('tbody .description-cell')).map((cell) => cell.textContent)).toEqual([
       'Visible three',
       'Visible one',
       'Hidden two',
+      'Move to savings',
     ]);
     click(container, '.btn-icon.edit');
     click(container, '.btn-icon.save');
@@ -669,6 +966,7 @@ describe('transaction mutation contracts', () => {
       'Visible three',
       'Visible one',
       'Hidden two',
+      'Move to savings',
     ]);
   });
 });
@@ -680,19 +978,6 @@ function handler(element: Element, name: string): (...args: unknown[]) => void {
 }
 
 describe('transaction domain and role boundaries', () => {
-  it('loads transaction data only and excludes transfer rows, controls and summaries', async () => {
-    const { container } = await renderTransactions([transaction()], [transfer()]);
-    expect(mockedApi.fetchTransfers).not.toHaveBeenCalled();
-    expect(mockedApi.fetchTransferAccounts).not.toHaveBeenCalled();
-    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
-    expect(container.textContent).not.toContain('Move to savings');
-    expect(container.querySelector('.form-type-toggle')).toBeNull();
-    expect(container.querySelector('.account-select')).toBeNull();
-    expect(container.querySelector('option[value="section:transfer"]')).toBeNull();
-    expect(container.querySelector('.summary-item.savings')).toBeNull();
-    expect(container.querySelector('.btn-import')).not.toBeNull();
-  });
-
   it('allows read-only filtering while disabling every mutation control', async () => {
     const { container } = await renderTransactions(
       [transaction({ warning: 'potential_duplicate' })],
@@ -779,5 +1064,37 @@ describe('transaction domain and role boundaries', () => {
     expect(
       Array.from(container.querySelectorAll<HTMLButtonElement>('.reorder')).every((button) => button.disabled)
     ).toBe(true);
+  });
+});
+
+describe('combined transfer actions', () => {
+  it('deletes transactions and transfers with overlapping IDs from the same selection', async () => {
+    const { container } = await renderTransactions([transaction()], [transfer()]);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+    click(container, 'thead input[type="checkbox"]');
+    click(container, '.transactions-actions .btn-danger');
+    expect(mockedApi.deleteTransfer).not.toHaveBeenCalled();
+    click(container, '.confirm-dialog-btn.confirm');
+    await flush();
+    expect(mockedApi.bulkDeleteTransactions).toHaveBeenCalledWith([1]);
+    expect(mockedApi.deleteTransfer).toHaveBeenCalledWith(1);
+  });
+
+  it('allows read-only users to filter transfers in a transfer-only year', async () => {
+    const { container } = await renderTransactions([], [transfer()], vi.fn(), true);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(container.textContent).toContain('Move to savings');
+    expect(container.querySelector('.transaction-form, .edit, .delete')).toBeNull();
+    change(container.querySelector('.filter-row th:nth-child(6) input')!, 'no match');
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(0);
+  });
+
+  it('blocks a pending transfer delete when write access is revoked', async () => {
+    const { container, setReadOnly } = await renderTransactions([], [transfer()]);
+    click(container, '.btn-icon.delete');
+    setReadOnly(true);
+    click(container, '.confirm-dialog-btn.confirm');
+    await flush();
+    expect(mockedApi.deleteTransfer).not.toHaveBeenCalled();
   });
 });

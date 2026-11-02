@@ -165,51 +165,24 @@ describe('shareable budget selector', () => {
     expect(onViewChange).not.toHaveBeenCalledWith(expect.stringContaining('archive-'));
   });
 
-  it('groups transaction subpages without a year and keeps the budget view reachable', async () => {
-    const { container, onViewChange } = await renderSidebar();
-    const nav = container.querySelector('nav');
-    const buttons = Array.from(nav?.querySelectorAll('button') ?? []);
-
+  it('keeps a single Transactions page without transfer subpages', async () => {
+    const { container, onViewChange } = await renderSidebar({ activeView: 'transactions' });
+    const nav = container.querySelector('nav')!;
+    const buttons = Array.from(nav.querySelectorAll('button'));
     expect(buttons.map((button) => button.textContent?.trim())).toEqual([
       'Budget',
       'Transactions',
-      'Transactions',
-      'Transfers',
       'Accounts',
       'Planning',
       'Playground',
       'Assets',
       'Settings',
     ]);
-    expect(nav?.textContent).not.toContain('2026');
-    const group = nav?.querySelector('.nav-group');
-    expect(group?.getAttribute('aria-label')).toBe('Transactions');
-    expect(Array.from(group?.querySelectorAll('.nav-sub-item') ?? [], (button) => button.textContent?.trim())).toEqual([
-      'Transactions',
-      'Transfers',
-    ]);
-
-    act(() => {
-      buttons[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(onViewChange).toHaveBeenCalledWith('current');
-  });
-
-  it.each(['transactions', 'transfers'])('marks only the %s child as the current page', async (activeView) => {
-    const { container, onViewChange } = await renderSidebar({ activeView });
-    const group = container.querySelector('.nav-group')!;
-    const children = Array.from(group.querySelectorAll<HTMLButtonElement>('.nav-sub-item'));
-    expect(children.filter((button) => button.getAttribute('aria-current') === 'page')).toHaveLength(1);
-    expect(children.find((button) => button.getAttribute('aria-current') === 'page')?.textContent?.trim()).toBe(
-      activeView === 'transfers' ? 'Transfers' : 'Transactions'
-    );
-    act(() => {
-      children[1].click();
-    });
-    expect(onViewChange).toHaveBeenCalledWith('transfers');
-    act(() => {
-      group.querySelector<HTMLButtonElement>('.nav-item')!.click();
-    });
-    expect(onViewChange).toHaveBeenLastCalledWith('transactions');
+    expect(nav.querySelector('.nav-subpages')).toBeNull();
+    expect(nav.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('Transactions');
+    act(() => buttons[1].click());
+    expect(onViewChange).toHaveBeenCalledWith('transactions');
+    act(() => buttons[0].click());
+    expect(onViewChange).toHaveBeenLastCalledWith('current');
   });
 });

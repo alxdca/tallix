@@ -1,0 +1,13 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import Transactions from './src/components/Transactions';
+import { I18nProvider } from './src/contexts/I18nContext';
+import { SettingsProvider } from './src/contexts/SettingsContext';
+import './src/styles/index.css';
+const source = { id: 100, name: 'Checking', institution: 'Bank', isSavingsAccount: false };
+const destination = { id: 200, name: 'Savings', institution: 'Bank', isSavingsAccount: true };
+const transaction = { id: 1, date: '2026-02-03', description: 'Weekly groceries', comment: null, thirdParty: 'Market', paymentMethodId: 100, paymentMethod: 'Checking (Bank)', amount: 12.5, itemId: 20, itemName: 'Groceries', groupName: 'Expenses', groupType: 'expense', accountingMonth: 2, accountingYear: 2026, sortPriority: null, warning: null };
+const transfer = { id: 1, date: '2026-02-04', amount: 50, description: 'Move to savings', sourceAccount: source, destinationAccount: destination, accountingMonth: 2, accountingYear: 2026, sortPriority: null };
+window.fetch = async (url) => new Response(JSON.stringify(String(url).includes('/transfers/') ? [transfer] : String(url).includes('/transactions/') ? [transaction] : String(url).includes('/payment-methods') ? [source,destination] : []), { status: 200, headers: { 'Content-Type': 'application/json' } });
+localStorage.setItem('tallix_locale', 'en');
+createRoot(document.getElementById('root')!).render(<I18nProvider><SettingsProvider><main style={{ padding: 32 }}><Transactions year={2026} yearId={77} groups={[]} readOnly /></main></SettingsProvider></I18nProvider>);
