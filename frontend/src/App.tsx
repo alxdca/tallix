@@ -6,6 +6,7 @@ import {
   createBudget,
   createBudgetYear,
   deleteBudget,
+  deleteBudgetYear,
   fetchAccounts,
   fetchBudgetData,
   fetchBudgetSummary,
@@ -194,6 +195,8 @@ function AppContent() {
     [t, selectedYear, activeBudgetId]
   );
 
+  const loadDataRef = useRef(loadData);
+  loadDataRef.current = loadData;
   const refreshData = useCallback(() => loadData(true), [loadData]);
 
   useEffect(() => {
@@ -267,6 +270,39 @@ function AppContent() {
     [activeBudget, resetBudgetData]
   );
 
+  const handleDeleteYear = useCallback(
+    async (year: number, budgetId: number) => {
+      if (
+        !activeBudget ||
+        activeBudget.id !== budgetId ||
+        activeBudget.role !== 'owner' ||
+        !activeBudget.years.includes(year) ||
+        activeBudget.years.length <= 1 ||
+        localStorage.getItem(ACTIVE_BUDGET_KEY) !== String(budgetId)
+      )
+        return;
+      await deleteBudgetYear(year);
+      const remainingYears = activeBudget.years.filter((candidate) => candidate !== year);
+      setAvailableBudgets((current) =>
+        current.map((budget) =>
+          budget.id === budgetId ? { ...budget, years: budget.years.filter((candidate) => candidate !== year) } : budget
+        )
+      );
+      const rememberedYear = Number(localStorage.getItem(budgetYearKey(budgetId)));
+      const replacementYear = Math.max(...remainingYears.filter((candidate) => candidate < year));
+      const nextYear = Number.isFinite(replacementYear) ? replacementYear : Math.min(...remainingYears);
+      if (rememberedYear === year) localStorage.setItem(budgetYearKey(budgetId), String(nextYear));
+      if (localStorage.getItem(ACTIVE_BUDGET_KEY) !== String(budgetId)) return;
+      if (rememberedYear === year) {
+        resetBudgetData();
+        setSelectedYear(nextYear);
+      } else {
+        await loadDataRef.current(true);
+      }
+    },
+    [activeBudget, resetBudgetData]
+  );
+
   const handleCreateBudget = useCallback(
     async (year: number, description: string, parentBudgetId: number | null) => {
       const budget = await createBudget(year, description.trim(), parentBudgetId);
@@ -322,6 +358,7 @@ function AppContent() {
           onCreateBudget={handleCreateBudget}
           onDeleteBudget={handleDeleteBudget}
           onCreateYear={handleCreateYear}
+          onDeleteYear={handleDeleteYear}
         />
       );
     }

@@ -21,6 +21,7 @@ vi.mock('./api', () => ({
   createBudget: vi.fn(),
   createBudgetYear: vi.fn(),
   deleteBudget: vi.fn(),
+  deleteBudgetYear: vi.fn(),
   fetchAccounts: vi.fn(),
   fetchBudgetData: vi.fn(),
   fetchBudgetSummary: vi.fn(),
@@ -151,6 +152,9 @@ vi.mock('./components/UserSettings', () => ({
   default: (props: any) => (
     <div data-testid="user-settings">
       User settings active {props.activeBudgetId}
+      <button type="button" onClick={() => void props.onDeleteYear(2026, props.activeBudgetId).catch(() => undefined)}>
+        Delete year 2026
+      </button>
       <button type="button" onClick={() => void props.onCreateYear(2028).catch(() => undefined)}>
         Add 2028
       </button>
@@ -258,6 +262,7 @@ function setupApi() {
   mockedApi.fetchBudgetData.mockImplementation(async (year = 2026) => budgetData(year));
   mockedApi.fetchBudgetSummary.mockImplementation(async (year = 2026) => summary(year));
   mockedApi.fetchAccounts.mockImplementation(async (year: number) => accounts(year));
+  mockedApi.deleteBudgetYear.mockResolvedValue(undefined);
   mockedApi.createBudgetYear.mockResolvedValue({ id: 20280, year: 2028 });
   mockedApi.createBudget.mockResolvedValue(budget({ id: 4, year: 2030, description: 'Roadtrip' }) as any);
   mockedApi.deleteBudget.mockResolvedValue({ budgets: accessibleBudgets.slice(1) as any, defaultBudgetId: 2 });
@@ -622,6 +627,74 @@ describe('budget and year selection', () => {
     expect(mockedApi.createBudget).not.toHaveBeenCalled();
     expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('1');
     expect(container.querySelectorAll('select[aria-label="Budget"] option')).toHaveLength(4);
+  });
+
+  it('deletes the selected year and remembers the preceding remaining year', async () => {
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    click(container, 'My account');
+    click(container, 'Delete year 2026');
+    await flush();
+    expect(mockedApi.deleteBudgetYear).toHaveBeenCalledWith(2026);
+    expect(localStorage.getItem('tallix_active_budget_year:1')).toBe('2025');
+    expect(container.querySelector('select[aria-label="Year"] option[value="2026"]')).toBeNull();
+    click(container, 'Current');
+    await waitForText(container, 'Header 2025');
+  });
+
+  it('selects the earliest remaining year when deleting the first year', async () => {
+    mockedApi.fetchBudgets.mockResolvedValueOnce({
+      budgets: [budget({ id: 1, year: 2026, years: [2026, 2028] })],
+      defaultBudgetId: 1,
+    });
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    click(container, 'My account');
+    click(container, 'Delete year 2026');
+    await flush();
+    expect(localStorage.getItem('tallix_active_budget_year:1')).toBe('2028');
+    click(container, 'Current');
+    await waitForText(container, 'Header 2028');
+  });
+
+  it('does not delete years through a collaborator callback', async () => {
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    changeBudget(container, '5');
+    await flush();
+    click(container, 'My account');
+    click(container, 'Delete year 2026');
+    await flush();
+    expect(mockedApi.deleteBudgetYear).not.toHaveBeenCalled();
+  });
+
+  it('preserves the year and selection when year deletion fails', async () => {
+    mockedApi.deleteBudgetYear.mockRejectedValueOnce(new Error('network down'));
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    click(container, 'My account');
+    click(container, 'Delete year 2026');
+    await flush();
+    expect(localStorage.getItem('tallix_active_budget_year:1')).toBe('2026');
+    expect(container.querySelector('select[aria-label="Year"] option[value="2026"]')).not.toBeNull();
+  });
+
+  it('keeps a newly selected budget when a previous budget year deletion finishes', async () => {
+    const pending = deferred<void>();
+    mockedApi.deleteBudgetYear.mockReturnValueOnce(pending.promise);
+    const { container } = await renderApp();
+    await waitForText(container, 'Header 2026');
+    click(container, 'My account');
+    click(container, 'Delete year 2026');
+    changeBudget(container, '3');
+    await waitForText(container, 'Header 2027');
+    pending.resolve();
+    await flush();
+    expect(localStorage.getItem(api.ACTIVE_BUDGET_KEY)).toBe('3');
+    expect(container.textContent).toContain('Header 2027');
+    expect(localStorage.getItem('tallix_active_budget_year:1')).toBe('2025');
+    changeBudget(container, '1');
+    await waitForText(container, 'Header 2025');
   });
 
   it('ignores a saved year that does not belong to the selected budget', async () => {

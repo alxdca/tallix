@@ -45,9 +45,9 @@ router.get(
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const selectedYear = req.budget!.startYear;
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const selectedYear = await withTenantContext(userId, budgetId, (tx) => budgetSvc.getStartYear(tx, budgetId));
     const transactions = await withTenantContext(userId, budgetId, (tx) =>
       transactionsSvc.getTransactionsForYear(tx, selectedYear, budgetId)
     );

@@ -12,6 +12,7 @@ import {
   transactions,
   transfers,
 } from '../db/schema.js';
+import { AppError } from '../middleware/errorHandler.js';
 import type { AnnualTotals, BudgetData, BudgetGroup, BudgetItem, BudgetSummary, MonthlyValue } from '../types.js';
 import * as accountsSvc from './accounts.js';
 
@@ -538,6 +539,32 @@ export async function getAllYears(tx: DbClient, budgetId: number) {
     year: y.year,
     initialBalance: parseFloat(y.initialBalance),
   }));
+}
+
+// Serialize deletions per budget so concurrent requests cannot remove its last two years.
+export async function deleteYear(tx: DbClient, year: number, budgetId: number, userId: string) {
+  const ownedBudgets = await tx.execute(sql`
+    SELECT ${budgets.id} FROM ${budgets}
+    WHERE ${budgets.id} = ${budgetId} AND ${budgets.userId} = ${userId}
+    FOR UPDATE
+  `);
+  if (ownedBudgets.length === 0) {
+    throw new AppError(403, 'Only the budget owner can perform this action');
+  }
+
+  const existing = await getBudgetYear(tx, year, budgetId);
+  if (!existing) return null;
+  const years = await getAllYears(tx, budgetId);
+  if (years.length <= 1) {
+    throw new AppError(400, 'Cannot delete the last year of a budget', { code: 'CANNOT_DELETE_LAST_BUDGET_YEAR' });
+  }
+
+  // Year-owned data cascades; shared groups, assets, accounts and access remain.
+  const [deleted] = await tx
+    .delete(budgetYears)
+    .where(and(eq(budgetYears.id, existing.id), eq(budgetYears.budgetId, budgetId)))
+    .returning({ id: budgetYears.id });
+  return deleted ?? null;
 }
 
 // Create a new year
@@ -1257,5 +1284,7 @@ export async function getStartYear(tx: DbClient, budgetId: number): Promise<numb
     throw new Error('Budget not found');
   }
 
-  return budget.startYear;
+  // Keep startYear as the parent-inheritance anchor even when that year is removed.
+  const years = await getAllYears(tx, budgetId);
+  return years.some((year) => year.year === budget.startYear) ? budget.startYear : (years[0]?.year ?? budget.startYear);
 }

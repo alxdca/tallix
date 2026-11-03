@@ -5,6 +5,7 @@ import {
   createBudget,
   createBudgetYear,
   deleteBudget,
+  deleteBudgetYear,
   fetchAccounts,
   fetchBudgetData,
   fetchBudgetSummary,
@@ -173,6 +174,23 @@ describe('budget api year routing', () => {
       body: JSON.stringify({ year: 2028 }),
       headers: { 'Content-Type': 'application/json', 'X-Budget-Id': '42' },
     });
+  });
+
+  it('deletes one calendar year within the active budget and accepts an empty response', async () => {
+    localStorage.setItem(ACTIVE_BUDGET_KEY, '42');
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await deleteBudgetYear(2028);
+    expect(fetchMock).toHaveBeenCalledWith('/api/budget/years/2028', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-Budget-Id': '42' },
+    });
+  });
+
+  it('reports a last-year deletion rejection', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: 'Keep a year', code: 'CANNOT_DELETE_LAST_BUDGET_YEAR' }, { status: 400 })
+    );
+    await expect(deleteBudgetYear(2028)).rejects.toMatchObject({ status: 400, code: 'CANNOT_DELETE_LAST_BUDGET_YEAR' });
   });
 
   it('shares the parent budget without limiting access to a year', async () => {

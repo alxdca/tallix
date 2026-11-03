@@ -203,6 +203,14 @@ const translations: Record<Locale, Record<string, any>> = {
       addYear: 'Add year',
       addingYear: 'Adding…',
       yearAlreadyExists: '{year} already exists in this budget.',
+      yearsTitle: 'Years in selected budget',
+      yearsHelp: 'Manage individual years in “{budget}”.',
+      lastYearHelp: 'Keep at least one year in this budget. To remove everything, delete the budget instead.',
+      deleteYearLabel: 'Delete year {year} from {budget}',
+      deleteYearTitle: 'Delete year',
+      deleteYearConfirm:
+        'Permanently delete {year} from “{budget}”? Its categories, planned amounts, transactions, transfers, account balances and asset values will be removed. Opening balances linked to this year in later years may change. This cannot be undone.',
+      yearDeleted: '{year} was deleted from “{budget}”.',
     },
     language: {
       en: 'English',
@@ -645,6 +653,7 @@ const translations: Record<Locale, Record<string, any>> = {
       BUDGET_SHARE_USER_NOT_FOUND: 'No Tallix account exists for this email address.',
       BUDGET_SHARE_ALREADY_OWNER: 'You already own this budget.',
       BUDGET_YEAR_ALREADY_EXISTS: 'Year {year} already exists in this budget.',
+      CANNOT_DELETE_LAST_BUDGET_YEAR: 'Keep at least one year in this budget.',
       BACKUP_PAYMENT_METHOD_CONFLICT:
         'Account "{name}" has different settings in this backup. Match its settings before restoring; accounts are used across your budgets.',
       UNKNOWN: 'Something went wrong',
@@ -865,6 +874,14 @@ const translations: Record<Locale, Record<string, any>> = {
       addYear: 'Ajouter l’année',
       addingYear: 'Ajout…',
       yearAlreadyExists: '{year} existe déjà dans ce budget.',
+      yearsTitle: 'Années du budget sélectionné',
+      yearsHelp: 'Gérez les années de « {budget} ».',
+      lastYearHelp: 'Conservez au moins une année dans ce budget. Pour tout retirer, supprimez le budget.',
+      deleteYearLabel: 'Supprimer l’année {year} du budget {budget}',
+      deleteYearTitle: 'Supprimer l’année',
+      deleteYearConfirm:
+        'Supprimer définitivement {year} du budget « {budget} » ? Ses catégories, montants prévus, transactions, virements, soldes des comptes et valeurs du patrimoine seront supprimés. Les soldes initiaux des années suivantes liés à cette année peuvent changer. Cette action est irréversible.',
+      yearDeleted: 'L’année {year} a été supprimée du budget « {budget} ».',
     },
     language: {
       en: 'Anglais',
@@ -1313,6 +1330,7 @@ const translations: Record<Locale, Record<string, any>> = {
       BUDGET_SHARE_USER_NOT_FOUND: 'Aucun compte Tallix n’existe pour cette adresse e-mail.',
       BUDGET_SHARE_ALREADY_OWNER: 'Vous êtes déjà propriétaire de ce budget.',
       BUDGET_YEAR_ALREADY_EXISTS: 'L’année {year} existe déjà dans ce budget.',
+      CANNOT_DELETE_LAST_BUDGET_YEAR: 'Conservez au moins une année dans ce budget.',
       BACKUP_PAYMENT_METHOD_CONFLICT:
         'Le compte « {name} » a des paramètres différents dans cette sauvegarde. Faites correspondre ses paramètres avant de restaurer ; les comptes sont utilisés dans vos budgets.',
       UNKNOWN: 'Une erreur est survenue',

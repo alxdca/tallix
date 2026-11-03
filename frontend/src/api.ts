@@ -128,6 +128,11 @@ export async function createBudgetYear(year: number): Promise<{ id: number; year
   return response.json();
 }
 
+export async function deleteBudgetYear(year: number): Promise<void> {
+  const response = await authFetch(`${API_BASE}/budget/years/${year}`, { method: 'DELETE' });
+  await ensureOk(response, 'Failed to delete budget year');
+}
+
 export async function deleteBudget(
   budgetId: number
 ): Promise<{ budgets: AccessibleBudget[]; defaultBudgetId: number }> {

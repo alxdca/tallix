@@ -1,9 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { errorHandler } from '../src/middleware/errorHandler.js';
+import { AppError, errorHandler } from '../src/middleware/errorHandler.js';
 
 const mocks = vi.hoisted(() => ({
   createYear: vi.fn(),
+  deleteYear: vi.fn(),
   getBudgetDataForYear: vi.fn(),
   getBudgetYear: vi.fn(),
   withTenantContext: vi.fn(async (_userId: string, _budgetId: number, callback: (tx: unknown) => Promise<unknown>) => {
@@ -20,6 +21,7 @@ vi.mock('../src/services/budget.js', async () => {
   return {
     ...actual,
     createYear: mocks.createYear,
+    deleteYear: mocks.deleteYear,
     getBudgetDataForYear: mocks.getBudgetDataForYear,
     getBudgetYear: mocks.getBudgetYear,
   };
@@ -37,18 +39,28 @@ function createResponse(resolve: () => void) {
       resolve();
       return response;
     }),
+    send: vi.fn(() => {
+      resolve();
+      return response;
+    }),
     body: undefined as unknown,
   };
   return response;
 }
 
-async function dispatchBudgetRoute(method: 'get' | 'post', path: '/year/:year' | '/years', req: Partial<Request>) {
+async function dispatchBudgetRoute(
+  method: 'get' | 'post' | 'delete',
+  path: '/year/:year' | '/years' | '/years/:year',
+  req: Partial<Request>
+) {
   const budgetRoutes = (await import('../src/routes/budget.js')).default;
   const layer = budgetRoutes.stack.find(
     (candidate) => candidate.route?.methods?.[method] && candidate.route.path === path
   );
-  const handler = layer?.route?.stack.find((candidate) => candidate.method === method)?.handle;
-  if (!handler) throw new Error(`${method.toUpperCase()} ${path} route not found`);
+  const handlers = layer?.route?.stack
+    .filter((candidate) => candidate.method === method)
+    .map((candidate) => candidate.handle);
+  if (!handlers?.length) throw new Error(`${method.toUpperCase()} ${path} route not found`);
 
   const request = {
     method: method.toUpperCase(),
@@ -80,9 +92,12 @@ async function dispatchBudgetRoute(method: 'get' | 'post', path: '/year/:year' |
   const res = createResponse(finish) as unknown as Response & { statusCode: number; body: unknown };
 
   await new Promise<void>((resolve, reject) => {
+    let handlerIndex = 0;
     const next: NextFunction = (error?: unknown) => {
       if (!error) {
-        resolve();
+        const handler = handlers[handlerIndex++];
+        if (handler) handler(request, res, next);
+        else resolve();
         return;
       }
       try {
@@ -94,7 +109,7 @@ async function dispatchBudgetRoute(method: 'get' | 'post', path: '/year/:year' |
     };
 
     try {
-      handler(request, res, next);
+      next();
       finished.then(resolve, reject);
     } catch (error) {
       reject(error);
@@ -149,5 +164,60 @@ describe('budget year routes', () => {
     expect(result.status).toBe(404);
     expect(result.body).toMatchObject({ error: 'Budget year not found' });
     expect(mocks.getBudgetDataForYear).not.toHaveBeenCalled();
+  });
+});
+
+describe('single budget year deletion routes', () => {
+  const ownerBudget = {
+    id: 12,
+    userId: 'writer-1',
+    description: 'Family',
+    startYear: 2026,
+    parentBudgetId: null,
+    role: 'owner' as const,
+  };
+
+  it('deletes a calendar year in the active owner budget', async () => {
+    mocks.deleteYear.mockResolvedValueOnce({ id: 77 });
+    const result = await dispatchBudgetRoute('delete', '/years/:year', {
+      params: { year: '2027' },
+      budget: ownerBudget,
+    });
+    expect(result.status).toBe(204);
+    expect(mocks.deleteYear).toHaveBeenCalledWith({}, 2027, 12, 'writer-1');
+  });
+
+  it.each(['read', 'write'] as const)('rejects %s collaborators before deleting data', async (role) => {
+    const result = await dispatchBudgetRoute('delete', '/years/:year', {
+      params: { year: '2027' },
+      budget: { ...ownerBudget, role },
+    });
+    expect(result.status).toBe(403);
+    expect(mocks.deleteYear).not.toHaveBeenCalled();
+  });
+
+  it.each(['2027x', '0', '1899', '10000', '2027.5', '-2027'])('rejects malformed year %s', async (year) => {
+    const result = await dispatchBudgetRoute('delete', '/years/:year', { params: { year }, budget: ownerBudget });
+    expect(result.status).toBe(400);
+    expect(mocks.deleteYear).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the year does not belong to this budget', async () => {
+    mocks.deleteYear.mockResolvedValueOnce(null);
+    expect(
+      (await dispatchBudgetRoute('delete', '/years/:year', { params: { year: '2027' }, budget: ownerBudget })).status
+    ).toBe(404);
+  });
+
+  it('returns a specific error when deleting the final year', async () => {
+    mocks.deleteYear.mockRejectedValueOnce(
+      new AppError(400, 'Cannot delete the last year of a budget', { code: 'CANNOT_DELETE_LAST_BUDGET_YEAR' })
+    );
+    const result = await dispatchBudgetRoute('delete', '/years/:year', {
+      params: { year: '2027' },
+      budget: ownerBudget,
+    });
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({ code: 'CANNOT_DELETE_LAST_BUDGET_YEAR' });
   });
 });

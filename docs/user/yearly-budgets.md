@@ -38,6 +38,23 @@ The balance-link migration reconnects all existing later years, including openin
 stored as snapshots, so their displayed balances can change. Explicit overrides saved after this
 change remain independent. Parent-budget starting-year overrides keep their existing behavior.
 
+## Delete and recreate a year
+
+1. Open your user menu and choose **My account**.
+2. Select the budget in the sidebar Budget dropdown.
+3. Under **Years in selected budget**, click **Delete** beside the year.
+4. Check the year and budget in the confirmation, then click **Delete year**.
+
+Only the budget owner can delete a year. At least one year must remain; use **Delete budget**
+to remove the entire budget. Deleting a year permanently removes its category items, planned
+amounts, transactions, transfers, opening account balances, asset values and entry ordering.
+Other years, shared category groups, accounts, asset definitions and sharing access are kept.
+Later opening balances linked to the deleted year may change.
+
+After deletion, use **Add year to selected budget** to recreate the same year. It receives an
+independent copy of the latest preceding year's annual and monthly plan and linked opening
+account balances. Deleted transactions and asset values are not restored.
+
 ## Delete a budget
 
 1. Open your user menu at the bottom of the sidebar and choose **My account**.

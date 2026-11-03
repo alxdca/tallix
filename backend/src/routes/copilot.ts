@@ -61,7 +61,11 @@ router.post(
     const budgetId = req.budget!.id;
     const language = req.user!.language || 'en';
     const country = req.user!.country || 'US';
-    const currentYear = parseSelectedYear(req.body.year, req.budget!.startYear);
+    const defaultYear =
+      req.body.year === undefined || req.body.year === null || req.body.year === ''
+        ? await withTenantContext(userId, budgetId, (tx) => budgetSvc.getStartYear(tx, budgetId))
+        : req.budget!.startYear;
+    const currentYear = parseSelectedYear(req.body.year, defaultYear);
     const existingYear = await withTenantContext(userId, budgetId, (tx) =>
       budgetSvc.getBudgetYear(tx, currentYear, budgetId)
     );

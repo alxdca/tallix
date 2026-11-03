@@ -1,5 +1,6 @@
 import { Router, type Router as RouterType } from 'express';
 import { withTenantContext } from '../db/context.js';
+import { requireBudgetOwner } from '../middleware/budget.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import * as budget from '../services/budget.js';
 
@@ -32,9 +33,9 @@ async function requireExistingBudgetYear(userId: string, budgetId: number, year:
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const selectedYear = req.budget!.startYear;
     const budgetId = req.budget!.id;
     const userId = req.user!.id;
+    const selectedYear = await withTenantContext(userId, budgetId, (tx) => budget.getStartYear(tx, budgetId));
     const ownerId = req.budget!.userId;
     const data = await withTenantContext(userId, budgetId, (tx) =>
       budget.getBudgetDataForYear(tx, selectedYear, budgetId, ownerId)
@@ -68,7 +69,9 @@ router.get('/months', (_req, res) => {
 router.get(
   '/summary',
   asyncHandler(async (req, res) => {
-    const requestedYear = req.query.year ? parseInt(String(req.query.year), 10) : req.budget!.startYear;
+    const requestedYear = req.query.year
+      ? parseInt(String(req.query.year), 10)
+      : await withTenantContext(req.user!.id, req.budget!.id, (tx) => budget.getStartYear(tx, req.budget!.id));
     if (Number.isNaN(requestedYear)) {
       throw new AppError(400, 'Invalid year');
     }
@@ -126,6 +129,21 @@ router.post(
       throw error;
     }
     res.status(201).json({ id: created.id, year: created.year });
+  })
+);
+
+// DELETE /api/budget/years/:year - Delete one calendar year, keeping the budget.
+router.delete(
+  '/years/:year',
+  requireBudgetOwner,
+  asyncHandler(async (req, res) => {
+    const year = /^\d{4}$/.test(req.params.year) ? parseYear(Number(req.params.year)) : NaN;
+    if (Number.isNaN(year)) throw new AppError(400, 'Invalid year');
+    const deleted = await withTenantContext(req.user!.id, req.budget!.id, (tx) =>
+      budget.deleteYear(tx, year, req.budget!.id, req.user!.id)
+    );
+    if (!deleted) throw new AppError(404, 'Budget year not found');
+    res.status(204).send();
   })
 );
 

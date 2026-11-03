@@ -1,4 +1,4 @@
-import React, { type FormEvent, useMemo, useState } from 'react';
+import React, { type FormEvent, useMemo, useRef, useState } from 'react';
 import { type AccessibleBudget, changePassword, updateUserSettings } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
@@ -24,6 +24,7 @@ interface UserSettingsProps {
   onCreateBudget: (year: number, description: string, parentBudgetId: number | null) => Promise<void>;
   onCreateYear: (year: number) => Promise<void>;
   onDeleteBudget: (budgetId: number) => Promise<void>;
+  onDeleteYear: (year: number, budgetId: number) => Promise<void>;
 }
 
 export default function UserSettings({
@@ -32,7 +33,10 @@ export default function UserSettings({
   onCreateBudget,
   onCreateYear,
   onDeleteBudget,
+  onDeleteYear,
 }: UserSettingsProps) {
+  const activeBudgetIdRef = useRef(activeBudgetId);
+  activeBudgetIdRef.current = activeBudgetId;
   const { user, updateUser } = useAuth();
   const { t, locale, setLocale } = useI18n();
   const [language, setLanguage] = useState(user?.language || 'fr');
@@ -44,6 +48,10 @@ export default function UserSettings({
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [yearToDelete, setYearToDelete] = useState<{ year: number; budget: AccessibleBudget } | null>(null);
+  const [deletingYear, setDeletingYear] = useState<number | null>(null);
+  const [yearError, setYearError] = useState<string | null>(null);
+  const [yearSuccess, setYearSuccess] = useState<string | null>(null);
   const [budgetToDelete, setBudgetToDelete] = useState<AccessibleBudget | null>(null);
   const [deletingBudgetId, setDeletingBudgetId] = useState<number | null>(null);
   const [budgetError, setBudgetError] = useState<string | null>(null);
@@ -157,6 +165,33 @@ export default function UserSettings({
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Clear year actions whenever the selected budget changes.
+  React.useEffect(() => {
+    setYearToDelete(null);
+    setYearError(null);
+    setYearSuccess(null);
+  }, [activeBudgetId]);
+
+  const handleDeleteYear = async () => {
+    if (!yearToDelete || deletingYear !== null || yearToDelete.budget.id !== activeBudgetId) return;
+    const { year, budget } = yearToDelete;
+    setYearToDelete(null);
+    setDeletingYear(year);
+    setYearError(null);
+    setYearSuccess(null);
+    try {
+      await onDeleteYear(year, budget.id);
+      if (activeBudgetIdRef.current === budget.id) {
+        setYearSuccess(t('userSettings.yearDeleted', { year, budget: budgetName(budget) }));
+      }
+    } catch (err) {
+      logger.error('Failed to delete budget year', err);
+      if (activeBudgetIdRef.current === budget.id) setYearError(getErrorMessage(err, t));
+    } finally {
+      setDeletingYear(null);
+    }
+  };
+
   const handleDeleteBudget = async () => {
     if (!budgetToDelete || deletingBudgetId !== null) return;
     const budget = budgetToDelete;
@@ -199,7 +234,7 @@ export default function UserSettings({
 
   const handleCreateYear = async (event: FormEvent) => {
     event.preventDefault();
-    if (isCreatingYear || !activeBudget || !canAddYear) return;
+    if (isCreatingYear || deletingYear !== null || !activeBudget || !canAddYear) return;
     const year = Number(newYear);
     if (!Number.isInteger(year) || year < 1900 || year > 9999) {
       setCreateYearError(t('sharing.invalidYear'));
@@ -412,7 +447,7 @@ export default function UserSettings({
                     setNewYear(event.target.value);
                     setCreateYearError(null);
                   }}
-                  disabled={isCreatingYear}
+                  disabled={isCreatingYear || deletingYear !== null}
                 />
               </div>
               {createYearError && (
@@ -420,10 +455,54 @@ export default function UserSettings({
                   {createYearError}
                 </p>
               )}
-              <button type="submit" className="btn-primary" disabled={isCreatingYear}>
+              <button type="submit" className="btn-primary" disabled={isCreatingYear || deletingYear !== null}>
                 {t(isCreatingYear ? 'userSettings.addingYear' : 'userSettings.addYear')}
               </button>
             </form>
+          </div>
+        )}
+
+        {activeBudget?.role === 'owner' && (
+          <div className="user-settings-section user-settings-years">
+            <h3 className="section-title">
+              <span className="section-indicator"></span>
+              {t('userSettings.yearsTitle')}
+            </h3>
+            <p className="user-settings-budget-help">
+              {t('userSettings.yearsHelp', { budget: budgetName(activeBudget) })}
+            </p>
+            {activeBudget.years.length <= 1 && <p>{t('userSettings.lastYearHelp')}</p>}
+            {yearError && (
+              <p className="form-error" role="alert">
+                {yearError}
+              </p>
+            )}
+            {yearSuccess && (
+              <p className="form-success" role="status">
+                {yearSuccess}
+              </p>
+            )}
+            <ul className="user-settings-budget-list">
+              {sortedBudgetYears(activeBudget.years).map((year) => (
+                <li key={year} className="user-settings-budget-row">
+                  <span className="user-info-value">{year}</span>
+                  <button
+                    type="button"
+                    className="btn-danger"
+                    aria-label={t('userSettings.deleteYearLabel', { year, budget: budgetName(activeBudget) })}
+                    disabled={
+                      activeBudget.years.length <= 1 ||
+                      deletingYear !== null ||
+                      isCreatingYear ||
+                      deletingBudgetId !== null
+                    }
+                    onClick={() => setYearToDelete({ year, budget: activeBudget })}
+                  >
+                    {t(deletingYear === year ? 'userSettings.deletingBudget' : 'common.delete')}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
@@ -457,7 +536,7 @@ export default function UserSettings({
                   type="button"
                   className="btn-danger"
                   aria-label={t('userSettings.deleteBudgetLabel', { budget: budgetLabel(budget) })}
-                  disabled={deletingBudgetId !== null}
+                  disabled={deletingBudgetId !== null || deletingYear !== null}
                   onClick={() => setBudgetToDelete(budget)}
                 >
                   {t(deletingBudgetId === budget.id ? 'userSettings.deletingBudget' : 'common.delete')}
@@ -467,6 +546,18 @@ export default function UserSettings({
           </ul>
         </div>
       </div>
+      <ConfirmDialog
+        isOpen={yearToDelete !== null}
+        title={t('userSettings.deleteYearTitle')}
+        message={
+          yearToDelete
+            ? t('userSettings.deleteYearConfirm', { year: yearToDelete.year, budget: budgetName(yearToDelete.budget) })
+            : ''
+        }
+        confirmLabel={t('userSettings.deleteYearTitle')}
+        onConfirm={handleDeleteYear}
+        onCancel={() => setYearToDelete(null)}
+      />
       <ConfirmDialog
         isOpen={budgetToDelete !== null}
         title={t('userSettings.deleteBudgetTitle')}

@@ -55,12 +55,14 @@ async function renderSettings(
     onCreateBudget: (year: number, description: string, parentBudgetId: number | null) => Promise<void>;
     onCreateYear: (year: number) => Promise<void>;
     onDeleteBudget: (budgetId: number) => Promise<void>;
+    onDeleteYear: (year: number, budgetId: number) => Promise<void>;
   }> = {}
 ) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const onCreateBudget = props.onCreateBudget ?? vi.fn().mockResolvedValue(undefined);
   const onCreateYear = props.onCreateYear ?? vi.fn().mockResolvedValue(undefined);
+  const onDeleteYear = props.onDeleteYear ?? vi.fn().mockResolvedValue(undefined);
   const onDeleteBudget = props.onDeleteBudget ?? vi.fn().mockResolvedValue(undefined);
   let root: Root;
 
@@ -75,12 +77,13 @@ async function renderSettings(
           onCreateBudget={onCreateBudget}
           onCreateYear={onCreateYear}
           onDeleteBudget={onDeleteBudget}
+          onDeleteYear={onDeleteYear}
         />
       </I18nProvider>
     );
   });
 
-  return { container, onCreateBudget, onCreateYear, onDeleteBudget };
+  return { container, onCreateBudget, onCreateYear, onDeleteBudget, onDeleteYear };
 }
 
 function buttonByName(container: HTMLElement, name: string) {
@@ -368,5 +371,58 @@ describe('budget year creation settings', () => {
 
     pending.resolve();
     await flush();
+  });
+});
+
+describe('single year deletion settings', () => {
+  it('confirms the year, budget and data loss before deleting', async () => {
+    const { container, onDeleteYear } = await renderSettings();
+    click(buttonByName(container, 'Delete year 2026 from Family plan'));
+    const dialog = container.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain('Permanently delete 2026 from “Family plan”');
+    expect(dialog?.textContent).toContain('transactions, transfers');
+    expect(dialog?.textContent).toContain('later years may change');
+    expect(onDeleteYear).not.toHaveBeenCalled();
+    click(buttonByName(dialog as HTMLElement, 'Delete year'));
+    await flush();
+    expect(onDeleteYear).toHaveBeenCalledWith(2026, 1);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('2026 was deleted');
+  });
+
+  it('leaves the year untouched when confirmation is cancelled', async () => {
+    const { container, onDeleteYear } = await renderSettings();
+    click(buttonByName(container, 'Delete year 2026 from Family plan'));
+    click(buttonByName(container, 'Cancel'));
+    expect(onDeleteYear).not.toHaveBeenCalled();
+  });
+
+  it('disables deletion of the last year and explains why', async () => {
+    const { container } = await renderSettings({ activeBudgetId: 2 });
+    expect((buttonByName(container, 'Delete year 2025 from Taxes') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.textContent).toContain('Keep at least one year');
+  });
+
+  it.each(['read', 'write'] as const)('hides year deletion for %s collaborators', async (role) => {
+    const { container } = await renderSettings({
+      activeBudgetId: 3,
+      budgets: [budget({ id: 3, year: 2027, years: [2026, 2027], role })],
+    });
+    expect(container.querySelector('.user-settings-years')).toBeNull();
+  });
+
+  it('disables year controls during deletion and reports errors', async () => {
+    const pending = deferred<void>();
+    const { container } = await renderSettings({ onDeleteYear: vi.fn(() => pending.promise) });
+    click(buttonByName(container, 'Delete year 2026 from Family plan'));
+    click(buttonByName(container.querySelector('[role="alertdialog"]') as HTMLElement, 'Delete year'));
+    await flush();
+    expect(
+      Array.from(container.querySelectorAll<HTMLButtonElement>('.user-settings-years button')).every(
+        (button) => button.disabled
+      )
+    ).toBe(true);
+    pending.reject(new Error('network down'));
+    await flush();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Something went wrong');
   });
 });
