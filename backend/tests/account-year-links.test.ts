@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { withTenantContext } from '../src/db/context.js';
 import * as schema from '../src/db/schema.js';
 import * as accountsSvc from '../src/services/accounts.js';
-import { getBudgetSummary } from '../src/services/budget.js';
+import { createYear, getBudgetSummary } from '../src/services/budget.js';
 
 const adminClient = postgres(process.env.DATABASE_URL!.replace(/tallix_app:tallix_app_secret/, 'tallix:tallix_secret'));
 const adminDb = drizzle(adminClient, { schema });
@@ -84,6 +84,49 @@ afterAll(async () => {
 });
 
 describe('calculated closing and live year opening balances', () => {
+  it('creates a year with an independent copy of the previous plan and no actual activity', async () => {
+    const ctx = await setup([2025]);
+    const [sourceItem] = await adminDb
+      .select()
+      .from(schema.budgetItems)
+      .where(eq(schema.budgetItems.yearId, ctx.years[0].id));
+    await adminDb
+      .update(schema.budgetItems)
+      .set({ yearlyBudget: '2400.00' })
+      .where(eq(schema.budgetItems.id, sourceItem.id));
+    await adminDb.insert(schema.monthlyValues).values([
+      { itemId: sourceItem.id, month: 1, budget: '100.25', actual: '90.00' },
+      { itemId: sourceItem.id, month: 12, budget: '300.75', actual: '280.00' },
+    ]);
+    await ctx.expense(2025, '100');
+
+    const created = await ctx.run((tx) => createYear(tx, 2026, 0, ctx.budget.id, ctx.user.id));
+    const copiedItems = await adminDb.query.budgetItems.findMany({
+      where: eq(schema.budgetItems.yearId, created.id),
+      with: { monthlyValues: true, transactions: true },
+    });
+    const plannedItems = copiedItems.filter((item) => item.groupId === sourceItem.groupId);
+    expect(plannedItems).toHaveLength(1);
+    const copied = plannedItems[0];
+    expect(copied.yearlyBudget).toBe('2400.00');
+    expect(copied.monthlyValues).toHaveLength(12);
+    expect(copied.monthlyValues.find((value) => value.month === 1)?.budget).toBe('100.25');
+    expect(copied.monthlyValues.find((value) => value.month === 12)?.budget).toBe('300.75');
+    expect(Number(copied.monthlyValues.find((value) => value.month === 2)?.budget)).toBe(0);
+    expect(copied.monthlyValues.every((value) => Number(value.actual) === 0)).toBe(true);
+    expect(copied.transactions).toEqual([]);
+    expect(await ctx.account(2026)).toMatchObject({ initialBalance: 900, linkedFromYear: 2025 });
+
+    await adminDb
+      .update(schema.monthlyValues)
+      .set({ budget: '999.00' })
+      .where(eq(schema.monthlyValues.itemId, copied.id));
+    const originalValues = await adminDb.query.monthlyValues.findMany({
+      where: eq(schema.monthlyValues.itemId, sourceItem.id),
+    });
+    expect(originalValues.find((value) => value.month === 1)?.budget).toBe('100.25');
+  });
+
   it('includes savings types so account views can distinguish savings and investments', async () => {
     const ctx = await setup();
     expect(await ctx.account(2025)).toMatchObject({ isSavingsAccount: false, savingsType: null });

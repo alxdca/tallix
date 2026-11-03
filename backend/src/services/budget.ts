@@ -617,6 +617,9 @@ async function copyPreviousYearItems(tx: DbClient, newYearId: number, year: numb
   const previousItems = await tx.query.budgetItems.findMany({
     where: eq(budgetItems.yearId, previousYear.id),
     orderBy: [asc(budgetItems.sortOrder), asc(budgetItems.id)],
+    with: {
+      monthlyValues: { columns: { month: true, budget: true } },
+    },
   });
 
   for (const previousItem of previousItems) {
@@ -628,16 +631,17 @@ async function copyPreviousYearItems(tx: DbClient, newYearId: number, year: numb
         name: previousItem.name,
         slug: previousItem.slug,
         sortOrder: previousItem.sortOrder,
-        yearlyBudget: '0',
+        yearlyBudget: previousItem.yearlyBudget,
         savingsAccountId: previousItem.savingsAccountId,
       })
       .returning();
 
+    const monthlyBudgets = new Map(previousItem.monthlyValues.map((value) => [value.month, value.budget]));
     await tx.insert(monthlyValues).values(
       Array.from({ length: 12 }, (_, index) => ({
         itemId: newItem.id,
         month: index + 1,
-        budget: '0',
+        budget: monthlyBudgets.get(index + 1) ?? '0',
         actual: '0',
       }))
     );

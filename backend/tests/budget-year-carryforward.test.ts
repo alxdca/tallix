@@ -11,7 +11,7 @@ vi.mock('../src/services/accounts.js', () => ({
 }));
 
 describe('budget year creation carryforward', () => {
-  it('copies previous-year items with zero values and carries forward December account balances', async () => {
+  it('copies annual and monthly plans without actuals and carries forward December account balances', async () => {
     const { createYear } = await import('../src/services/budget.js');
     const insertYearReturning = vi.fn().mockResolvedValue([{ id: 2027, year: 2027, initialBalance: '0' }]);
     const insertYearValues = vi.fn().mockReturnValue({ returning: insertYearReturning });
@@ -51,6 +51,10 @@ describe('budget year creation carryforward', () => {
               sortOrder: 1,
               yearlyBudget: '2400.00',
               savingsAccountId: null,
+              monthlyValues: [
+                { month: 1, budget: '100.25', actual: '90.00' },
+                { month: 12, budget: '300.75', actual: '280.00' },
+              ],
             },
             {
               id: 102,
@@ -61,6 +65,7 @@ describe('budget year creation carryforward', () => {
               sortOrder: 2,
               yearlyBudget: '1200.00',
               savingsAccountId: 9,
+              monthlyValues: [{ month: 6, budget: '1200.00', actual: '1000.00' }],
             },
           ]),
           findFirst: vi.fn().mockResolvedValue({ id: 302 }),
@@ -95,7 +100,7 @@ describe('budget year creation carryforward', () => {
       name: 'Groceries',
       slug: 'groceries',
       sortOrder: 1,
-      yearlyBudget: '0',
+      yearlyBudget: '2400.00',
       savingsAccountId: null,
     });
     expect(insertItemValues).toHaveBeenCalledWith({
@@ -104,12 +109,27 @@ describe('budget year creation carryforward', () => {
       name: 'Emergency (Bank)',
       slug: 'emergency-fund',
       sortOrder: 2,
-      yearlyBudget: '0',
+      yearlyBudget: '1200.00',
       savingsAccountId: 9,
     });
     expect(insertMonthlyValues).toHaveBeenCalledTimes(2);
     expect(insertMonthlyValues.mock.calls[0][0]).toHaveLength(12);
-    expect(insertMonthlyValues.mock.calls[0][0][0]).toMatchObject({ itemId: 301, month: 1, budget: '0', actual: '0' });
+    expect(insertMonthlyValues.mock.calls[0][0]).toEqual(
+      Array.from({ length: 12 }, (_, index) => ({
+        itemId: 301,
+        month: index + 1,
+        budget: index === 0 ? '100.25' : index === 11 ? '300.75' : '0',
+        actual: '0',
+      }))
+    );
+    expect(insertMonthlyValues.mock.calls[1][0]).toEqual(
+      Array.from({ length: 12 }, (_, index) => ({
+        itemId: 302,
+        month: index + 1,
+        budget: index === 5 ? '1200.00' : '0',
+        actual: '0',
+      }))
+    );
     expect(insertAccountBalancesValues).toHaveBeenCalledWith([
       { yearId: 2027, paymentMethodId: 5, initialBalance: '1234.56' },
       { yearId: 2027, paymentMethodId: 9, initialBalance: '700.00' },

@@ -24,8 +24,9 @@ for 2026 and a Personal budget for 2026.
 3. Under **Add year to selected budget**, enter the year.
 4. Click **Add year**.
 
-Tallix copies category items from the latest preceding year in that budget, with planned
-amounts reset to zero and no transactions copied. Opening account balances are linked to that
+Tallix copies category items and their annual and monthly planned amounts from the latest
+preceding year in that budget. Actual amounts start at zero and no transactions are copied.
+The copied plan can be edited independently in the new year. Opening account balances are linked to that
 year's calculated December closing balances. Changes to an earlier balance or recorded activity
 flow through later linked years. You can override an opening balance after confirming a warning
 that its link will be broken, and restore the link from Accounts.

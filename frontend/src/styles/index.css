@@ -2692,9 +2692,10 @@ td.zero {
   white-space: nowrap;
 }
 
-/* Transfer rows need more space for source → destination */
+/* Transfer accounts wrap within the third-party column. */
 .transactions-table tr.transfer .third-party-cell {
-  max-width: 220px;
+  max-width: none;
+  white-space: normal;
 }
 
 .transactions-table .comment-cell {
@@ -2707,9 +2708,18 @@ td.zero {
   white-space: nowrap;
 }
 
-/* Transfer accounts in third-party cell need more space */
 .transactions-table .third-party-cell .transfer-accounts {
-  min-width: 280px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 6px;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.transactions-table .third-party-cell .transfer-source {
+  grid-column: 1 / -1;
 }
 
 .transactions-table .category-cell {
