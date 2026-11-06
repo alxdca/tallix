@@ -25,6 +25,10 @@ The funds summary shows:
 - Actual funds based on account balances.
 - A combination of monthly and yearly budgets for projections.
 
+January starts from the year's opening payment-account balance. Each later forecast month starts
+from the previous month's projected closing balance, including when viewing a future budget year.
+Forecast months use planned income, expenses and savings; recorded balances apply to actual months.
+
 ## Reordering and organization
 
 - Drag and drop groups and items to reorder.

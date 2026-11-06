@@ -135,3 +135,68 @@ describe('budget spreadsheet month display', () => {
     ]);
   });
 });
+
+describe('available funds forecasts', () => {
+  it.each([
+    ['income', false],
+    ['income', true],
+    ['expense', false],
+    ['expense', true],
+    ['savings', false],
+    ['savings', true],
+  ] as const)('carries each future-year %s forecast into the next month (account balances: %s)', (type, withBalances) => {
+    const container = renderSpreadsheet({
+      sections: sections(type),
+      year: 2027,
+      lastActiveMonth: 12,
+      paymentAccountsMonthlyBalances: withBalances ? Array.from({ length: 12 }, (_, i) => 1000 + i * 25) : undefined,
+    });
+    const starts = monthCells(container, '.start-of-month');
+    const ends = monthCells(container, '.end-of-month');
+    const cashFlow = type === 'income' ? 100 : -100;
+
+    for (let i = 0; i < 12; i++) {
+      expect(starts[i].textContent).toBe(formatCurrency(1000 + i * cashFlow, true));
+      expect(ends[i].textContent).toBe(formatCurrency(1000 + (i + 1) * cashFlow, true));
+      if (i > 0) expect(starts[i].textContent).toBe(ends[i - 1].textContent);
+    }
+  });
+
+  it.each([2025, 2026])('continues forecasts after the last actual month in %i', (year) => {
+    const container = renderSpreadsheet({ year, lastActiveMonth: 9 });
+    const starts = monthCells(container, '.start-of-month');
+    const ends = monthCells(container, '.end-of-month');
+
+    // September's actual expense is 25; October's recorded 40 stays outside the forecast.
+    expect(starts[8].textContent).toBe(formatCurrency(1000, true));
+    expect(ends[8].textContent).toBe(formatCurrency(975, true));
+    for (let i = 9; i < 12; i++) {
+      expect(starts[i].textContent).toBe(formatCurrency(975 - (i - 9) * 100, true));
+      expect(ends[i].textContent).toBe(formatCurrency(875 - (i - 9) * 100, true));
+    }
+  });
+
+  it('projects changing income, expenses, savings and remaining annual budgets together', () => {
+    const plannedSections = (['income', 'expense', 'savings'] as const).flatMap((type) => {
+      const result = sections(type);
+      const item = result[0].groups[0].items[0];
+      item.months = Array.from({ length: 12 }, (_, i) => ({
+        budget: type === 'income' ? 200 + i * 10 : type === 'expense' ? 100 : 25,
+        actual: 0,
+      }));
+      item.yearlyBudget = type === 'expense' ? 250 : 0;
+      return result;
+    });
+    const container = renderSpreadsheet({ sections: plannedSections, year: 2027 });
+    const starts = monthCells(container, '.start-of-month');
+    const ends = monthCells(container, '.end-of-month');
+    let balance = 1000;
+
+    for (let i = 0; i < 12; i++) {
+      expect(starts[i].textContent).toBe(formatCurrency(balance, true));
+      balance += 75 + i * 10;
+      if (i === 11) balance -= 250;
+      expect(ends[i].textContent).toBe(formatCurrency(balance, true));
+    }
+  });
+});
